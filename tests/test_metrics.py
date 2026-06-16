@@ -2,6 +2,8 @@ from dataclasses import dataclass
 import unittest
 
 from vision_robot_arm.metrics import calculate_angle, calculate_angles
+from vision_robot_arm.smoothing import LowPassValueFilter
+from vision_robot_arm.calibration import PoseCalibration
 
 
 @dataclass
@@ -42,6 +44,27 @@ class MetricsTests(unittest.TestCase):
         )
 
         self.assertIsNone(angles["left_elbow"])
+
+
+class SmoothingTests(unittest.TestCase):
+    def test_low_pass_value_filter_smooths_toward_new_value(self) -> None:
+        value_filter = LowPassValueFilter(alpha=0.5)
+
+        self.assertEqual(value_filter.update(10.0), 10.0)
+        self.assertEqual(value_filter.update(20.0), 15.0)
+
+
+class CalibrationTests(unittest.TestCase):
+    def test_calibration_returns_relative_angle_offsets(self) -> None:
+        calibration = PoseCalibration()
+        calibration.capture({"left_elbow": 90.0, "right_elbow": None})
+
+        relative = calibration.relative_angles(
+            {"left_elbow": 110.0, "right_elbow": 80.0}
+        )
+
+        self.assertEqual(relative["left_elbow"], 20.0)
+        self.assertIsNone(relative["right_elbow"])
 
 
 if __name__ == "__main__":

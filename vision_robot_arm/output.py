@@ -3,7 +3,8 @@ import time
 from typing import Any
 
 from vision_robot_arm.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE
-from vision_robot_arm.metrics import calculate_angles, format_angles
+from vision_robot_arm.metrics import format_angles
+from vision_robot_arm.pose_state import PoseState
 
 
 def print_landmarks(
@@ -27,22 +28,16 @@ def print_landmarks(
         print(line)
 
 
-def emit_console_data(
-    mode: str,
-    landmarks: list[Any],
-    world_landmarks: list[Any] | None,
-    indices: dict[str, int],
-    names: dict[int, str],
-    min_visibility: float,
-) -> None:
+def emit_console_data(mode: str, state: PoseState, names: dict[int, str]) -> None:
     timestamp = time.strftime("%H:%M:%S")
     print(f"\n[{timestamp}] mode={mode}")
 
     if mode in (ANGLE_MODE, BOTH_MODE):
-        angles = calculate_angles(landmarks, indices, min_visibility)
-        print(format_angles(angles))
+        print("angles   " + format_angles(state.angles))
+        if state.calibrated:
+            print("relative " + format_angles(state.relative_angles))
 
     if mode in (LANDMARK_MODE, BOTH_MODE):
-        print_landmarks(landmarks, world_landmarks, names)
+        print_landmarks(state.landmarks, state.world_landmarks, names)
 
     sys.stdout.flush()

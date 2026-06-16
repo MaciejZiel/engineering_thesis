@@ -10,6 +10,8 @@ Current version:
 - opens a webcam with OpenCV
 - detects a single human pose with MediaPipe Pose Landmarker
 - draws a custom skeleton with a horizontal hip line
+- smooths landmarks and joint angles
+- can calibrate a neutral pose
 - prints joint angles, raw pose landmarks, or both
 - lets you switch data modes while the camera is running
 
@@ -39,6 +41,12 @@ Useful options:
 python main.py --camera 0 --width 1280 --height 720 --print-interval 0.5
 ```
 
+For stronger smoothing, lower the alpha value:
+
+```powershell
+python main.py --smoothing-alpha 0.2
+```
+
 The default pose model is stored at:
 
 ```text
@@ -63,8 +71,11 @@ vision_robot_arm/
   landmarks.py           # landmark lookup and visibility checks
   metrics.py             # joint angle calculations
   output.py              # console printing modes
+  pose_state.py          # shared pose data object
   pose_tracker.py        # MediaPipe Pose Landmarker wrapper
   runtime.py             # optional dependency loading
+  smoothing.py           # low-pass filters
+  state_builder.py       # raw detections -> smoothed pose state
 models/
   pose_landmarker_lite.task
 tests/
@@ -76,6 +87,7 @@ tests/
 - `1`: print joint angles
 - `2`: print raw landmarks
 - `3`: print angles and raw landmarks
+- `c`: calibrate the current pose as neutral
 - `q` or `Esc`: quit
 
 ## Tests
@@ -88,7 +100,8 @@ python -m unittest discover -s tests
 
 Angle mode prints values such as elbows, shoulders, hips, knees, and ankles.
 The angle is calculated from three body points, with the middle point as the
-joint.
+joint. After calibration, angle mode also prints relative angle offsets from
+the calibrated neutral pose.
 
 Landmark mode prints MediaPipe's 33 pose points with normalized image
 coordinates (`x`, `y`, `z`) and `visibility`. When available, world coordinates

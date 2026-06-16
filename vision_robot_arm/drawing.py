@@ -185,11 +185,14 @@ def draw_overlay(
     frame: Any,
     mode: str,
     person_detected: bool,
+    calibrated: bool = False,
 ) -> None:
     status = "detected" if person_detected else "not detected"
+    calibration = "on" if calibrated else "off"
     lines = [
         f"Mode: {mode} | 1 angles  2 points  3 both",
-        f"Person: {status} | q/Esc quit",
+        f"Person: {status} | calibration: {calibration}",
+        "c calibrate | q/Esc quit",
     ]
     for row, text in enumerate(lines):
         y = 28 + row * 26

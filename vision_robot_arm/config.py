@@ -18,6 +18,7 @@ class AppConfig:
     height: int = 0
     print_interval: float = 0.5
     visibility_threshold: float = 0.55
+    smoothing_alpha: float = 0.35
     model_path: Path = DEFAULT_MODEL_PATH
     num_poses: int = 1
     min_detection_confidence: float = 0.5
@@ -29,6 +30,8 @@ class AppConfig:
             raise SystemExit("--print-interval must be greater than 0")
         if not 0.0 <= self.visibility_threshold <= 1.0:
             raise SystemExit("--visibility-threshold must be between 0 and 1")
+        if not 0.0 < self.smoothing_alpha <= 1.0:
+            raise SystemExit("--smoothing-alpha must be greater than 0 and at most 1")
         if self.num_poses <= 0:
             raise SystemExit("--num-poses must be greater than 0")
 

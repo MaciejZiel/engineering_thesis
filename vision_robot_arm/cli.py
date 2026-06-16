@@ -40,6 +40,12 @@ def parse_args() -> AppConfig:
         help="Minimum MediaPipe visibility for drawing/angle calculation. Default: 0.55.",
     )
     parser.add_argument(
+        "--smoothing-alpha",
+        type=float,
+        default=0.35,
+        help="Low-pass smoothing factor for landmarks and angles. Lower is smoother. Default: 0.35.",
+    )
+    parser.add_argument(
         "--model",
         type=Path,
         default=DEFAULT_MODEL_PATH,
@@ -77,6 +83,7 @@ def parse_args() -> AppConfig:
         height=args.height,
         print_interval=args.print_interval,
         visibility_threshold=args.visibility_threshold,
+        smoothing_alpha=args.smoothing_alpha,
         model_path=args.model,
         num_poses=args.num_poses,
         min_detection_confidence=args.min_detection_confidence,

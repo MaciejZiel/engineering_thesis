@@ -6,6 +6,7 @@ from vision_robot_arm.landmarks import build_landmark_indices, build_landmark_na
 from vision_robot_arm.output import emit_console_data
 from vision_robot_arm.pose_tracker import PoseTracker
 from vision_robot_arm.runtime import load_runtime_dependencies
+from vision_robot_arm.state_builder import PoseStateBuilder
 
 
 def update_mode_from_key(key: int, current_mode: str) -> str:
@@ -40,6 +41,11 @@ def run_app(config: AppConfig) -> int:
             )
 
         tracker = PoseTracker(deps, config)
+        state_builder = PoseStateBuilder(
+            indices=indices,
+            min_visibility=config.visibility_threshold,
+            smoothing_alpha=config.smoothing_alpha,
+        )
         mode = ANGLE_MODE
         next_print_at = 0.0
         started_at = time.monotonic()
@@ -58,11 +64,17 @@ def run_app(config: AppConfig) -> int:
             timestamp_ms = int((time.monotonic() - started_at) * 1000)
             detection = tracker.detect(rgb_frame, timestamp_ms)
 
+            current_state = None
             if detection.landmarks:
+                current_state = state_builder.build(
+                    timestamp_ms,
+                    detection.landmarks,
+                    detection.world_landmarks,
+                )
                 draw_stick_figure(
                     cv2,
                     frame,
-                    detection.landmarks,
+                    current_state.landmarks,
                     indices,
                     config.visibility_threshold,
                 )
@@ -71,20 +83,28 @@ def run_app(config: AppConfig) -> int:
                 if now >= next_print_at:
                     emit_console_data(
                         mode,
-                        detection.landmarks,
-                        detection.world_landmarks,
-                        indices,
+                        current_state,
                         names,
-                        config.visibility_threshold,
                     )
                     next_print_at = now + config.print_interval
+            else:
+                state_builder.reset_tracking()
 
-            draw_overlay(cv2, frame, mode, detection.has_pose)
+            draw_overlay(
+                cv2,
+                frame,
+                mode,
+                detection.has_pose,
+                calibrated=state_builder.calibrated,
+            )
             cv2.imshow(window_name, frame)
 
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 return 0
+            if key == ord("c") and current_state is not None:
+                count = state_builder.capture_calibration(current_state)
+                print(f"Calibration captured from {count} angles.")
             mode = update_mode_from_key(key, mode)
     finally:
         if tracker is not None:
