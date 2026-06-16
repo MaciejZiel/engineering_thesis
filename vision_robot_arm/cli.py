@@ -27,6 +27,17 @@ def parse_args() -> AppConfig:
         help="Loop the video file when it reaches the end.",
     )
     parser.add_argument(
+        "--robot-debug",
+        action="store_true",
+        help="Print mapped robot commands without controlling real hardware.",
+    )
+    parser.add_argument(
+        "--robot-print-interval",
+        type=float,
+        default=0.5,
+        help="Seconds between robot debug command prints. Default: 0.5.",
+    )
+    parser.add_argument(
         "--width",
         type=int,
         default=0,
@@ -98,6 +109,8 @@ def parse_args() -> AppConfig:
         camera=args.camera,
         video_path=args.video,
         loop_video=args.loop_video,
+        robot_debug=args.robot_debug,
+        robot_print_interval=args.robot_print_interval,
         width=args.width,
         height=args.height,
         print_interval=args.print_interval,

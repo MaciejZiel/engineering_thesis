@@ -14,6 +14,7 @@ Current version:
 - can calibrate a neutral pose
 - records pose data to CSV
 - recognizes simple rule-based gestures
+- maps pose state to debug robot commands
 - prints joint angles, raw pose landmarks, or both
 - lets you switch data modes while the camera is running
 
@@ -89,6 +90,7 @@ vision_robot_arm/
   pose_state.py          # shared pose data object
   pose_tracker.py        # MediaPipe Pose Landmarker wrapper
   recording.py           # CSV pose recordings
+  robot.py               # robot command abstraction/debug controller
   runtime.py             # optional dependency loading
   smoothing.py           # low-pass filters
   state_builder.py       # raw detections -> smoothed pose state
@@ -142,3 +144,20 @@ The first gesture layer is rule-based and prints/records:
 - `left_hand_up`, `right_hand_up`, `both_hands_up`
 - `left_arm_side`, `right_arm_side`
 - `left_elbow_bent`, `right_elbow_bent`
+
+## Robot Debug Mode
+
+The app does not control real hardware yet. For now, robot mode maps the current
+pose state to printed debug commands:
+
+```powershell
+python main.py --robot-debug
+```
+
+Current debug mapping:
+
+- right shoulder angle -> `shoulder`
+- right elbow angle -> `elbow`
+- `right_hand_up` -> `lift_mode=on`
+- `right_elbow_bent` -> `gripper=close`
+- `right_arm_side` -> `gripper=open`

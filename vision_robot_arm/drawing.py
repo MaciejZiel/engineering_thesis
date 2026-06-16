@@ -187,14 +187,19 @@ def draw_overlay(
     person_detected: bool,
     calibrated: bool = False,
     recording: bool = False,
+    robot_debug: bool = False,
     gestures: tuple[str, ...] = (),
 ) -> None:
     status = "detected" if person_detected else "not detected"
     calibration = "on" if calibrated else "off"
     recording_status = "on" if recording else "off"
+    robot_status = "on" if robot_debug else "off"
     lines = [
         f"Mode: {mode} | 1 angles  2 points  3 both",
-        f"Person: {status} | calibration: {calibration} | recording: {recording_status}",
+        (
+            f"Person: {status} | calibration: {calibration} | "
+            f"recording: {recording_status} | robot: {robot_status}"
+        ),
         "c calibrate | r record | q/Esc quit",
     ]
     if gestures:

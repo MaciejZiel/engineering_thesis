@@ -6,6 +6,7 @@ from vision_robot_arm.landmarks import build_landmark_indices, build_landmark_na
 from vision_robot_arm.output import emit_console_data
 from vision_robot_arm.pose_tracker import PoseTracker
 from vision_robot_arm.recording import CsvPoseRecorder
+from vision_robot_arm.robot import create_robot_controller
 from vision_robot_arm.runtime import load_runtime_dependencies
 from vision_robot_arm.state_builder import PoseStateBuilder
 
@@ -47,6 +48,10 @@ def run_app(config: AppConfig) -> int:
 
         tracker = PoseTracker(deps, config)
         recorder = CsvPoseRecorder(config.recording_dir)
+        robot_controller = create_robot_controller(
+            enabled=config.robot_debug,
+            print_interval=config.robot_print_interval,
+        )
         state_builder = PoseStateBuilder(
             indices=indices,
             min_visibility=config.visibility_threshold,
@@ -111,6 +116,7 @@ def run_app(config: AppConfig) -> int:
                     next_print_at = now + config.print_interval
 
                 recorder.write_state(current_state, names)
+                robot_controller.update(current_state)
             else:
                 state_builder.reset_tracking()
 
@@ -121,6 +127,7 @@ def run_app(config: AppConfig) -> int:
                 detection.has_pose,
                 calibrated=state_builder.calibrated,
                 recording=recorder.is_recording,
+                robot_debug=config.robot_debug,
                 gestures=current_state.gestures if current_state else (),
             )
             cv2.imshow(window_name, frame)
@@ -141,6 +148,8 @@ def run_app(config: AppConfig) -> int:
     finally:
         if "recorder" in locals():
             recorder.stop()
+        if "robot_controller" in locals():
+            robot_controller.close()
         if tracker is not None:
             tracker.close()
         capture.release()
