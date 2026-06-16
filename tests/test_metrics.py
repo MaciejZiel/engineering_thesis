@@ -9,6 +9,7 @@ from vision_robot_arm.smoothing import LowPassValueFilter
 from vision_robot_arm.calibration import PoseCalibration
 from vision_robot_arm.pose_state import LandmarkPoint, PoseState
 from vision_robot_arm.recording import CsvPoseRecorder
+from vision_robot_arm.gestures import detect_gestures
 
 
 @dataclass
@@ -81,6 +82,7 @@ class RecordingTests(unittest.TestCase):
             raw_angles={"left_elbow": 91.0},
             angles={"left_elbow": 90.0},
             relative_angles={"left_elbow": 5.0},
+            gestures=("left_elbow_bent",),
             calibrated=True,
         )
 
@@ -97,8 +99,40 @@ class RecordingTests(unittest.TestCase):
         self.assertEqual(rows[0]["calibrated"], "True")
         self.assertEqual(rows[0]["angle_left_elbow"], "90.0")
         self.assertEqual(rows[0]["relative_left_elbow"], "5.0")
+        self.assertEqual(rows[0]["gestures"], "left_elbow_bent")
         self.assertEqual(rows[0]["nose_x"], "0.1")
         self.assertEqual(rows[0]["nose_world_z"], "3.0")
+
+
+class GestureTests(unittest.TestCase):
+    def test_detects_hand_up_and_bent_elbow(self) -> None:
+        indices = {
+            "LEFT_SHOULDER": 0,
+            "LEFT_ELBOW": 1,
+            "LEFT_WRIST": 2,
+            "RIGHT_SHOULDER": 3,
+            "RIGHT_ELBOW": 4,
+            "RIGHT_WRIST": 5,
+        }
+        landmarks = [
+            FakeLandmark(0.4, 0.5),
+            FakeLandmark(0.35, 0.35),
+            FakeLandmark(0.35, 0.25),
+            FakeLandmark(0.6, 0.5),
+            FakeLandmark(0.65, 0.5),
+            FakeLandmark(0.68, 0.5),
+        ]
+
+        gestures = detect_gestures(
+            landmarks,
+            {"left_elbow": 75.0, "right_elbow": 170.0},
+            indices,
+            min_visibility=0.55,
+        )
+
+        self.assertIn("left_hand_up", gestures)
+        self.assertIn("left_elbow_bent", gestures)
+        self.assertNotIn("right_elbow_bent", gestures)
 
 
 if __name__ == "__main__":

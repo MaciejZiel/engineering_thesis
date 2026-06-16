@@ -1,6 +1,7 @@
 from typing import Any
 
 from vision_robot_arm.calibration import PoseCalibration
+from vision_robot_arm.gestures import detect_gestures
 from vision_robot_arm.metrics import calculate_angles
 from vision_robot_arm.pose_state import LandmarkPoint, PoseState
 from vision_robot_arm.smoothing import AngleSmoother, LandmarkSmoother
@@ -56,6 +57,12 @@ class PoseStateBuilder:
             )
         )
         relative_angles = self._calibration.relative_angles(smoothed_angles)
+        gestures = detect_gestures(
+            smoothed_landmarks,
+            smoothed_angles,
+            self._indices,
+            self._min_visibility,
+        )
 
         return PoseState(
             timestamp_ms=timestamp_ms,
@@ -64,6 +71,7 @@ class PoseStateBuilder:
             raw_angles=raw_angles,
             angles=smoothed_angles,
             relative_angles=relative_angles,
+            gestures=gestures,
             calibrated=self._calibration.calibrated,
         )
 

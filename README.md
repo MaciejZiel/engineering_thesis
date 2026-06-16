@@ -13,6 +13,7 @@ Current version:
 - smooths landmarks and joint angles
 - can calibrate a neutral pose
 - records pose data to CSV
+- recognizes simple rule-based gestures
 - prints joint angles, raw pose landmarks, or both
 - lets you switch data modes while the camera is running
 
@@ -69,6 +70,7 @@ vision_robot_arm/
   cli.py                 # command-line arguments
   config.py              # runtime settings and defaults
   drawing.py             # custom stick figure and overlay
+  gestures.py            # simple rule-based gesture detection
   landmarks.py           # landmark lookup and visibility checks
   metrics.py             # joint angle calculations
   output.py              # console printing modes
@@ -114,8 +116,17 @@ are printed too.
 
 Press `r` while the app is running to start or stop recording. Files are saved
 under `recordings/` by default and include timestamps, smoothed angles, relative
-angles after calibration, image landmarks, visibility, and world coordinates.
+angles after calibration, detected gestures, image landmarks, visibility, and
+world coordinates.
 
 ```powershell
 python main.py --recording-dir recordings
 ```
+
+## Gestures
+
+The first gesture layer is rule-based and prints/records:
+
+- `left_hand_up`, `right_hand_up`, `both_hands_up`
+- `left_arm_side`, `right_arm_side`
+- `left_elbow_bent`, `right_elbow_bent`

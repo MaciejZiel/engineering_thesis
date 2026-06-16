@@ -31,6 +31,8 @@ def print_landmarks(
 def emit_console_data(mode: str, state: PoseState, names: dict[int, str]) -> None:
     timestamp = time.strftime("%H:%M:%S")
     print(f"\n[{timestamp}] mode={mode}")
+    if state.gestures:
+        print("gestures " + ", ".join(state.gestures))
 
     if mode in (ANGLE_MODE, BOTH_MODE):
         print("angles   " + format_angles(state.angles))

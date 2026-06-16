@@ -187,6 +187,7 @@ def draw_overlay(
     person_detected: bool,
     calibrated: bool = False,
     recording: bool = False,
+    gestures: tuple[str, ...] = (),
 ) -> None:
     status = "detected" if person_detected else "not detected"
     calibration = "on" if calibrated else "off"
@@ -196,6 +197,8 @@ def draw_overlay(
         f"Person: {status} | calibration: {calibration} | recording: {recording_status}",
         "c calibrate | r record | q/Esc quit",
     ]
+    if gestures:
+        lines.append("Gestures: " + ", ".join(gestures[:3]))
     for row, text in enumerate(lines):
         y = 28 + row * 26
         cv2.putText(

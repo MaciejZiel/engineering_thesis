@@ -27,6 +27,7 @@ class PoseState:
     raw_angles: dict[str, float | None]
     angles: dict[str, float | None]
     relative_angles: dict[str, float | None]
+    gestures: tuple[str, ...]
     calibrated: bool
 
     @property

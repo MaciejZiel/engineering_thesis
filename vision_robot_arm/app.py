@@ -101,6 +101,7 @@ def run_app(config: AppConfig) -> int:
                 detection.has_pose,
                 calibrated=state_builder.calibrated,
                 recording=recorder.is_recording,
+                gestures=current_state.gestures if current_state else (),
             )
             cv2.imshow(window_name, frame)
 

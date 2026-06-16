@@ -58,6 +58,7 @@ class CsvPoseRecorder:
         row: dict[str, str | int | float | bool] = {
             "timestamp_ms": state.timestamp_ms,
             "calibrated": state.calibrated,
+            "gestures": "|".join(state.gestures),
         }
 
         for name in ANGLE_DEFINITIONS:
@@ -82,7 +83,7 @@ class CsvPoseRecorder:
         self._file.flush()
 
     def _build_fieldnames(self, landmark_names: dict[int, str]) -> list[str]:
-        fieldnames = ["timestamp_ms", "calibrated"]
+        fieldnames = ["timestamp_ms", "calibrated", "gestures"]
         for name in ANGLE_DEFINITIONS:
             fieldnames.append(f"angle_{name}")
             fieldnames.append(f"relative_{name}")
