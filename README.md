@@ -12,6 +12,7 @@ Current version:
 - draws a custom skeleton with a horizontal hip line
 - smooths landmarks and joint angles
 - can calibrate a neutral pose
+- records pose data to CSV
 - prints joint angles, raw pose landmarks, or both
 - lets you switch data modes while the camera is running
 
@@ -73,6 +74,7 @@ vision_robot_arm/
   output.py              # console printing modes
   pose_state.py          # shared pose data object
   pose_tracker.py        # MediaPipe Pose Landmarker wrapper
+  recording.py           # CSV pose recordings
   runtime.py             # optional dependency loading
   smoothing.py           # low-pass filters
   state_builder.py       # raw detections -> smoothed pose state
@@ -88,6 +90,7 @@ tests/
 - `2`: print raw landmarks
 - `3`: print angles and raw landmarks
 - `c`: calibrate the current pose as neutral
+- `r`: start/stop CSV recording
 - `q` or `Esc`: quit
 
 ## Tests
@@ -106,3 +109,13 @@ the calibrated neutral pose.
 Landmark mode prints MediaPipe's 33 pose points with normalized image
 coordinates (`x`, `y`, `z`) and `visibility`. When available, world coordinates
 are printed too.
+
+## CSV Recordings
+
+Press `r` while the app is running to start or stop recording. Files are saved
+under `recordings/` by default and include timestamps, smoothed angles, relative
+angles after calibration, image landmarks, visibility, and world coordinates.
+
+```powershell
+python main.py --recording-dir recordings
+```

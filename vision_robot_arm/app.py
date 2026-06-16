@@ -5,6 +5,7 @@ from vision_robot_arm.drawing import draw_overlay, draw_stick_figure
 from vision_robot_arm.landmarks import build_landmark_indices, build_landmark_names
 from vision_robot_arm.output import emit_console_data
 from vision_robot_arm.pose_tracker import PoseTracker
+from vision_robot_arm.recording import CsvPoseRecorder
 from vision_robot_arm.runtime import load_runtime_dependencies
 from vision_robot_arm.state_builder import PoseStateBuilder
 
@@ -41,6 +42,7 @@ def run_app(config: AppConfig) -> int:
             )
 
         tracker = PoseTracker(deps, config)
+        recorder = CsvPoseRecorder(config.recording_dir)
         state_builder = PoseStateBuilder(
             indices=indices,
             min_visibility=config.visibility_threshold,
@@ -87,6 +89,8 @@ def run_app(config: AppConfig) -> int:
                         names,
                     )
                     next_print_at = now + config.print_interval
+
+                recorder.write_state(current_state, names)
             else:
                 state_builder.reset_tracking()
 
@@ -96,6 +100,7 @@ def run_app(config: AppConfig) -> int:
                 mode,
                 detection.has_pose,
                 calibrated=state_builder.calibrated,
+                recording=recorder.is_recording,
             )
             cv2.imshow(window_name, frame)
 
@@ -105,8 +110,16 @@ def run_app(config: AppConfig) -> int:
             if key == ord("c") and current_state is not None:
                 count = state_builder.capture_calibration(current_state)
                 print(f"Calibration captured from {count} angles.")
+            if key == ord("r"):
+                is_recording, path = recorder.toggle(names)
+                if is_recording:
+                    print(f"Recording started: {path}")
+                else:
+                    print(f"Recording stopped: {path}")
             mode = update_mode_from_key(key, mode)
     finally:
+        if "recorder" in locals():
+            recorder.stop()
         if tracker is not None:
             tracker.close()
         capture.release()

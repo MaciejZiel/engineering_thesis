@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 
 from vision_robot_arm.app import run_app
-from vision_robot_arm.config import DEFAULT_MODEL_PATH, AppConfig
+from vision_robot_arm.config import DEFAULT_MODEL_PATH, DEFAULT_RECORDING_DIR, AppConfig
 
 
 def parse_args() -> AppConfig:
@@ -46,6 +46,12 @@ def parse_args() -> AppConfig:
         help="Low-pass smoothing factor for landmarks and angles. Lower is smoother. Default: 0.35.",
     )
     parser.add_argument(
+        "--recording-dir",
+        type=Path,
+        default=DEFAULT_RECORDING_DIR,
+        help=f"Directory for CSV recordings. Default: {DEFAULT_RECORDING_DIR}",
+    )
+    parser.add_argument(
         "--model",
         type=Path,
         default=DEFAULT_MODEL_PATH,
@@ -84,6 +90,7 @@ def parse_args() -> AppConfig:
         print_interval=args.print_interval,
         visibility_threshold=args.visibility_threshold,
         smoothing_alpha=args.smoothing_alpha,
+        recording_dir=args.recording_dir,
         model_path=args.model,
         num_poses=args.num_poses,
         min_detection_confidence=args.min_detection_confidence,

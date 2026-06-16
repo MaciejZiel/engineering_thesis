@@ -9,6 +9,7 @@ BOTH_MODE = "both"
 DEFAULT_MODEL_PATH = (
     Path(__file__).resolve().parent.parent / "models" / "pose_landmarker_lite.task"
 )
+DEFAULT_RECORDING_DIR = Path(__file__).resolve().parent.parent / "recordings"
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class AppConfig:
     print_interval: float = 0.5
     visibility_threshold: float = 0.55
     smoothing_alpha: float = 0.35
+    recording_dir: Path = DEFAULT_RECORDING_DIR
     model_path: Path = DEFAULT_MODEL_PATH
     num_poses: int = 1
     min_detection_confidence: float = 0.5

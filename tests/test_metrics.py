@@ -1,9 +1,14 @@
 from dataclasses import dataclass
+import csv
+from pathlib import Path
+import tempfile
 import unittest
 
 from vision_robot_arm.metrics import calculate_angle, calculate_angles
 from vision_robot_arm.smoothing import LowPassValueFilter
 from vision_robot_arm.calibration import PoseCalibration
+from vision_robot_arm.pose_state import LandmarkPoint, PoseState
+from vision_robot_arm.recording import CsvPoseRecorder
 
 
 @dataclass
@@ -65,6 +70,35 @@ class CalibrationTests(unittest.TestCase):
 
         self.assertEqual(relative["left_elbow"], 20.0)
         self.assertIsNone(relative["right_elbow"])
+
+
+class RecordingTests(unittest.TestCase):
+    def test_csv_recorder_writes_pose_state(self) -> None:
+        state = PoseState(
+            timestamp_ms=123,
+            landmarks=[LandmarkPoint(0.1, 0.2, 0.3, 0.9)],
+            world_landmarks=[LandmarkPoint(1.0, 2.0, 3.0, 1.0)],
+            raw_angles={"left_elbow": 91.0},
+            angles={"left_elbow": 90.0},
+            relative_angles={"left_elbow": 5.0},
+            calibrated=True,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            recorder = CsvPoseRecorder(Path(temp_dir))
+            path = recorder.start({0: "nose"})
+            recorder.write_state(state, {0: "nose"})
+            recorder.stop()
+
+            with path.open(newline="", encoding="utf-8") as csv_file:
+                rows = list(csv.DictReader(csv_file))
+
+        self.assertEqual(rows[0]["timestamp_ms"], "123")
+        self.assertEqual(rows[0]["calibrated"], "True")
+        self.assertEqual(rows[0]["angle_left_elbow"], "90.0")
+        self.assertEqual(rows[0]["relative_left_elbow"], "5.0")
+        self.assertEqual(rows[0]["nose_x"], "0.1")
+        self.assertEqual(rows[0]["nose_world_z"], "3.0")
 
 
 if __name__ == "__main__":
