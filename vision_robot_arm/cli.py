@@ -16,6 +16,17 @@ def parse_args() -> AppConfig:
         help="OpenCV camera index. Default: 0.",
     )
     parser.add_argument(
+        "--video",
+        type=Path,
+        default=None,
+        help="Optional video file to process instead of a webcam.",
+    )
+    parser.add_argument(
+        "--loop-video",
+        action="store_true",
+        help="Loop the video file when it reaches the end.",
+    )
+    parser.add_argument(
         "--width",
         type=int,
         default=0,
@@ -85,6 +96,8 @@ def parse_args() -> AppConfig:
     args = parser.parse_args()
     return AppConfig(
         camera=args.camera,
+        video_path=args.video,
+        loop_video=args.loop_video,
         width=args.width,
         height=args.height,
         print_interval=args.print_interval,

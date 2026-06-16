@@ -26,20 +26,24 @@ def run_app(config: AppConfig) -> int:
     indices = build_landmark_indices(deps.vision)
     names = build_landmark_names(deps.vision)
 
-    capture = cv2.VideoCapture(config.camera)
+    source = str(config.video_path) if config.video_path is not None else config.camera
+    capture = cv2.VideoCapture(source)
     tracker = None
 
     try:
-        if config.width > 0:
+        if config.video_path is None and config.width > 0:
             capture.set(cv2.CAP_PROP_FRAME_WIDTH, config.width)
-        if config.height > 0:
+        if config.video_path is None and config.height > 0:
             capture.set(cv2.CAP_PROP_FRAME_HEIGHT, config.height)
 
         if not capture.isOpened():
-            raise SystemExit(
-                f"Could not open camera index {config.camera}. "
-                "Try another index, for example: python main.py --camera 1"
-            )
+            if config.video_path is not None:
+                raise SystemExit(f"Could not open video file: {config.video_path}")
+            else:
+                raise SystemExit(
+                    f"Could not open camera index {config.camera}. "
+                    "Try another index, for example: python main.py --camera 1"
+                )
 
         tracker = PoseTracker(deps, config)
         recorder = CsvPoseRecorder(config.recording_dir)
@@ -51,19 +55,35 @@ def run_app(config: AppConfig) -> int:
         mode = ANGLE_MODE
         next_print_at = 0.0
         started_at = time.monotonic()
+        last_timestamp_ms = -1
+        wait_delay_ms = _frame_wait_delay_ms(cv2, capture, config)
         window_name = "Vision Robot Arm - Pose Tracker"
 
-        print("Camera started.")
+        print(_source_started_message(config))
         print("Keys: 1 angles, 2 landmarks, 3 both, q/Esc quit.")
 
         while True:
             ok, frame = capture.read()
             if not ok:
+                if config.video_path is not None:
+                    if config.loop_video:
+                        capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        state_builder.reset_tracking()
+                        continue
+                    print("Video ended.")
+                    return 0
                 print("Camera frame could not be read.")
                 return 1
 
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            timestamp_ms = int((time.monotonic() - started_at) * 1000)
+            timestamp_ms = _frame_timestamp_ms(
+                cv2,
+                capture,
+                config,
+                started_at,
+                last_timestamp_ms,
+            )
+            last_timestamp_ms = timestamp_ms
             detection = tracker.detect(rgb_frame, timestamp_ms)
 
             current_state = None
@@ -105,7 +125,7 @@ def run_app(config: AppConfig) -> int:
             )
             cv2.imshow(window_name, frame)
 
-            key = cv2.waitKey(1) & 0xFF
+            key = cv2.waitKey(wait_delay_ms) & 0xFF
             if key in (ord("q"), 27):
                 return 0
             if key == ord("c") and current_state is not None:
@@ -125,3 +145,34 @@ def run_app(config: AppConfig) -> int:
             tracker.close()
         capture.release()
         cv2.destroyAllWindows()
+
+
+def _source_started_message(config: AppConfig) -> str:
+    if config.video_path is not None:
+        return f"Video started: {config.video_path}"
+    return "Camera started."
+
+
+def _frame_wait_delay_ms(cv2: object, capture: object, config: AppConfig) -> int:
+    if config.video_path is None:
+        return 1
+    fps = capture.get(cv2.CAP_PROP_FPS)
+    if fps <= 0:
+        return 1
+    return max(1, int(1000 / fps))
+
+
+def _frame_timestamp_ms(
+    cv2: object,
+    capture: object,
+    config: AppConfig,
+    started_at: float,
+    last_timestamp_ms: int,
+) -> int:
+    if config.video_path is None:
+        return int((time.monotonic() - started_at) * 1000)
+
+    timestamp_ms = int(capture.get(cv2.CAP_PROP_POS_MSEC))
+    if timestamp_ms <= last_timestamp_ms:
+        timestamp_ms = last_timestamp_ms + 1
+    return timestamp_ms

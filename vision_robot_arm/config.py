@@ -22,6 +22,8 @@ class AppConfig:
     smoothing_alpha: float = 0.35
     recording_dir: Path = DEFAULT_RECORDING_DIR
     model_path: Path = DEFAULT_MODEL_PATH
+    video_path: Path | None = None
+    loop_video: bool = False
     num_poses: int = 1
     min_detection_confidence: float = 0.5
     min_pose_presence_confidence: float = 0.5
@@ -36,6 +38,8 @@ class AppConfig:
             raise SystemExit("--smoothing-alpha must be greater than 0 and at most 1")
         if self.num_poses <= 0:
             raise SystemExit("--num-poses must be greater than 0")
+        if self.video_path is not None and not self.video_path.exists():
+            raise SystemExit(f"Video file not found: {self.video_path.resolve()}")
 
         model_path = self.model_path.resolve()
         if not model_path.exists():

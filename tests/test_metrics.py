@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from vision_robot_arm.config import AppConfig
 from vision_robot_arm.metrics import calculate_angle, calculate_angles
 from vision_robot_arm.smoothing import LowPassValueFilter
 from vision_robot_arm.calibration import PoseCalibration
@@ -102,6 +103,14 @@ class RecordingTests(unittest.TestCase):
         self.assertEqual(rows[0]["gestures"], "left_elbow_bent")
         self.assertEqual(rows[0]["nose_x"], "0.1")
         self.assertEqual(rows[0]["nose_world_z"], "3.0")
+
+
+class ConfigTests(unittest.TestCase):
+    def test_config_rejects_missing_video_file(self) -> None:
+        config = AppConfig(video_path=Path("does_not_exist.mp4"))
+
+        with self.assertRaises(SystemExit):
+            config.validate()
 
 
 class GestureTests(unittest.TestCase):

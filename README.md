@@ -37,6 +37,18 @@ If the default camera is not correct:
 python main.py --camera 1
 ```
 
+To process a saved video instead of the webcam:
+
+```powershell
+python main.py --video sample.mp4
+```
+
+To loop a video while testing:
+
+```powershell
+python main.py --video sample.mp4 --loop-video
+```
+
 Useful options:
 
 ```powershell
