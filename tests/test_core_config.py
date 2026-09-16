@@ -38,6 +38,18 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             AppConfig(hand_model_path=missing, hands=True).validate()
 
+    def test_confidences_outside_zero_to_one_are_refused(self) -> None:
+        """MediaPipe aborts the process on these instead of raising, so catch them first."""
+        for field in (
+            "min_detection_confidence",
+            "min_pose_presence_confidence",
+            "min_tracking_confidence",
+        ):
+            for value in (-2.0, 5.0):
+                with self.subTest(field=field, value=value):
+                    with self.assertRaises(SystemExit):
+                        AppConfig(**{field: value}).validate()
+
     def test_default_model_path_points_into_models_directory(self) -> None:
         self.assertEqual(DEFAULT_MODEL_PATH.parent.name, "models")
         self.assertTrue(DEFAULT_MODEL_PATH.exists())

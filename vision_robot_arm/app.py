@@ -39,6 +39,9 @@ from vision_robot_arm.vision.recording import CsvPoseRecorder
 from vision_robot_arm.vision.state_builder import PoseStateBuilder
 
 WINDOW_NAME = "Motion Twin - Dual UR7e Control"
+# Some containers refuse to seek. Without a cap the loop would spin without ever
+# repainting or reading a key, and only an outside kill would stop it.
+MAX_REWIND_ATTEMPTS = 3
 
 
 def update_mode_from_key(key: int, current_mode: str) -> str:
@@ -110,24 +113,30 @@ def run_app(config: AppConfig) -> int:
         if config.test_mode:
             print(f"Test mode: joint angle labels and embedded robot simulation ({config.robot.backend}).")
 
+        rewind_attempts = 0
         while True:
             ok, frame = capture.read()
             if not ok:
-                if config.video_path is not None:
-                    if config.loop_video:
-                        capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                        # Keep video time running across the rewind; the filters downstream
-                        # derive their time constants from these stamps.
-                        timestamp_offset_ms = last_timestamp_ms + wait_delay_ms
-                        state_builder.reset_tracking()
-                        robot_controller.reset()
-                        wrist_hold.reset()
-                        gesture_filter.reset()
-                        continue
+                if config.video_path is None:
+                    print("Camera frame could not be read.")
+                    return 1
+                if not config.loop_video:
                     print("Video ended.")
                     return 0
-                print("Camera frame could not be read.")
-                return 1
+                rewind_attempts += 1
+                if rewind_attempts > MAX_REWIND_ATTEMPTS:
+                    print(f"Video ended: {config.video_path} could not be rewound.")
+                    return 1
+                capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                # Keep video time running across the rewind; the filters downstream
+                # derive their time constants from these stamps.
+                timestamp_offset_ms = last_timestamp_ms + wait_delay_ms
+                state_builder.reset_tracking()
+                robot_controller.reset()
+                wrist_hold.reset()
+                gesture_filter.reset()
+                continue
+            rewind_attempts = 0
 
             frame = _fit_frame(cv2, frame, config)
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -319,16 +328,25 @@ def run_app(config: AppConfig) -> int:
                     print(f"Recording stopped: {path}")
             mode = cycle_output_mode(mode) if action == ACTION_MODE else update_mode_from_key(key, mode)
     finally:
-        if recorder is not None:
-            recorder.stop()
-        if robot_controller is not None:
-            robot_controller.close()
-        if hand_tracker is not None:
-            hand_tracker.close()
-        if tracker is not None:
-            tracker.close()
-        capture.release()
+        _release_all(
+            ("robot", None if robot_controller is None else robot_controller.close),
+            ("recording", None if recorder is None else recorder.stop),
+            ("hand tracker", None if hand_tracker is None else hand_tracker.close),
+            ("pose tracker", None if tracker is None else tracker.close),
+            ("camera", capture.release),
+        )
         cv2.destroyAllWindows()
+
+
+def _release_all(*resources: tuple[str, object]) -> None:
+    """Close everything, whatever fails: a full disk must not leave an arm streaming."""
+    for name, close in resources:
+        if close is None:
+            continue
+        try:
+            close()
+        except Exception as error:  # noqa: BLE001 - shutdown continues regardless
+            print(f"Could not close the {name}: {error}")
 
 
 def _simulation_canvas(np: object, size: tuple[int, int]) -> object:
@@ -339,6 +357,8 @@ def _fit_frame(cv2: object, frame: object, config: AppConfig) -> object:
     if config.width <= 0 or config.height <= 0:
         return frame
     height, width = frame.shape[:2]
+    if width <= 0 or height <= 0:
+        return frame
     scale = min(config.width / width, config.height / height, 1.0)
     if scale >= 1.0:
         return frame

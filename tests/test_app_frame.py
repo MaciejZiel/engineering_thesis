@@ -4,7 +4,7 @@ import numpy as np
 
 from pathlib import Path
 
-from vision_robot_arm.app import _fit_frame, _frame_timestamp_ms
+from vision_robot_arm.app import _fit_frame, _frame_timestamp_ms, _release_all
 from vision_robot_arm.core.config import AppConfig
 
 
@@ -62,6 +62,36 @@ class FakeCapture:
 
     def get(self, prop: int) -> float:
         return self.position_ms
+
+
+class EmptyFrameTests(unittest.TestCase):
+    def test_a_capture_returning_an_empty_mat_does_not_crash(self) -> None:
+        """Some webcam drivers hand back ok=True with a zero-size image."""
+        cv2 = FakeCv2()
+        config = AppConfig(width=1920, height=1080)
+
+        for shape in ((0, 0, 3), (0, 1280, 3), (720, 0, 3)):
+            with self.subTest(shape=shape):
+                frame = np.zeros(shape, dtype=np.uint8)
+
+                self.assertIs(_fit_frame(cv2, frame, config), frame)
+
+
+class ReleaseTests(unittest.TestCase):
+    def test_every_resource_is_closed_even_when_one_fails(self) -> None:
+        closed: list[str] = []
+
+        def failing() -> None:
+            raise OSError(28, "No space left on device")
+
+        _release_all(
+            ("robot", lambda: closed.append("robot")),
+            ("recording", failing),
+            ("camera", lambda: closed.append("camera")),
+            ("window", None),
+        )
+
+        self.assertEqual(closed, ["robot", "camera"])
 
 
 class TimestampTests(unittest.TestCase):

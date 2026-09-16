@@ -197,6 +197,21 @@ class RobotConfigTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             RobotConfig(wrist=bad).validate()
 
+    def test_joint_ranges_must_stay_inside_the_ur7e_limits(self) -> None:
+        """Those degrees go straight into a servoj on real hardware."""
+        wide_elbow = JointMapping("elbow", 180.0, -1.0, JointLimit(-1000.0, 1000.0))
+        wide_shoulder = JointMapping("shoulder_elevation", -180.0, 1.0, JointLimit(-5000.0, 0.0))
+
+        with self.assertRaises(SystemExit):
+            RobotConfig(elbow=wide_elbow).validate()
+        with self.assertRaises(SystemExit):
+            RobotConfig(shoulder=wide_shoulder).validate()
+
+    def test_a_range_inside_the_hardware_limit_is_accepted(self) -> None:
+        narrow = JointMapping("elbow", 180.0, -1.0, JointLimit(-90.0, 90.0))
+
+        RobotConfig(elbow=narrow).validate()
+
     def test_default_config_is_valid_and_disabled(self) -> None:
         config = RobotConfig()
 

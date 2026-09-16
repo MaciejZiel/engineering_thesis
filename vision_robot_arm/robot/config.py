@@ -160,8 +160,19 @@ class RobotConfig:
             )
         if self.backend == BACKEND_SERIAL and not self.port:
             raise SystemExit("--robot-port is required with --robot-backend serial")
+        hardware = {
+            "shoulder": UR7E_JOINT_RANGE,
+            "elbow": UR7E_ELBOW_RANGE,
+            "wrist": UR7E_JOINT_RANGE,
+        }
         for name, mapping in (("shoulder", self.shoulder), ("elbow", self.elbow), ("wrist", self.wrist)):
             if mapping.limit.minimum >= mapping.limit.maximum:
                 raise SystemExit(f"{name} joint limit minimum must be below its maximum")
             if mapping.sign == 0:
                 raise SystemExit(f"{name} joint mapping sign must not be 0")
+            allowed = hardware[name]
+            if mapping.limit.minimum < allowed.minimum or mapping.limit.maximum > allowed.maximum:
+                raise SystemExit(
+                    f"--robot-{name}-range must stay inside the UR7e limit "
+                    f"{allowed.minimum:.0f} {allowed.maximum:.0f}"
+                )

@@ -49,6 +49,14 @@ class AppConfig:
             raise SystemExit("--smoothing-alpha must be greater than 0 and at most 1")
         if self.num_poses <= 0:
             raise SystemExit("--num-poses must be greater than 0")
+        for flag, value in (
+            ("--min-detection-confidence", self.min_detection_confidence),
+            ("--min-pose-presence-confidence", self.min_pose_presence_confidence),
+            ("--min-tracking-confidence", self.min_tracking_confidence),
+        ):
+            # MediaPipe aborts the process on an out-of-range value instead of raising.
+            if not 0.0 <= value <= 1.0:
+                raise SystemExit(f"{flag} must be between 0 and 1")
         self.robot.validate()
         if self.video_path is not None and not self.video_path.exists():
             raise SystemExit(f"Video file not found: {self.video_path.resolve()}")
