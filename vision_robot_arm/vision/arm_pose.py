@@ -14,6 +14,10 @@ from vision_robot_arm.vision.landmarks import is_reliable
 SIDES = ("left", "right")
 ELEVATION_SUFFIX = "shoulder_elevation"
 IMAGE_DOWN = (0.0, 1.0)
+# An upper arm pointing at the camera projects to almost nothing, and the angle of a
+# two-pixel vector is landmark noise. Below this length the joint is left unmeasured.
+MIN_ARM_LENGTH = 0.04
+MIN_ARM_LENGTH_PER_SHOULDER_WIDTH = 0.25
 
 Vector = tuple[float, float]
 
@@ -25,16 +29,35 @@ def arm_elevation_angles(
     aspect_ratio: float = 1.0,
 ) -> dict[str, float]:
     down = torso_down_vector(landmarks, indices, min_visibility, aspect_ratio)
+    minimum_length = _minimum_arm_length(landmarks, indices, min_visibility, aspect_ratio)
     angles: dict[str, float] = {}
     for side in SIDES:
         shoulder = _point(landmarks, indices, f"{side.upper()}_SHOULDER", min_visibility)
         elbow = _point(landmarks, indices, f"{side.upper()}_ELBOW", min_visibility)
         if shoulder is None or elbow is None:
             continue
-        elevation = vector_angle(_vector(shoulder, elbow, aspect_ratio), down)
+        arm = _vector(shoulder, elbow, aspect_ratio)
+        if _norm(arm) < minimum_length:
+            continue
+        elevation = vector_angle(arm, down)
         if elevation is not None:
             angles[f"{side}_{ELEVATION_SUFFIX}"] = elevation
     return angles
+
+
+def _minimum_arm_length(
+    landmarks: list[Any],
+    indices: dict[str, int],
+    min_visibility: float,
+    aspect_ratio: float,
+) -> float:
+    """Scale the noise floor with the person: someone further away is smaller on screen."""
+    left = _point(landmarks, indices, "LEFT_SHOULDER", min_visibility)
+    right = _point(landmarks, indices, "RIGHT_SHOULDER", min_visibility)
+    if left is None or right is None:
+        return MIN_ARM_LENGTH
+    shoulder_width = _norm(_vector(left, right, aspect_ratio))
+    return max(MIN_ARM_LENGTH, shoulder_width * MIN_ARM_LENGTH_PER_SHOULDER_WIDTH)
 
 
 def torso_down_vector(

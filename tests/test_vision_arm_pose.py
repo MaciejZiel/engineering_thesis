@@ -82,6 +82,21 @@ class ElevationTests(unittest.TestCase):
 
         self.assertEqual(arm_elevation_angles(landmarks, INDICES), {})
 
+    def test_arm_pointing_at_the_camera_is_left_unmeasured(self) -> None:
+        landmarks = pose(P(0.41, 0.42), P(0.6, 0.6))
+
+        angles = arm_elevation_angles(landmarks, INDICES)
+
+        self.assertNotIn("left_shoulder_elevation", angles)
+        self.assertIn("right_shoulder_elevation", angles)
+
+    def test_a_distant_person_keeps_a_smaller_noise_floor(self) -> None:
+        far = [P(0.48, 0.4), P(0.52, 0.4), P(0.48, 0.45), P(0.52, 0.45), P(0.5, 0.5), P(0.5, 0.5)]
+
+        angles = arm_elevation_angles(far, INDICES)
+
+        self.assertAlmostEqual(angles["left_shoulder_elevation"], 0.0)
+
     def test_wide_frames_stretch_the_arm_toward_horizontal(self) -> None:
         landmarks = pose(P(0.3, 0.3), P(0.6, 0.4))
 
