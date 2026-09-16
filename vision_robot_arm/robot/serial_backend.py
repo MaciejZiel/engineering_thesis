@@ -4,16 +4,20 @@ from typing import Any, Callable
 
 from vision_robot_arm.robot.backend import Clock, TargetTracker
 from vision_robot_arm.robot.targets import (
+    ARM_NAMES,
     GRIPPER_CLOSE,
     JOINT_ELBOW,
     JOINT_SHOULDER,
-    ArmState,
+    JOINT_WRIST,
     JointTargets,
+    RobotState,
 )
 
+ARM_CODES = {arm: arm[0].upper() for arm in ARM_NAMES}
 JOINT_CODES = {
     JOINT_SHOULDER: "S",
     JOINT_ELBOW: "E",
+    JOINT_WRIST: "W",
 }
 GRIPPER_CODE = "G"
 LIFT_MODE_CODE = "L"
@@ -23,13 +27,15 @@ Importer = Callable[[str], Any]
 
 
 def encode_targets(targets: JointTargets) -> bytes:
-    fields = [
-        f"{JOINT_CODES[joint]}:{value:.1f}"
-        for joint, value in targets.joints.items()
-        if joint in JOINT_CODES
-    ]
-    if targets.gripper is not None:
-        fields.append(f"{GRIPPER_CODE}:{1 if targets.gripper == GRIPPER_CLOSE else 0}")
+    fields = []
+    for arm, arm_code in ARM_CODES.items():
+        arm_targets = targets.arm(arm)
+        for joint, value in arm_targets.joints.items():
+            if joint in JOINT_CODES:
+                fields.append(f"{arm_code}{JOINT_CODES[joint]}:{value:.1f}")
+        if arm_targets.gripper is not None:
+            closed = 1 if arm_targets.gripper == GRIPPER_CLOSE else 0
+            fields.append(f"{arm_code}{GRIPPER_CODE}:{closed}")
     fields.append(f"{LIFT_MODE_CODE}:{1 if targets.lift_mode else 0}")
     return (";".join(fields) + FRAME_TERMINATOR).encode("ascii")
 
@@ -80,8 +86,8 @@ class SerialBackend:
         self._last_frame = frame
         self._next_send_at = now + self._send_interval
 
-    def arm_state(self) -> ArmState | None:
-        return self._tracker.arm_state()
+    def robot_state(self) -> RobotState | None:
+        return self._tracker.robot_state()
 
     def status_lines(self) -> list[str]:
         last = self._last_frame.decode("ascii").strip() if self._last_frame else "idle"

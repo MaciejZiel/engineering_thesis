@@ -1,25 +1,26 @@
 import time
 
 from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE, AppConfig
-from vision_robot_arm.core.hud import scaled
 from vision_robot_arm.core.pose_state import mirror_landmarks
 from vision_robot_arm.core.runtime import load_runtime_dependencies
 from vision_robot_arm.robot.controller import RobotController
 from vision_robot_arm.robot.factory import create_robot_controller
-from vision_robot_arm.robot.visualization import draw_arm_panel
+from vision_robot_arm.robot.visualization import draw_simulation
 from vision_robot_arm.vision.drawing import (
     draw_joint_angle_labels,
     draw_overlay,
     draw_stick_figure,
 )
+from vision_robot_arm.vision.hand_gestures import detect_hand_gestures
+from vision_robot_arm.vision.hand_tracker import HandTracker
 from vision_robot_arm.vision.landmarks import build_landmark_indices, build_landmark_names
 from vision_robot_arm.vision.output import emit_console_data
 from vision_robot_arm.vision.pose_tracker import PoseTracker
 from vision_robot_arm.vision.recording import CsvPoseRecorder
 from vision_robot_arm.vision.state_builder import PoseStateBuilder
 
-ARM_PANEL_SIZE = 240
-ARM_PANEL_MARGIN = 12
+SIMULATION_WINDOW = "Vision Robot Arm - Robot Simulation"
+SIMULATION_SIZE = (960, 540)
 
 
 def update_mode_from_key(key: int, current_mode: str) -> str:
@@ -41,6 +42,7 @@ def run_app(config: AppConfig) -> int:
     source = str(config.video_path) if config.video_path is not None else config.camera
     capture = cv2.VideoCapture(source)
     tracker: PoseTracker | None = None
+    hand_tracker: HandTracker | None = None
     recorder: CsvPoseRecorder | None = None
     robot_controller: RobotController | None = None
 
@@ -60,6 +62,8 @@ def run_app(config: AppConfig) -> int:
                 )
 
         tracker = PoseTracker(deps, config)
+        if config.hands:
+            hand_tracker = HandTracker(deps, config)
         recorder = CsvPoseRecorder(config.recording_dir)
         robot_controller = create_robot_controller(config.robot)
         state_builder = PoseStateBuilder(
@@ -74,11 +78,16 @@ def run_app(config: AppConfig) -> int:
         wait_delay_ms = _frame_wait_delay_ms(cv2, capture, config)
         mirrored = config.mirror and config.video_path is None
         window_name = "Vision Robot Arm - Pose Tracker"
+        simulation_canvas = None
+        if config.test_mode:
+            simulation_canvas = deps.np.zeros(
+                (SIMULATION_SIZE[1], SIMULATION_SIZE[0], 3), dtype=deps.np.uint8
+            )
 
         print(_source_started_message(config))
         print("Keys: 1 angles, 2 landmarks, 3 both, c calibrate, r record, q/Esc quit.")
         if config.test_mode:
-            print(f"Test mode: joint angle labels and robot arm panel ({config.robot.backend}).")
+            print(f"Test mode: joint angle labels and robot simulation window ({config.robot.backend}).")
 
         while True:
             ok, frame = capture.read()
@@ -105,6 +114,10 @@ def run_app(config: AppConfig) -> int:
             )
             last_timestamp_ms = timestamp_ms
             detection = tracker.detect(rgb_frame, timestamp_ms)
+            hand_gestures: tuple[str, ...] = ()
+            if hand_tracker is not None and detection.landmarks:
+                hands = hand_tracker.detect(rgb_frame, timestamp_ms)
+                hand_gestures = detect_hand_gestures(hands, detection.landmarks, indices)
             if mirrored:
                 frame = cv2.flip(frame, 1)
 
@@ -114,6 +127,7 @@ def run_app(config: AppConfig) -> int:
                     timestamp_ms,
                     detection.landmarks,
                     detection.world_landmarks,
+                    extra_gestures=hand_gestures,
                 )
                 display_landmarks = (
                     mirror_landmarks(current_state.landmarks)
@@ -166,20 +180,10 @@ def run_app(config: AppConfig) -> int:
                 gestures=current_state.gestures if current_state else (),
                 status_lines=() if config.test_mode else tuple(robot_controller.status_lines()),
             )
-            if config.test_mode:
-                arm_state = robot_controller.arm_state()
-                if arm_state is not None:
-                    height, width = frame.shape[:2]
-                    panel_size = scaled(ARM_PANEL_SIZE, frame)
-                    margin = scaled(ARM_PANEL_MARGIN, frame)
-                    draw_arm_panel(
-                        cv2,
-                        frame,
-                        arm_state,
-                        origin=(width - panel_size - margin, height - panel_size - margin),
-                        size=panel_size,
-                    )
             cv2.imshow(window_name, frame)
+            if simulation_canvas is not None:
+                draw_simulation(cv2, simulation_canvas, robot_controller.robot_state())
+                cv2.imshow(SIMULATION_WINDOW, simulation_canvas)
 
             key = cv2.waitKey(wait_delay_ms) & 0xFF
             if key in (ord("q"), 27):
@@ -199,6 +203,8 @@ def run_app(config: AppConfig) -> int:
             recorder.stop()
         if robot_controller is not None:
             robot_controller.close()
+        if hand_tracker is not None:
+            hand_tracker.close()
         if tracker is not None:
             tracker.close()
         capture.release()

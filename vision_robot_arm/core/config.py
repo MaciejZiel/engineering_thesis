@@ -10,7 +10,12 @@ BOTH_MODE = "both"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "models" / "pose_landmarker_lite.task"
+DEFAULT_HAND_MODEL_PATH = PROJECT_ROOT / "models" / "hand_landmarker.task"
 DEFAULT_RECORDING_DIR = PROJECT_ROOT / "recordings"
+HAND_MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
+    "hand_landmarker/float16/1/hand_landmarker.task"
+)
 
 
 @dataclass(frozen=True)
@@ -24,6 +29,8 @@ class AppConfig:
     smoothing_alpha: float = 0.35
     recording_dir: Path = DEFAULT_RECORDING_DIR
     model_path: Path = DEFAULT_MODEL_PATH
+    hand_model_path: Path = DEFAULT_HAND_MODEL_PATH
+    hands: bool = True
     video_path: Path | None = None
     loop_video: bool = False
     robot: RobotConfig = RobotConfig()
@@ -51,4 +58,10 @@ class AppConfig:
             raise SystemExit(
                 f"Pose model not found: {model_path}\n"
                 "Expected the default model at models/pose_landmarker_lite.task."
+            )
+        hand_model_path = self.hand_model_path.resolve()
+        if self.hands and not hand_model_path.exists():
+            raise SystemExit(
+                f"Hand model not found: {hand_model_path}\n"
+                f"Download it from {HAND_MODEL_URL} or run with --no-hands."
             )

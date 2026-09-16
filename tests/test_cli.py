@@ -35,6 +35,9 @@ class CliRobotOptionsTests(unittest.TestCase):
                 "--robot-elbow-range",
                 "10",
                 "170",
+                "--robot-wrist-range",
+                "20",
+                "160",
             ]
         )
 
@@ -43,6 +46,7 @@ class CliRobotOptionsTests(unittest.TestCase):
         self.assertEqual(config.robot.max_speed_deg_s, 45.0)
         self.assertEqual(config.robot.elbow_limit, JointLimit(10.0, 170.0))
         self.assertEqual(config.robot.shoulder_limit, JointLimit(0.0, 180.0))
+        self.assertEqual(config.robot.wrist_limit, JointLimit(20.0, 160.0))
 
     def test_unknown_backend_is_rejected(self) -> None:
         with self.assertRaises(SystemExit):
@@ -59,6 +63,11 @@ class CliRobotOptionsTests(unittest.TestCase):
 
         self.assertTrue(config.test_mode)
         self.assertEqual(config.robot.backend, "sim")
+
+    def test_hand_tracking_is_on_by_default_and_can_be_disabled(self) -> None:
+        self.assertTrue(parse_args([]).hands)
+        self.assertFalse(parse_args(["--no-hands"]).hands)
+        self.assertEqual(parse_args(["--hand-model", "x.task"]).hand_model_path.name, "x.task")
 
     def test_test_mode_keeps_explicit_backend(self) -> None:
         config = parse_args(["--test-mode", "--robot-backend", "debug"])

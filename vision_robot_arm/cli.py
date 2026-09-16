@@ -2,7 +2,12 @@ import argparse
 from pathlib import Path
 
 from vision_robot_arm.app import run_app
-from vision_robot_arm.core.config import DEFAULT_MODEL_PATH, DEFAULT_RECORDING_DIR, AppConfig
+from vision_robot_arm.core.config import (
+    DEFAULT_HAND_MODEL_PATH,
+    DEFAULT_MODEL_PATH,
+    DEFAULT_RECORDING_DIR,
+    AppConfig,
+)
 from vision_robot_arm.robot.config import (
     BACKEND_CHOICES,
     BACKEND_DEBUG,
@@ -81,6 +86,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_MODEL_PATH,
         help=f"Path to a MediaPipe Pose Landmarker .task model. Default: {DEFAULT_MODEL_PATH}",
+    )
+    parser.add_argument(
+        "--hand-model",
+        type=Path,
+        default=DEFAULT_HAND_MODEL_PATH,
+        help=f"Path to a MediaPipe Hand Landmarker .task model. Default: {DEFAULT_HAND_MODEL_PATH}",
+    )
+    parser.add_argument(
+        "--no-hands",
+        dest="hands",
+        action="store_false",
+        help="Disable hand tracking (open hand / fist gestures for the gripper).",
     )
     parser.add_argument(
         "--num-poses",
@@ -188,6 +205,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar=("MIN", "MAX"),
         help="Allowed elbow joint range in degrees. Default: 0 180.",
     )
+    robot.add_argument(
+        "--robot-wrist-range",
+        type=float,
+        nargs=2,
+        default=(0.0, 180.0),
+        metavar=("MIN", "MAX"),
+        help="Allowed wrist joint range in degrees. Default: 0 180.",
+    )
     return parser
 
 
@@ -211,6 +236,7 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         joint_deadband_deg=args.robot_deadband,
         shoulder_limit=JointLimit(*args.robot_shoulder_range),
         elbow_limit=JointLimit(*args.robot_elbow_range),
+        wrist_limit=JointLimit(*args.robot_wrist_range),
     )
     return AppConfig(
         camera=args.camera,
@@ -226,6 +252,8 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         smoothing_alpha=args.smoothing_alpha,
         recording_dir=args.recording_dir,
         model_path=args.model,
+        hand_model_path=args.hand_model,
+        hands=args.hands,
         num_poses=args.num_poses,
         min_detection_confidence=args.min_detection_confidence,
         min_pose_presence_confidence=args.min_pose_presence_confidence,

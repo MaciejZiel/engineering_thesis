@@ -12,6 +12,8 @@ ANGLE_DEFINITIONS: AngleDefinitions = {
     "right_elbow": ("RIGHT_SHOULDER", "RIGHT_ELBOW", "RIGHT_WRIST"),
     "left_shoulder": ("LEFT_ELBOW", "LEFT_SHOULDER", "LEFT_HIP"),
     "right_shoulder": ("RIGHT_ELBOW", "RIGHT_SHOULDER", "RIGHT_HIP"),
+    "left_wrist": ("LEFT_ELBOW", "LEFT_WRIST", "LEFT_INDEX"),
+    "right_wrist": ("RIGHT_ELBOW", "RIGHT_WRIST", "RIGHT_INDEX"),
     "left_hip": ("LEFT_SHOULDER", "LEFT_HIP", "LEFT_KNEE"),
     "right_hip": ("RIGHT_SHOULDER", "RIGHT_HIP", "RIGHT_KNEE"),
     "left_knee": ("LEFT_HIP", "LEFT_KNEE", "LEFT_ANKLE"),

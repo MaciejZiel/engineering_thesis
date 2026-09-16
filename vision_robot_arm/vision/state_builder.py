@@ -30,6 +30,7 @@ class PoseStateBuilder:
         timestamp_ms: int,
         landmarks: list[Any],
         world_landmarks: list[Any] | None,
+        extra_gestures: tuple[str, ...] = (),
     ) -> PoseState:
         raw_landmarks = [LandmarkPoint.from_landmark(landmark) for landmark in landmarks]
         smoothed_landmarks = self._landmark_smoother.update(raw_landmarks)
@@ -62,7 +63,7 @@ class PoseStateBuilder:
             smoothed_angles,
             self._indices,
             self._min_visibility,
-        )
+        ) + tuple(extra_gestures)
 
         return PoseState(
             timestamp_ms=timestamp_ms,

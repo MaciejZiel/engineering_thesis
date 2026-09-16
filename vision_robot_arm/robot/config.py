@@ -28,6 +28,7 @@ class RobotConfig:
     joint_deadband_deg: float = 1.5
     shoulder_limit: JointLimit = JointLimit()
     elbow_limit: JointLimit = JointLimit()
+    wrist_limit: JointLimit = JointLimit()
 
     @property
     def enabled(self) -> bool:
@@ -38,6 +39,8 @@ class RobotConfig:
             return self.shoulder_limit
         if joint == "elbow":
             return self.elbow_limit
+        if joint == "wrist":
+            return self.wrist_limit
         return JointLimit()
 
     def validate(self) -> None:
@@ -56,6 +59,11 @@ class RobotConfig:
             raise SystemExit("--robot-deadband must be 0 or greater")
         if self.backend == BACKEND_SERIAL and not self.port:
             raise SystemExit("--robot-port is required with --robot-backend serial")
-        for name, limit in (("shoulder", self.shoulder_limit), ("elbow", self.elbow_limit)):
+        limits = (
+            ("shoulder", self.shoulder_limit),
+            ("elbow", self.elbow_limit),
+            ("wrist", self.wrist_limit),
+        )
+        for name, limit in limits:
             if limit.minimum >= limit.maximum:
                 raise SystemExit(f"{name} joint limit minimum must be below its maximum")

@@ -7,7 +7,7 @@ from vision_robot_arm.robot.backend import DebugBackend
 from vision_robot_arm.robot.config import RobotConfig
 from vision_robot_arm.robot.controller import MappedRobotController, NullRobotController
 from vision_robot_arm.robot.factory import create_robot_controller
-from vision_robot_arm.robot.targets import JointTargets
+from vision_robot_arm.robot.targets import ArmTargets, JointTargets
 
 
 def make_state(angles: dict[str, float | None], gestures: tuple[str, ...] = ()) -> PoseState:
@@ -37,41 +37,45 @@ class FactoryTests(unittest.TestCase):
 
         self.assertIsInstance(controller, NullRobotController)
         self.assertEqual(controller.status_lines(), [])
+        self.assertIsNone(controller.robot_state())
 
     def test_debug_backend_creates_mapped_controller(self) -> None:
         controller = create_robot_controller(RobotConfig(backend="debug"))
 
         self.assertIsInstance(controller, MappedRobotController)
 
-    def test_sim_backend_reports_simulated_state_on_overlay(self) -> None:
-        controller = create_robot_controller(RobotConfig(backend="sim"))
-
-        controller.update(make_state({"right_shoulder": 45.0}))
-
-        self.assertTrue(controller.status_lines()[0].startswith("sim shoulder="))
-
     def test_mapped_controller_prints_commands_through_debug_backend(self) -> None:
         controller = create_robot_controller(RobotConfig(backend="debug"))
         output = io.StringIO()
 
         with contextlib.redirect_stdout(output):
-            controller.update(make_state({"right_shoulder": 45.0}, ("right_elbow_bent",)))
+            controller.update(make_state({"right_shoulder": 45.0}, ("right_fist",)))
 
         self.assertEqual(
             output.getvalue().strip(),
-            "robot shoulder= 45.0 | gripper=close | lift_mode=off",
+            "robot R: shoulder= 45.0 gripper=close | lift_mode=off",
         )
         self.assertEqual(
             controller.status_lines(),
-            ["robot debug: shoulder= 45.0 | gripper=close | lift_mode=off"],
+            ["robot debug: R: shoulder= 45.0 gripper=close | lift_mode=off"],
         )
+
+    def test_sim_backend_reports_two_arms(self) -> None:
+        controller = create_robot_controller(RobotConfig(backend="sim"))
+
+        controller.update(make_state({"right_shoulder": 45.0, "left_wrist": 120.0}))
+
+        state = controller.robot_state()
+        self.assertEqual(state.arm("right").targets["shoulder"], 45.0)
+        self.assertEqual(state.arm("left").targets["wrist"], 120.0)
+        self.assertTrue(controller.status_lines()[0].startswith("sim R:"))
 
 
 class DebugBackendTests(unittest.TestCase):
     def test_prints_are_rate_limited(self) -> None:
         clock = FakeClock()
         backend = DebugBackend(print_interval=1.0, clock=clock)
-        targets = JointTargets(timestamp_ms=1, joints={"elbow": 90.0})
+        targets = JointTargets(timestamp_ms=1, arms={"right": ArmTargets(joints={"elbow": 90.0})})
         output = io.StringIO()
 
         with contextlib.redirect_stdout(output):

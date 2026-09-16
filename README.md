@@ -96,10 +96,11 @@ For stronger smoothing, lower the alpha value:
 python main.py --smoothing-alpha 0.2
 ```
 
-The default pose model is stored at:
+The default models are stored at:
 
 ```text
 models/pose_landmarker_lite.task
+models/hand_landmarker.task
 ```
 
 You can use another MediaPipe Pose Landmarker model with:
@@ -107,6 +108,10 @@ You can use another MediaPipe Pose Landmarker model with:
 ```powershell
 python main.py --model path\to\pose_landmarker.task
 ```
+
+Hand tracking (open hand / fist for the gripper) uses the MediaPipe Hand
+Landmarker. Point `--hand-model` at another `.task` file or disable it with
+`--no-hands` on slow machines.
 
 ## Project Structure
 
@@ -127,7 +132,9 @@ vision_robot_arm/
   vision/                  # camera, pose detection, gestures, drawing
     calibration.py         # neutral pose calibration
     drawing.py             # custom stick figure and overlay
-    gestures.py            # simple rule-based gesture detection
+    gestures.py            # simple rule-based body gesture detection
+    hand_gestures.py       # open hand / fist detection and left-right matching
+    hand_tracker.py        # MediaPipe Hand Landmarker wrapper
     landmarks.py           # landmark lookup and visibility checks
     metrics.py             # joint angle calculations
     output.py              # console printing modes
@@ -142,10 +149,11 @@ vision_robot_arm/
     factory.py             # backend selection from --robot-backend
     mapping.py             # PoseState -> JointTargets
     serial_backend.py      # serial line protocol and pyserial backend
-    simulation.py          # simulated arm backend
-    targets.py             # JointTargets and ArmState value objects
-    visualization.py       # robot arm panel drawn in test mode
+    simulation.py          # simulated two-arm robot backend
+    targets.py             # JointTargets, ArmState and RobotState value objects
+    visualization.py       # robot simulation window drawn in test mode
 models/
+  hand_landmarker.task
   pose_landmarker_lite.task
 tests/
   test_cli.py
@@ -156,6 +164,7 @@ tests/
   test_robot_simulation.py
   test_robot_visualization.py
   test_vision_drawing.py
+  test_vision_hand_gestures.py
   test_vision_metrics.py
   test_vision_smoothing.py
 ```
@@ -167,12 +176,15 @@ rules, and `docs/OWNERSHIP.md` for who owns which area and how we commit.
 ## Test Mode
 
 Test mode is the quickest way to see what the robot side receives. It draws
-the current shoulder and elbow angles next to the joints on the camera image,
-prints the robot state to the console, and shows a panel in the bottom-right
-corner with a schematic two-link arm: the grey arm is the mapped target, the
-green arm is where the (simulated) robot currently is, the blue jaws show the
-gripper. The top-left panel shows detection, robot backend, calibration and
-recording state plus detected gestures; the key hints sit at the bottom.
+the current shoulder, elbow and wrist angles next to the joints on the camera
+image, prints the robot state to the console, and opens a second window,
+"Robot Simulation", with two schematic three-link arms. The left panel is
+the robot arm driven by your left arm, the right panel by your right arm
+(mirrored like the camera view). The grey arm is the mapped target, the green
+arm is where the simulated robot currently is, the blue jaws show the gripper.
+The top-left panel of the camera window shows detection, robot backend,
+calibration and recording state plus detected gestures; the key hints sit at
+the bottom.
 
 ```powershell
 python main.py --test-mode
@@ -236,17 +248,28 @@ The first gesture layer is rule-based and prints/records:
 - `left_arm_side`, `right_arm_side`
 - `left_elbow_bent`, `right_elbow_bent`
 
+The second layer uses the MediaPipe Hand Landmarker. Each detected hand is
+matched to the nearest pose wrist, so the names always refer to your own
+left or right hand. A hand counts as open when at least three fingers are
+extended (fingertip farther from the wrist than the middle knuckle) and as a
+fist when none are:
+
+- `left_hand_open`, `right_hand_open`
+- `left_fist`, `right_fist`
+
 ## Robot Backends
 
-The robot side turns every `PoseState` into `JointTargets` (named joint angles
-in degrees, a gripper command and a lift-mode flag) and hands them to a backend
-selected with `--robot-backend`:
+The robot side turns every `PoseState` into `JointTargets`: for each of the
+two robot arms (`right`, `left`) the shoulder, elbow and wrist angles in
+degrees plus a gripper command, and one lift-mode flag. Your right arm drives
+the right robot arm and your left arm the left one. The targets go to a
+backend selected with `--robot-backend`:
 
 | Backend  | What it does                                                    |
 | -------- | --------------------------------------------------------------- |
 | `none`   | default, robot side disabled                                    |
 | `debug`  | prints the mapped targets to the console                        |
-| `sim`    | simulated arm with speed limit, state shown on the overlay      |
+| `sim`    | two simulated arms with speed limit, shown in the test window   |
 | `serial` | sends targets to hardware over a serial port (pyserial)         |
 
 ```powershell
@@ -255,10 +278,10 @@ python main.py --robot-backend debug
 
 `--robot-debug` still works as a deprecated alias for `--robot-backend debug`.
 
-The simulated arm starts at `--robot-home` degrees (default `90`) and moves
+Each simulated arm starts at `--robot-home` degrees (default `90`) and moves
 toward the mapped targets at most `--robot-max-speed` degrees per second
-(default `90`). Its current and target angles are drawn on the camera overlay,
-so you can test the mapping without hardware:
+(default `90`). With `--test-mode` the current and target angles are drawn in
+the simulation window, so you can test the mapping without hardware:
 
 ```powershell
 python main.py --robot-backend sim --robot-max-speed 60
@@ -277,29 +300,34 @@ Each frame is one ASCII line, at most every `--robot-send-interval` seconds
 (default `0.05`):
 
 ```text
-S:90.0;E:45.0;G:1;L:0
+RS:90.0;RE:45.0;RW:120.0;RG:1;LS:30.0;LE:170.0;LW:90.0;LG:0;L:0
 ```
+
+Every field except `L` starts with the arm, `R` (right) or `L` (left):
 
 | Field | Meaning                                       |
 | ----- | --------------------------------------------- |
-| `S`   | shoulder angle in degrees                     |
-| `E`   | elbow angle in degrees                        |
-| `G`   | gripper, `1` close / `0` open, omitted = hold  |
+| `?S`  | shoulder angle in degrees                     |
+| `?E`  | elbow angle in degrees                        |
+| `?W`  | wrist angle in degrees                        |
+| `?G`  | gripper, `1` close / `0` open, omitted = hold  |
 | `L`   | lift mode, `1` on / `0` off                    |
 
 Joints without a reliable angle in the current frame are omitted. The wire
 format lives in `encode_targets` in `vision_robot_arm/robot/serial_backend.py`
 and is expected to change once the hardware is chosen.
 
-Current mapping (`vision_robot_arm/robot/mapping.py`):
+Current mapping (`vision_robot_arm/robot/mapping.py`), applied to each arm:
 
-- right shoulder angle -> `shoulder`
-- right elbow angle -> `elbow`
+- shoulder angle (elbow-shoulder-hip) -> `shoulder`
+- elbow angle (shoulder-elbow-wrist) -> `elbow`
+- wrist angle (elbow-wrist-index finger) -> `wrist`
+- `<side>_fist` -> `gripper=close`
+- `<side>_hand_open` -> `gripper=open`
 - `right_hand_up` -> `lift_mode=on`
-- `right_elbow_bent` -> `gripper=close`
-- `right_arm_side` -> `gripper=open`
 
-Joint angles are clamped to `--robot-shoulder-range` / `--robot-elbow-range`
+Joint angles are clamped to `--robot-shoulder-range`, `--robot-elbow-range`
+and `--robot-wrist-range`
 (default `0 180`) and changes smaller than `--robot-deadband` degrees (default
 `1.5`) are ignored to suppress jitter. When neither gripper gesture is active
 the gripper keeps its previous state.

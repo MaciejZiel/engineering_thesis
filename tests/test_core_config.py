@@ -19,6 +19,13 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             config.validate()
 
+    def test_missing_hand_model_is_only_an_error_when_hands_enabled(self) -> None:
+        missing = Path("no_such_hand_model.task")
+
+        AppConfig(hand_model_path=missing, hands=False).validate()
+        with self.assertRaises(SystemExit):
+            AppConfig(hand_model_path=missing, hands=True).validate()
+
     def test_default_model_path_points_into_models_directory(self) -> None:
         self.assertEqual(DEFAULT_MODEL_PATH.parent.name, "models")
         self.assertTrue(DEFAULT_MODEL_PATH.exists())

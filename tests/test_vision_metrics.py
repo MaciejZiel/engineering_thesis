@@ -7,7 +7,7 @@ import unittest
 from vision_robot_arm.core.pose_state import LandmarkPoint, PoseState
 from vision_robot_arm.vision.calibration import PoseCalibration
 from vision_robot_arm.vision.gestures import detect_gestures
-from vision_robot_arm.vision.metrics import calculate_angle, calculate_angles
+from vision_robot_arm.vision.metrics import ANGLE_DEFINITIONS, calculate_angle, calculate_angles
 from vision_robot_arm.vision.recording import CsvPoseRecorder
 from vision_robot_arm.vision.smoothing import LowPassValueFilter
 
@@ -50,6 +50,12 @@ class MetricsTests(unittest.TestCase):
         )
 
         self.assertIsNone(angles["left_elbow"])
+
+
+class AngleDefinitionTests(unittest.TestCase):
+    def test_wrist_angles_use_elbow_wrist_and_index(self) -> None:
+        self.assertEqual(ANGLE_DEFINITIONS["right_wrist"], ("RIGHT_ELBOW", "RIGHT_WRIST", "RIGHT_INDEX"))
+        self.assertEqual(ANGLE_DEFINITIONS["left_wrist"], ("LEFT_ELBOW", "LEFT_WRIST", "LEFT_INDEX"))
 
 
 class SmoothingTests(unittest.TestCase):

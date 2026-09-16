@@ -81,8 +81,8 @@ PoseState -> RobotMapper -> JointTargets -> RobotBackend
   the previous state) and a lift-mode flag.
 - `RobotBackend` (`robot/backend.py`) is the transport protocol:
   `send(targets)`, `status_lines()` for the overlay and `close()`. Backends:
-  `DebugBackend` prints, `SimulationBackend` (`robot/simulation.py`) keeps an
-  in-memory arm that moves toward the targets with a speed limit,
+  `DebugBackend` prints, `SimulationBackend` (`robot/simulation.py`) keeps two
+  in-memory arms that move toward the targets with a speed limit,
   `SerialBackend` (`robot/serial_backend.py`) writes one ASCII line per frame
   over pyserial. pyserial is an optional dependency loaded the same way as
   OpenCV and MediaPipe: missing module means a `SystemExit` with an install
@@ -90,10 +90,18 @@ PoseState -> RobotMapper -> JointTargets -> RobotBackend
 - The overlay hook: `draw_overlay(..., status_lines=...)` in
   `vision/drawing.py` appends whatever the active backend reports, so the
   robot side can show state on screen without touching drawing code.
-- Every backend also exposes `arm_state() -> ArmState | None` (current and
-  target joint angles, gripper, lift mode). `robot/visualization.py` draws it
-  as a two-link arm panel when `--test-mode` is on; `vision/drawing.py`
-  labels the body joints with their angles in the same mode.
+- Every backend also exposes `robot_state() -> RobotState | None`: per arm
+  (`right`, `left`) the current and target shoulder/elbow/wrist angles and
+  the gripper, plus the lift-mode flag. `robot/visualization.py` renders it
+  into the separate simulation window (two three-link arms) when
+  `--test-mode` is on; `vision/drawing.py` labels the body joints with their
+  angles in the same mode.
+- Hand gestures: `vision/hand_tracker.py` wraps the MediaPipe Hand
+  Landmarker, `vision/hand_gestures.py` matches each hand to the nearest pose
+  wrist and classifies it as open or fist. The names (`right_fist`,
+  `left_hand_open`, ...) are merged into `PoseState.gestures` by
+  `PoseStateBuilder.build(extra_gestures=...)`, so the robot side sees them
+  like any other gesture.
 - `MappedRobotController` (`robot/controller.py`) glues a mapper to a backend
   and is what `app.py` talks to through the `RobotController` protocol.
 - `create_robot_controller(RobotConfig)` (`robot/factory.py`) chooses the

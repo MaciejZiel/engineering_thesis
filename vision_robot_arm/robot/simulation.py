@@ -3,36 +3,66 @@ import time
 
 from vision_robot_arm.robot.backend import Clock
 from vision_robot_arm.robot.config import RobotConfig
-from vision_robot_arm.robot.targets import GRIPPER_OPEN, JOINT_NAMES, ArmState, JointTargets
+from vision_robot_arm.robot.targets import (
+    ARM_NAMES,
+    GRIPPER_OPEN,
+    JOINT_NAMES,
+    ArmState,
+    JointTargets,
+    RobotState,
+)
+
+
+class SimulatedArm:
+    def __init__(self, config: RobotConfig) -> None:
+        self._config = config
+        self.joints = {
+            name: config.limit_for(name).clamp(config.home_deg) for name in JOINT_NAMES
+        }
+        self.targets = dict(self.joints)
+        self.gripper = GRIPPER_OPEN
+
+    def set_targets(self, joints: dict[str, float], gripper: str | None) -> None:
+        for joint, value in joints.items():
+            if joint in self.targets:
+                self.targets[joint] = self._config.limit_for(joint).clamp(value)
+        if gripper is not None:
+            self.gripper = gripper
+
+    def step(self, max_delta: float) -> None:
+        for joint, target in self.targets.items():
+            current = self.joints[joint]
+            delta = target - current
+            if abs(delta) <= max_delta:
+                self.joints[joint] = target
+            else:
+                self.joints[joint] = current + math.copysign(max_delta, delta)
+
+    @property
+    def state(self) -> ArmState:
+        return ArmState(joints=dict(self.joints), targets=dict(self.targets), gripper=self.gripper)
 
 
 class SimulationBackend:
     def __init__(self, config: RobotConfig, clock: Clock = time.monotonic) -> None:
         self._config = config
         self._clock = clock
-        self._joints = {
-            name: config.limit_for(name).clamp(config.home_deg) for name in JOINT_NAMES
-        }
-        self._targets = dict(self._joints)
-        self._gripper = GRIPPER_OPEN
+        self._arms = {name: SimulatedArm(config) for name in ARM_NAMES}
         self._lift_mode = False
         self._last_time: float | None = None
 
     @property
-    def state(self) -> ArmState:
-        return ArmState(
-            joints=dict(self._joints),
-            targets=dict(self._targets),
-            gripper=self._gripper,
+    def state(self) -> RobotState:
+        return RobotState(
+            arms={name: arm.state for name, arm in self._arms.items()},
             lift_mode=self._lift_mode,
         )
 
     def send(self, targets: JointTargets) -> None:
-        for joint, value in targets.joints.items():
-            if joint in self._targets:
-                self._targets[joint] = self._config.limit_for(joint).clamp(value)
-        if targets.gripper is not None:
-            self._gripper = targets.gripper
+        for name, arm_targets in targets.arms.items():
+            arm = self._arms.get(name)
+            if arm is not None:
+                arm.set_targets(arm_targets.joints, arm_targets.gripper)
         self._lift_mode = targets.lift_mode
 
         now = self._clock()
@@ -40,27 +70,24 @@ class SimulationBackend:
         self._last_time = now
         self.step(dt)
 
-    def step(self, dt: float) -> ArmState:
+    def step(self, dt: float) -> RobotState:
         max_delta = self._config.max_speed_deg_s * max(dt, 0.0)
-        for joint, target in self._targets.items():
-            current = self._joints[joint]
-            delta = target - current
-            if abs(delta) <= max_delta:
-                self._joints[joint] = target
-            else:
-                self._joints[joint] = current + math.copysign(max_delta, delta)
+        for arm in self._arms.values():
+            arm.step(max_delta)
         return self.state
 
-    def arm_state(self) -> ArmState:
+    def robot_state(self) -> RobotState:
         return self.state
 
     def status_lines(self) -> list[str]:
-        lines = [
-            f"sim {joint}={self._joints[joint]:5.1f} -> {self._targets[joint]:5.1f}"
-            for joint in JOINT_NAMES
-        ]
-        lift = "on" if self._lift_mode else "off"
-        lines.append(f"sim gripper={self._gripper} | lift_mode={lift}")
+        lines = []
+        for name, arm in self._arms.items():
+            joints = " ".join(
+                f"{joint[0].upper()} {arm.joints[joint]:5.1f}->{arm.targets[joint]:5.1f}"
+                for joint in JOINT_NAMES
+            )
+            lines.append(f"sim {name[0].upper()}: {joints} grip {arm.gripper}")
+        lines.append(f"sim lift_mode={'on' if self._lift_mode else 'off'}")
         return lines
 
     def close(self) -> None:

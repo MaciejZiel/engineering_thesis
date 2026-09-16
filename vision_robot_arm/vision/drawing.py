@@ -8,7 +8,14 @@ from vision_robot_arm.vision.metrics import ANGLE_DEFINITIONS
 Point = tuple[int, int]
 Color = tuple[int, int, int]
 
-ARM_JOINT_LABELS = ("left_shoulder", "right_shoulder", "left_elbow", "right_elbow")
+ARM_JOINT_LABELS = (
+    "left_shoulder",
+    "right_shoulder",
+    "left_elbow",
+    "right_elbow",
+    "left_wrist",
+    "right_wrist",
+)
 JOINT_LABEL_COLOR: Color = (0, 230, 255)
 HUD_MARGIN = 12
 HINT_SCALE = 0.42

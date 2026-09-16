@@ -5,7 +5,12 @@ from vision_robot_arm.robot.serial_backend import (
     encode_targets,
     load_serial_module,
 )
-from vision_robot_arm.robot.targets import GRIPPER_CLOSE, GRIPPER_OPEN, JointTargets
+from vision_robot_arm.robot.targets import (
+    GRIPPER_CLOSE,
+    GRIPPER_OPEN,
+    ArmTargets,
+    JointTargets,
+)
 
 
 class FakeClock:
@@ -47,31 +52,43 @@ class FailingSerialModule:
         raise OSError("device not found")
 
 
+def right(joints: dict[str, float] | None = None, gripper: str | None = None) -> JointTargets:
+    return JointTargets(timestamp_ms=1, arms={"right": ArmTargets(joints=joints or {}, gripper=gripper)})
+
+
 class EncodeTargetsTests(unittest.TestCase):
-    def test_encodes_joints_gripper_and_lift_mode(self) -> None:
+    def test_encodes_both_arms_grippers_and_lift_mode(self) -> None:
         targets = JointTargets(
             timestamp_ms=1,
-            joints={"shoulder": 90.0, "elbow": 45.0},
-            gripper=GRIPPER_CLOSE,
+            arms={
+                "right": ArmTargets(
+                    joints={"shoulder": 90.0, "elbow": 45.0, "wrist": 120.0},
+                    gripper=GRIPPER_CLOSE,
+                ),
+                "left": ArmTargets(joints={"shoulder": 30.0}, gripper=GRIPPER_OPEN),
+            },
             lift_mode=False,
         )
 
-        self.assertEqual(encode_targets(targets), b"S:90.0;E:45.0;G:1;L:0\n")
+        self.assertEqual(
+            encode_targets(targets),
+            b"RS:90.0;RE:45.0;RW:120.0;RG:1;LS:30.0;LG:0;L:0\n",
+        )
 
     def test_omits_gripper_when_not_commanded(self) -> None:
-        targets = JointTargets(timestamp_ms=1, joints={"elbow": 10.0}, lift_mode=True)
+        targets = JointTargets(
+            timestamp_ms=1,
+            arms={"left": ArmTargets(joints={"elbow": 10.0})},
+            lift_mode=True,
+        )
 
-        self.assertEqual(encode_targets(targets), b"E:10.0;L:1\n")
-
-    def test_open_gripper_is_zero(self) -> None:
-        targets = JointTargets(timestamp_ms=1, gripper=GRIPPER_OPEN)
-
-        self.assertEqual(encode_targets(targets), b"G:0;L:0\n")
+        self.assertEqual(encode_targets(targets), b"LE:10.0;L:1\n")
 
     def test_unknown_joints_are_skipped(self) -> None:
-        targets = JointTargets(timestamp_ms=1, joints={"wrist": 10.0, "shoulder": 1.0})
+        self.assertEqual(encode_targets(right({"finger": 10.0, "shoulder": 1.0})), b"RS:1.0;L:0\n")
 
-        self.assertEqual(encode_targets(targets), b"S:1.0;L:0\n")
+    def test_empty_targets_still_carry_lift_mode(self) -> None:
+        self.assertEqual(encode_targets(JointTargets(timestamp_ms=1)), b"L:0\n")
 
 
 class LoadSerialModuleTests(unittest.TestCase):
@@ -103,7 +120,7 @@ class SerialBackendTests(unittest.TestCase):
         module = FakeSerialModule()
         clock = FakeClock()
         backend = SerialBackend("COM3", 9600, 1.0, serial_module=module, clock=clock)
-        targets = JointTargets(timestamp_ms=1, joints={"shoulder": 90.0})
+        targets = right({"shoulder": 90.0})
 
         backend.send(targets)
         clock.now = 0.5
@@ -111,7 +128,7 @@ class SerialBackendTests(unittest.TestCase):
         clock.now = 1.0
         backend.send(targets)
 
-        self.assertEqual(module.ports[0].written, [b"S:90.0;L:0\n", b"S:90.0;L:0\n"])
+        self.assertEqual(module.ports[0].written, [b"RS:90.0;L:0\n", b"RS:90.0;L:0\n"])
 
     def test_empty_targets_are_not_sent(self) -> None:
         module = FakeSerialModule()
@@ -121,15 +138,18 @@ class SerialBackendTests(unittest.TestCase):
 
         self.assertEqual(module.ports[0].written, [])
 
-    def test_status_lines_show_last_frame(self) -> None:
+    def test_status_and_robot_state_follow_last_frame(self) -> None:
         module = FakeSerialModule()
         backend = SerialBackend("COM3", 9600, 0.05, serial_module=module, clock=FakeClock())
 
         self.assertEqual(backend.status_lines(), ["serial COM3 @ 9600: idle"])
+        self.assertIsNone(backend.robot_state())
 
-        backend.send(JointTargets(timestamp_ms=1, joints={"elbow": 45.0}))
+        backend.send(right({"elbow": 45.0}, gripper=GRIPPER_CLOSE))
 
-        self.assertEqual(backend.status_lines(), ["serial COM3 @ 9600: E:45.0;L:0"])
+        self.assertEqual(backend.status_lines(), ["serial COM3 @ 9600: RE:45.0;RG:1;L:0"])
+        self.assertEqual(backend.robot_state().arm("right").joints, {"elbow": 45.0})
+        self.assertEqual(backend.robot_state().arm("right").gripper, GRIPPER_CLOSE)
 
     def test_close_closes_port(self) -> None:
         module = FakeSerialModule()
