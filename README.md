@@ -208,6 +208,8 @@ vision_robot_arm/
     factory.py             # backend selection from --robot-backend
     mapping.py             # PoseState -> JointTargets
     serial_backend.py      # generic serial line protocol (pyserial)
+    ur_dashboard.py        # dashboard readiness check (port 29999)
+    ur_rtde.py             # RTDE feedback client (port 30004)
     simulation.py          # two simulated UR7e arms
     targets.py             # UR joint names, JointTargets, ArmState, RobotState
     ur_backend.py          # URScript servoj over TCP to the UR7e controllers
@@ -223,6 +225,8 @@ tests/
   test_robot_serial.py
   test_robot_simulation.py
   test_robot_ur.py
+  test_robot_ur_dashboard.py
+  test_robot_ur_rtde.py
   test_robot_visualization.py
   test_vision_drawing.py
   test_vision_hand_gestures.py
@@ -341,7 +345,7 @@ arm the left one. The targets go to a backend selected with
 | `none`   | default, robot side disabled                                    |
 | `debug`  | prints the mapped targets to the console                        |
 | `sim`    | two simulated UR7e arms with speed limit, shown in the test window |
-| `ur`     | real UR7e cobots: URScript `servoj` over TCP (ports 30001/30002) |
+| `ur`     | real UR7e cobots: ramped `servoj` over TCP plus RTDE feedback   |
 | `serial` | generic serial line protocol for a microcontroller (pyserial)   |
 
 ```powershell
@@ -361,16 +365,25 @@ python main.py --robot-backend sim --robot-max-speed 60
 
 ### UR7e over URScript
 
-Put each cobot in **Remote Control** mode on the teach pendant, give the
-PC a route to the controllers, then:
+Put each cobot in **Remote Control** mode on the teach pendant, give the PC a
+route to the controllers, then:
 
 ```powershell
 python main.py --robot-backend ur --robot-right-host 192.168.1.10 --robot-left-host 192.168.1.11
 ```
 
-The backend opens one TCP connection per cobot to the URScript secondary
-interface (`--robot-ur-port`, default `30002`; `30001` is the primary
-interface) and streams one line every `--robot-send-interval` seconds:
+What happens on start-up, in order:
+
+1. **Readiness check** on the dashboard server (`--robot-dashboard-port`,
+   default `29999`). Local control, a robot mode other than `RUNNING` or a
+   safety stop end the run with a message naming the problem instead of a
+   silently motionless arm. Skip it with `--no-robot-preflight`; an
+   unreachable dashboard is not treated as an error.
+2. **Homing**: one `movej` to the UR home pose `[0, -90, 0, -90, 0, 0]` at
+   `--robot-start-speed` (default `30` deg/s) and `--robot-start-accel`
+   (default `60` deg/s²). No `servoj` is sent for `--robot-start-seconds`
+   (default `2`), so the arm starts from a known pose.
+3. **Streaming**: one line per cobot every `--robot-send-interval` seconds:
 
 ```text
 servoj([0.0000, -0.7854, 1.5708, -1.5708, 0.0000, 0.0000], 0, 0, 0.050, 0.100, 300)
@@ -380,11 +393,29 @@ The six values are the joint angles in radians in UR order (base, shoulder,
 elbow, wrist 1, wrist 2, wrist 3). The remaining parameters are `a` and `v`
 (ignored by `servoj`), `t` (`--robot-send-interval`), `lookahead_time`
 (`--robot-servo-lookahead`, default `0.1`) and `gain` (`--robot-servo-gain`,
-default `300`). The gripper is driven through tool digital output 0
-(`set_tool_digital_out(0, True)` = close); swap `encode_gripper` in
-`vision_robot_arm/robot/ur_backend.py` for the URCap call of the gripper the
-lab mounts (for example Robotiq). Start with a low `--robot-max-speed` and
-narrow joint ranges when testing on the real cobots.
+default `300`).
+
+**The streamed pose is a ramped setpoint, not the raw mapped angle.** Each arm
+runs the same motion model as the simulator, so the commanded pose moves toward
+your arm at most `--robot-max-speed` degrees per second (default `60`, UR7e
+limit `180`). A tracking glitch therefore cannot ask the controller for a jump
+of tens of degrees.
+
+**Feedback**: the backend opens an RTDE connection (`--robot-rtde-port`,
+default `30004`) and reads `actual_q`, `robot_mode` and `safety_status`. The
+arm preview and the status lines then show where the robot actually is, with
+its mode and safety status; the grey ghost stays the commanded target. Use
+`--no-robot-feedback` to run open-loop, which falls back to displaying the
+setpoints.
+
+**Shutdown** sends `stopj`, so closing the window decelerates the arms instead
+of leaving the last `servoj` running.
+
+The gripper is driven through a tool digital output
+(`--robot-tool-output`, default `0`; `set_tool_digital_out(0, True)` = close).
+Swap `encode_gripper` in `vision_robot_arm/robot/ur_backend.py` for the URCap
+call of the gripper the lab mounts (for example Robotiq). Start with a low
+`--robot-max-speed` and narrow joint ranges when testing on the real cobots.
 
 Body angle to UR joint mapping (`vision_robot_arm/robot/config.py`,
 `JointMapping`):

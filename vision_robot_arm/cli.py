@@ -17,6 +17,8 @@ from vision_robot_arm.robot.config import (
     DEFAULT_SHOULDER_MAPPING,
     DEFAULT_WRIST_MAPPING,
     UR7E_MAX_JOINT_SPEED_DEG_S,
+    UR_DASHBOARD_PORT,
+    UR_RTDE_PORT,
     UR_SECONDARY_PORT,
     JointLimit,
     JointMapping,
@@ -178,6 +180,54 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"URScript TCP port on the UR controller (30001 primary, 30002 secondary). Default: {UR_SECONDARY_PORT}.",
     )
     robot.add_argument(
+        "--robot-rtde-port",
+        type=int,
+        default=UR_RTDE_PORT,
+        help=f"RTDE feedback port on the UR controller. Default: {UR_RTDE_PORT}.",
+    )
+    robot.add_argument(
+        "--robot-dashboard-port",
+        type=int,
+        default=UR_DASHBOARD_PORT,
+        help=f"Dashboard server port used for the readiness check. Default: {UR_DASHBOARD_PORT}.",
+    )
+    robot.add_argument(
+        "--no-robot-feedback",
+        dest="robot_feedback",
+        action="store_false",
+        help="Do not read actual joint angles over RTDE; show commanded setpoints instead.",
+    )
+    robot.add_argument(
+        "--no-robot-preflight",
+        dest="robot_preflight",
+        action="store_false",
+        help="Skip the dashboard check for Remote Control, robot mode and safety status.",
+    )
+    robot.add_argument(
+        "--robot-start-seconds",
+        type=float,
+        default=2.0,
+        help="Seconds reserved for the initial movej to the home pose. Default: 2.",
+    )
+    robot.add_argument(
+        "--robot-start-speed",
+        type=float,
+        default=30.0,
+        help="Joint speed of that initial movej in degrees per second. Default: 30.",
+    )
+    robot.add_argument(
+        "--robot-start-accel",
+        type=float,
+        default=60.0,
+        help="Joint acceleration of the initial movej in degrees per second squared. Default: 60.",
+    )
+    robot.add_argument(
+        "--robot-tool-output",
+        type=int,
+        default=0,
+        help="Tool digital output driving the gripper. Default: 0.",
+    )
+    robot.add_argument(
         "--robot-servo-gain",
         type=int,
         default=300,
@@ -263,6 +313,14 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         right_host=args.robot_right_host,
         left_host=args.robot_left_host,
         ur_port=args.robot_ur_port,
+        rtde_port=args.robot_rtde_port,
+        dashboard_port=args.robot_dashboard_port,
+        feedback=args.robot_feedback,
+        preflight=args.robot_preflight,
+        start_seconds=args.robot_start_seconds,
+        start_speed_deg_s=args.robot_start_speed,
+        start_accel_deg_s2=args.robot_start_accel,
+        tool_output=args.robot_tool_output,
         servo_gain=args.robot_servo_gain,
         servo_lookahead_s=args.robot_servo_lookahead,
         port=args.robot_port,

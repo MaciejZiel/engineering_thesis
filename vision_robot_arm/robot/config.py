@@ -15,6 +15,8 @@ BACKEND_SERIAL = "serial"
 BACKEND_CHOICES = (BACKEND_NONE, BACKEND_DEBUG, BACKEND_SIM, BACKEND_UR, BACKEND_SERIAL)
 
 UR_SECONDARY_PORT = 30002
+UR_RTDE_PORT = 30004
+UR_DASHBOARD_PORT = 29999
 UR7E_MAX_JOINT_SPEED_DEG_S = 180.0
 
 
@@ -63,8 +65,16 @@ class RobotConfig:
     right_host: str | None = None
     left_host: str | None = None
     ur_port: int = UR_SECONDARY_PORT
+    rtde_port: int = UR_RTDE_PORT
+    dashboard_port: int = UR_DASHBOARD_PORT
+    feedback: bool = True
+    preflight: bool = True
     servo_gain: int = 300
     servo_lookahead_s: float = 0.1
+    start_seconds: float = 2.0
+    start_speed_deg_s: float = 30.0
+    start_accel_deg_s2: float = 60.0
+    tool_output: int = 0
     port: str | None = None
     baud_rate: int = 115200
     send_interval: float = 0.05
@@ -123,8 +133,23 @@ class RobotConfig:
             raise SystemExit("--robot-baud must be greater than 0")
         if self.joint_deadband_deg < 0:
             raise SystemExit("--robot-deadband must be 0 or greater")
-        if not 0 < self.ur_port < 65536:
-            raise SystemExit("--robot-ur-port must be between 1 and 65535")
+        for flag, port in (
+            ("--robot-ur-port", self.ur_port),
+            ("--robot-rtde-port", self.rtde_port),
+            ("--robot-dashboard-port", self.dashboard_port),
+        ):
+            if not 0 < port < 65536:
+                raise SystemExit(f"{flag} must be between 1 and 65535")
+        if self.start_seconds < 0:
+            raise SystemExit("--robot-start-seconds must be 0 or greater")
+        if not 0 < self.start_speed_deg_s <= UR7E_MAX_JOINT_SPEED_DEG_S:
+            raise SystemExit(
+                f"--robot-start-speed must be between 0 and {UR7E_MAX_JOINT_SPEED_DEG_S:.0f} deg/s"
+            )
+        if self.start_accel_deg_s2 <= 0:
+            raise SystemExit("--robot-start-accel must be greater than 0")
+        if not 0 <= self.tool_output <= 1:
+            raise SystemExit("--robot-tool-output must be 0 or 1")
         if self.servo_gain < 100 or self.servo_gain > 2000:
             raise SystemExit("--robot-servo-gain must be between 100 and 2000")
         if self.servo_lookahead_s < 0.03 or self.servo_lookahead_s > 0.2:

@@ -100,9 +100,13 @@ PoseState -> RobotMapper -> JointTargets -> RobotBackend
   `send(targets)`, `status_lines()` for the overlay and `close()`. Backends:
   `DebugBackend` prints, `SimulationBackend` (`robot/simulation.py`) keeps two
   in-memory arms that move toward the targets with a speed limit,
-  `URBackend` (`robot/ur_backend.py`) opens one TCP socket per cobot to the
-  URScript interface (port 30002) and streams `servoj([...6 radians...], 0, 0,
-  t, lookahead_time, gain)` lines, plus `set_tool_digital_out` for the gripper;
+  `URBackend` (`robot/ur_backend.py`) drives the real cobots: it checks the
+  dashboard server (`robot/ur_dashboard.py`), homes each arm with `movej`,
+  streams `servoj([...6 radians...], 0, 0, t, lookahead_time, gain)` for a
+  setpoint that ramps at `--robot-max-speed` instead of the raw mapped angle,
+  sends `set_tool_digital_out` for the gripper, reads `actual_q` back over
+  RTDE (`robot/ur_rtde.py`) so the twin shows the robot rather than the
+  command, and decelerates with `stopj` on close;
   `SerialBackend` (`robot/serial_backend.py`) is a generic fallback that
   writes one ASCII line per frame over pyserial. pyserial is an optional
   dependency loaded the same way as OpenCV and MediaPipe: missing module means
