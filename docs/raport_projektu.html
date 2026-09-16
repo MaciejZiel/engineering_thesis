@@ -1,0 +1,801 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <title>Vision Robot Arm - dokumentacja projektu</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 17mm 18mm 17mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: #17202a;
+      background: #ffffff;
+      font-family: "DejaVu Sans", Arial, sans-serif;
+      font-size: 11.2pt;
+      line-height: 1.48;
+    }
+
+    h1,
+    h2,
+    h3 {
+      color: #102033;
+      line-height: 1.2;
+      margin: 0 0 10px;
+    }
+
+    h1 {
+      font-size: 29pt;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 18pt;
+      margin-top: 26px;
+      padding-bottom: 5px;
+      border-bottom: 2px solid #d5dee8;
+    }
+
+    h3 {
+      font-size: 13.5pt;
+      margin-top: 17px;
+    }
+
+    p {
+      margin: 0 0 9px;
+    }
+
+    ul,
+    ol {
+      margin: 6px 0 12px 20px;
+      padding: 0;
+    }
+
+    li {
+      margin: 3px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 14px;
+      font-size: 10.4pt;
+    }
+
+    th,
+    td {
+      border: 1px solid #c9d3df;
+      padding: 7px 8px;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf3f8;
+      color: #102033;
+      text-align: left;
+    }
+
+    code {
+      font-family: "DejaVu Sans Mono", Consolas, monospace;
+      font-size: 9.6pt;
+      background: #f2f5f7;
+      border: 1px solid #d7e0e8;
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+
+    .cover {
+      min-height: 255mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      page-break-after: always;
+      padding: 20mm 0 6mm;
+    }
+
+    .cover-mark {
+      width: 76px;
+      height: 76px;
+      border-radius: 12px;
+      background: #1e4f7a;
+      position: relative;
+      margin-bottom: 22px;
+    }
+
+    .cover-mark::before,
+    .cover-mark::after {
+      content: "";
+      position: absolute;
+      background: #ffffff;
+    }
+
+    .cover-mark::before {
+      width: 48px;
+      height: 10px;
+      left: 14px;
+      top: 33px;
+      border-radius: 5px;
+    }
+
+    .cover-mark::after {
+      width: 10px;
+      height: 48px;
+      left: 33px;
+      top: 14px;
+      border-radius: 5px;
+    }
+
+    .subtitle {
+      color: #425466;
+      font-size: 15pt;
+      margin-top: 12px;
+      max-width: 155mm;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 42mm 1fr;
+      gap: 7px 13px;
+      margin-top: 26px;
+      font-size: 11pt;
+    }
+
+    .meta-label {
+      color: #536475;
+      font-weight: 700;
+    }
+
+    .note {
+      background: #eef6fb;
+      border-left: 4px solid #1e6b9f;
+      padding: 10px 12px;
+      margin: 12px 0;
+    }
+
+    .warning {
+      background: #fff6e5;
+      border-left: 4px solid #bf7d16;
+      padding: 10px 12px;
+      margin: 12px 0;
+    }
+
+    .page-break {
+      page-break-before: always;
+    }
+
+    .toc {
+      page-break-after: always;
+    }
+
+    .toc ol {
+      columns: 1;
+      margin-left: 22px;
+      font-size: 11.5pt;
+    }
+
+    .toc li {
+      margin: 7px 0;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      margin: 13px 0 15px;
+    }
+
+    .flow-box {
+      min-height: 34mm;
+      border: 1px solid #b9c8d6;
+      background: #f7fafc;
+      padding: 8px;
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      text-align: center;
+      font-size: 9.5pt;
+      font-weight: 700;
+    }
+
+    .flow-box span {
+      display: block;
+      color: #536475;
+      font-size: 8.5pt;
+      font-weight: 400;
+      margin-top: 4px;
+    }
+
+    .two-columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .compact {
+      font-size: 10.2pt;
+    }
+
+    .footer-note {
+      color: #647485;
+      font-size: 9.5pt;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <section class="cover">
+    <div>
+      <div class="cover-mark" aria-hidden="true"></div>
+      <h1>Vision Robot Arm</h1>
+      <p class="subtitle">
+        Dokumentacja projektu oraz wstępne założenia pracy inżynierskiej:
+        śledzenie ruchu człowieka kamerą i przekazywanie ruchów kończyn górnych
+        do ramion robotycznych.
+      </p>
+
+      <div class="meta-grid">
+        <div class="meta-label">Typ dokumentu</div>
+        <div>Opis projektu, analiza obecnego stanu i plan dalszego rozwoju</div>
+        <div class="meta-label">Projekt</div>
+        <div>Vision Robot Arm</div>
+        <div class="meta-label">Autor</div>
+        <div>[do uzupełnienia]</div>
+        <div class="meta-label">Promotor</div>
+        <div>[do uzupełnienia]</div>
+        <div class="meta-label">Uczelnia</div>
+        <div>[do uzupełnienia]</div>
+        <div class="meta-label">Data</div>
+        <div>17 czerwca 2026</div>
+      </div>
+    </div>
+
+    <div class="footer-note">
+      Dokument przygotowany jako robocza baza do dalszej dokumentacji projektu
+      i przyszłej pracy inżynierskiej. Pola oznaczone jako "do uzupełnienia"
+      należy dostosować do wymagań uczelni.
+    </div>
+  </section>
+
+  <section class="toc">
+    <h2>Spis treści</h2>
+    <ol>
+      <li>Cel dokumentu</li>
+      <li>Streszczenie projektu</li>
+      <li>Aktualny stan implementacji</li>
+      <li>Architektura systemu</li>
+      <li>Opis głównych modułów programu</li>
+      <li>Planowany kierunek pracy inżynierskiej</li>
+      <li>Zakładany przepływ danych w wersji docelowej</li>
+      <li>Przewidywana struktura pracy inżynierskiej</li>
+      <li>Metody testowania i oceny jakości</li>
+      <li>Ryzyka techniczne i dalszy rozwój</li>
+      <li>Podsumowanie</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>1. Cel dokumentu</h2>
+    <p>
+      Celem dokumentu jest opisanie aktualnego projektu informatycznego oraz
+      przygotowanie roboczego opisu tego, w jakim kierunku projekt może zostać
+      rozwinięty w ramach pracy inżynierskiej. Dokument nie jest jeszcze pełną
+      pracą dyplomową. Ma służyć jako materiał bazowy do rozmowy z promotorem,
+      planowania zakresu oraz późniejszego rozbudowania rozdziałów teoretycznych,
+      projektowych i badawczych.
+    </p>
+    <p>
+      Obecny kod realizuje prototyp systemu wizyjnego, który wykrywa sylwetkę
+      człowieka na obrazie z kamery lub pliku wideo, wyznacza punkty anatomiczne,
+      oblicza kąty stawów, rozpoznaje proste gesty i umożliwia zapis danych do
+      pliku CSV. Docelowo system ma sterować ramionami robotycznymi tak, aby
+      ruch ramion robota odwzorowywał ruchy wykonywane przez człowieka.
+    </p>
+
+    <div class="note">
+      Proponowany temat roboczy: <strong>System wizyjnego śledzenia ruchu
+      człowieka do sterowania ramionami robotycznymi</strong>.
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Streszczenie projektu</h2>
+    <p>
+      Projekt Vision Robot Arm jest prototypem aplikacji komputerowej napisanej
+      w języku Python. System wykorzystuje kamerę internetową albo nagranie
+      wideo jako źródło obrazu. Każda klatka jest przetwarzana przez model
+      MediaPipe Pose Landmarker, który zwraca zestaw punktów opisujących położenie
+      głowy, tułowia, rąk i nóg. Na tej podstawie program tworzy uproszczony
+      model sylwetki, liczy kąty wybranych stawów oraz wykrywa podstawowe gesty,
+      na przykład uniesienie ręki albo zgięcie łokcia.
+    </p>
+    <p>
+      W aktualnej wersji projekt nie steruje jeszcze rzeczywistym sprzętem.
+      Zamiast tego posiada tryb debugowania robota, w którym wybrane wartości
+      pozy są mapowane na tekstowe komendy, takie jak ustawienie barku, łokcia
+      lub chwytaka. Dzięki temu można sprawdzać logikę sterowania bez ryzyka
+      uszkodzenia mechaniki.
+    </p>
+    <p>
+      Praca inżynierska może rozwinąć ten prototyp w kompletny system składający
+      się z warstwy wizyjnej, warstwy interpretacji ruchu oraz warstwy sterowania
+      ramionami robotycznymi. Najważniejszym problemem inżynierskim będzie
+      stabilne przełożenie ruchu człowieka widocznego w kamerze na bezpieczne
+      i powtarzalne ruchy manipulatorów.
+    </p>
+  </section>
+
+  <section>
+    <h2>3. Aktualny stan implementacji</h2>
+    <p>
+      Repozytorium zawiera działający prototyp aplikacji uruchamianej z linii
+      poleceń. Program otwiera kamerę lub plik wideo, wykonuje detekcję pozy,
+      rysuje własny szkielet na obrazie, wypisuje dane w konsoli i opcjonalnie
+      zapisuje przebieg do pliku CSV. Projekt zawiera również podstawowy zestaw
+      testów jednostkowych.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Obszar</th>
+          <th>Aktualna funkcjonalność</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Wejście obrazu</td>
+          <td>Kamera OpenCV lub plik wideo, opcjonalne zapętlanie nagrania.</td>
+          <td>Działa w prototypie</td>
+        </tr>
+        <tr>
+          <td>Detekcja pozy</td>
+          <td>MediaPipe Pose Landmarker z modelem <code>pose_landmarker_lite.task</code>.</td>
+          <td>Działa w prototypie</td>
+        </tr>
+        <tr>
+          <td>Analiza ruchu</td>
+          <td>Obliczanie kątów łokci, barków, bioder, kolan i kostek.</td>
+          <td>Działa w prototypie</td>
+        </tr>
+        <tr>
+          <td>Stabilizacja danych</td>
+          <td>Proste filtrowanie dolnoprzepustowe landmarków i kątów.</td>
+          <td>Działa w prototypie</td>
+        </tr>
+        <tr>
+          <td>Kalibracja</td>
+          <td>Zapamiętanie neutralnej pozy i liczenie odchylenia kątów od tej pozy.</td>
+          <td>Działa, wymaga dopracowania</td>
+        </tr>
+        <tr>
+          <td>Gesty</td>
+          <td>Regułowe wykrywanie podniesionych rąk, rąk w bok i zgiętych łokci.</td>
+          <td>Działa w prototypie</td>
+        </tr>
+        <tr>
+          <td>Sterowanie robotem</td>
+          <td>Na razie tylko debugowe mapowanie pozy na tekstowe komendy.</td>
+          <td>Do rozbudowy</td>
+        </tr>
+        <tr>
+          <td>Rejestracja danych</td>
+          <td>Zapis timestampów, kątów, gestów i punktów ciała do CSV.</td>
+          <td>Działa w prototypie</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      Testy jednostkowe sprawdzają obecnie obliczanie kątów, filtrowanie,
+      kalibrację, zapis CSV, konfigurację, gesty i mapowanie komend robota.
+      W ostatniej weryfikacji zestaw testów zakończył się wynikiem:
+      <code>Ran 8 tests - OK</code>.
+    </p>
+  </section>
+
+  <section class="page-break">
+    <h2>4. Architektura systemu</h2>
+    <p>
+      Aplikacja jest podzielona na małe moduły, z których każdy odpowiada za
+      konkretną część przetwarzania. Taki podział ułatwia dalsze rozwijanie
+      projektu, ponieważ logika detekcji pozy, logika obliczeń i logika wyjścia
+      nie są wymieszane w jednym pliku.
+    </p>
+
+    <div class="flow">
+      <div class="flow-box">Kamera lub wideo<span>OpenCV</span></div>
+      <div class="flow-box">Detekcja pozy<span>MediaPipe</span></div>
+      <div class="flow-box">Stan pozy<span>kąty, gesty, kalibracja</span></div>
+      <div class="flow-box">Wyjścia<span>overlay, konsola, CSV</span></div>
+      <div class="flow-box">Robot<span>debug teraz, sprzęt później</span></div>
+    </div>
+
+    <h3>Główny przepływ działania</h3>
+    <ol>
+      <li>Użytkownik uruchamia program przez <code>python main.py</code>.</li>
+      <li>CLI tworzy konfigurację aplikacji na podstawie argumentów.</li>
+      <li>OpenCV otwiera kamerę lub wskazany plik wideo.</li>
+      <li>Każda klatka jest konwertowana do formatu RGB i przekazywana do MediaPipe.</li>
+      <li>MediaPipe zwraca listę punktów ciała człowieka.</li>
+      <li>Program wygładza dane, liczy kąty stawów i wykrywa gesty.</li>
+      <li>Wynik jest rysowany na obrazie i może być zapisany do pliku CSV.</li>
+      <li>W trybie debugowym wybrane kąty i gesty są mapowane na komendy robota.</li>
+    </ol>
+
+    <h3>Technologie</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Technologia</th>
+          <th>Rola w projekcie</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Python 3.12</td>
+          <td>Język implementacji aplikacji i testów.</td>
+        </tr>
+        <tr>
+          <td>OpenCV</td>
+          <td>Obsługa kamery, odczyt wideo, konwersja obrazu i wyświetlanie okna.</td>
+        </tr>
+        <tr>
+          <td>MediaPipe</td>
+          <td>Model detekcji pozy człowieka i zwracanie punktów anatomicznych.</td>
+        </tr>
+        <tr>
+          <td>NumPy</td>
+          <td>Biblioteka numeryczna używana pośrednio i przygotowana do dalszych obliczeń.</td>
+        </tr>
+        <tr>
+          <td>unittest</td>
+          <td>Podstawowe testy jednostkowe logiki domenowej.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>5. Opis głównych modułów programu</h2>
+
+    <table class="compact">
+      <thead>
+        <tr>
+          <th>Plik</th>
+          <th>Odpowiedzialność</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>main.py</code></td>
+          <td>Cienki punkt wejścia, który uruchamia funkcję CLI.</td>
+        </tr>
+        <tr>
+          <td><code>vision_robot_arm/cli.py</code></td>
+          <td>Definicja argumentów linii poleceń, na przykład kamera, model, smoothing i tryb robota.</td>
+        </tr>
+        <tr>
+          <td><code>vision_robot_arm/config.py</code></td>
+          <td>Konfiguracja aplikacji, wartości domyślne i walidacja podstawowych parametrów.</td>
+        </tr>
+        <tr>
+          <td><code>vision_robot_arm/app.py</code></td>
+          <td>Główna pętla programu, obsługa klatek, klawiszy, rysowania, nagrywania i kontrolera robota.</td>
+        </tr>
+        <tr>
+          <td><code>vision_robot_arm/pose_tracker.py</code></td>
+          <td>Opakowanie MediaPipe Pose Landmarker i zwracanie pierwszej wykrytej sylwetki.</td>
+        </tr>
+        <tr>
+          <td><code>vision_robot_arm/state_builder.py</code></td>
+          <td>Budowanie kompletnego stanu pozy z landmarków, kątów, kalibracji i gestów.</td>
+        </tr>
+        <tr>
+          <td><code>vision_robot_arm/metrics.py</code></td>
+          <td>Definicje kątów i funkcje obliczające kąty stawów w przestrzeni obrazu.</td>
+        </tr>
+        <tr>
+          <td><code>vision_robot_arm/smoothing.py</code></td>
+          <td>Filtry dolnoprzepustowe ograniczające drgania danych z detekcji.</td>
+        </tr>
+        <tr>
+          <td><code>vision_robot_arm/gestures.py</code></td>
+          <td>Proste reguły rozpoznawania gestów na podstawie punktów ciała i kątów.</td>
+        </tr>
+        <tr>
+          <td><code>vision_robot_arm/recording.py</code></td>
+          <td>Zapis danych pozy do plików CSV.</td>
+        </tr>
+        <tr>
+          <td><code>vision_robot_arm/robot.py</code></td>
+          <td>Abstrakcja kontrolera robota i debugowe mapowanie ruchu na komendy.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      Taki podział jest dobrym punktem startowym do pracy inżynierskiej, ponieważ
+      umożliwia stopniową wymianę warstwy debugowej na rzeczywistą komunikację
+      ze sprzętem bez konieczności przepisywania całej aplikacji.
+    </p>
+  </section>
+
+  <section class="page-break">
+    <h2>6. Planowany kierunek pracy inżynierskiej</h2>
+    <p>
+      Docelowy projekt ma polegać na tym, że kamera śledzi człowieka, system
+      poprawnie identyfikuje jego kończyny, a następnie ruch kończyn górnych
+      jest przekazywany do ramion robotycznych. Ramiona mają poruszać się w
+      sposób zbliżony do ruchu rąk człowieka, przy zachowaniu ograniczeń
+      mechanicznych i bezpieczeństwa.
+    </p>
+
+    <h3>Zakres docelowy</h3>
+    <ul>
+      <li>Stabilne śledzenie całej sylwetki człowieka w czasie rzeczywistym.</li>
+      <li>Wyodrębnienie najważniejszych punktów kończyn górnych: barków, łokci, nadgarstków i dłoni.</li>
+      <li>Obliczanie kątów i przemieszczeń potrzebnych do sterowania ramionami robotycznymi.</li>
+      <li>Kalibracja pozy neutralnej użytkownika i pozy neutralnej robota.</li>
+      <li>Mapowanie ruchu człowieka na zakresy pracy przegubów robota.</li>
+      <li>Filtrowanie sygnału, aby ograniczyć drgania i przypadkowe skoki pozy.</li>
+      <li>Komunikacja z rzeczywistym kontrolerem ramienia robotycznego albo symulatorem.</li>
+      <li>Mechanizmy bezpieczeństwa, takie jak ograniczenie prędkości, zakresu ruchu i awaryjne zatrzymanie.</li>
+      <li>Testy dokładności śledzenia, opóźnienia oraz powtarzalności ruchu.</li>
+    </ul>
+
+    <h3>Przypuszczalna funkcjonalność końcowa</h3>
+    <p>
+      Po zakończeniu rozwoju system powinien umożliwiać użytkownikowi stanięcie
+      przed kamerą, wykonanie krótkiej kalibracji, a następnie sterowanie ruchem
+      ramion robotycznych poprzez naturalne ruchy własnych rąk. System powinien
+      wyświetlać podgląd z kamery z naniesionym szkieletem, pokazywać aktualne
+      kąty stawów oraz informować o stanie połączenia z robotem.
+    </p>
+    <p>
+      W zależności od dostępnego sprzętu możliwe są dwa warianty zakończenia
+      projektu. Pierwszy wariant to pełne sterowanie fizycznym ramieniem
+      robotycznym. Drugi wariant to sterowanie symulatorem lub trybem debugowym,
+      który będzie generował komendy zgodne z przyszłym interfejsem sprzętowym.
+      Drugi wariant nadal może być wartościowy inżyniersko, jeśli praca wykaże
+      poprawne śledzenie, stabilne przetwarzanie i dobrze zaprojektowany interfejs
+      komunikacyjny.
+    </p>
+  </section>
+
+  <section>
+    <h2>7. Zakładany przepływ danych w wersji docelowej</h2>
+    <p>
+      Wersja docelowa powinna mieć jasno wydzielony potok przetwarzania danych.
+      Pozwoli to osobno testować warstwę wizyjną, interpretację ruchu i sterowanie
+      robotem.
+    </p>
+
+    <ol>
+      <li>
+        <strong>Pobranie obrazu.</strong>
+        Kamera dostarcza kolejne klatki w czasie rzeczywistym. Ważne będą
+        rozdzielczość, liczba klatek na sekundę i stałość oświetlenia.
+      </li>
+      <li>
+        <strong>Detekcja punktów ciała.</strong>
+        Model wizyjny wykrywa punkty sylwetki człowieka. Dla sterowania ramionami
+        najważniejsze są barki, łokcie i nadgarstki.
+      </li>
+      <li>
+        <strong>Ocena jakości detekcji.</strong>
+        System powinien odrzucać punkty o zbyt niskiej widoczności i sygnalizować
+        użytkownikowi utratę poprawnego śledzenia.
+      </li>
+      <li>
+        <strong>Wygładzanie sygnału.</strong>
+        Dane z modelu wizyjnego mogą drgać. Filtracja zmniejsza niestabilność
+        ruchu robota, ale zwiększa opóźnienie, dlatego trzeba dobrać kompromis.
+      </li>
+      <li>
+        <strong>Kalibracja.</strong>
+        Pozycja użytkownika i pozycja robota muszą mieć wspólny punkt odniesienia.
+        Kalibracja pozwala obliczać ruch względny zamiast opierać się tylko na
+        absolutnych kątach z kamery.
+      </li>
+      <li>
+        <strong>Mapowanie na robota.</strong>
+        Kąty człowieka są przeliczane na kąty przegubów robota. Należy uwzględnić
+        inne proporcje ramion, ograniczenia mechaniczne i zakresy pracy serw.
+      </li>
+      <li>
+        <strong>Wysłanie komend.</strong>
+        Komendy trafiają do kontrolera sprzętowego, na przykład przez USB, UART,
+        sieć lokalną albo dedykowany protokół zależny od wybranego robota.
+      </li>
+      <li>
+        <strong>Informacja zwrotna.</strong>
+        System powinien monitorować, czy robot przyjął komendę, czy nie przekracza
+        limitów i czy nie wystąpił błąd komunikacji.
+      </li>
+    </ol>
+
+    <div class="warning">
+      Przy realnym sprzęcie sterowanie musi zawierać ograniczenia bezpieczeństwa.
+      Robot nie powinien wykonywać gwałtownych ruchów wynikających z chwilowego
+      błędu detekcji, zasłonięcia ręki albo utraty obrazu z kamery.
+    </div>
+  </section>
+
+  <section class="page-break">
+    <h2>8. Przewidywana struktura pracy inżynierskiej</h2>
+    <p>
+      Poniższy układ może posłużyć jako wstępna propozycja rozdziałów. Ostateczny
+      kształt powinien zostać dopasowany do wymagań uczelni i promotora.
+    </p>
+
+    <h3>Rozdział 1. Wprowadzenie</h3>
+    <p>
+      Opis problemu, motywacja, cel pracy, zakres projektu oraz krótkie
+      przedstawienie zastosowań systemów śledzenia ruchu i teleoperacji robotów.
+    </p>
+
+    <h3>Rozdział 2. Podstawy teoretyczne</h3>
+    <p>
+      Omówienie komputerowego widzenia, detekcji pozy człowieka, punktów
+      anatomicznych, filtracji sygnałów oraz podstaw sterowania manipulatorami.
+      W tym rozdziale można wyjaśnić, czym są landmarki, kąty stawów, kalibracja
+      i ograniczenia mechaniczne robotów.
+    </p>
+
+    <h3>Rozdział 3. Analiza wymagań</h3>
+    <p>
+      Wymagania funkcjonalne i niefunkcjonalne: działanie w czasie rzeczywistym,
+      dokładność śledzenia, obsługa kamery, zapis danych, tryb debugowy,
+      bezpieczeństwo i możliwość dalszej integracji ze sprzętem.
+    </p>
+
+    <h3>Rozdział 4. Projekt systemu</h3>
+    <p>
+      Architektura aplikacji, opis modułów, przepływ danych, format zapisywanych
+      danych oraz projekt interfejsu między aplikacją a kontrolerem robota.
+    </p>
+
+    <h3>Rozdział 5. Implementacja</h3>
+    <p>
+      Opis wykorzystanych bibliotek, sposobu uruchamiania aplikacji, detekcji
+      pozy przez MediaPipe, liczenia kątów, wygładzania, kalibracji, rozpoznawania
+      gestów i mapowania na komendy robota.
+    </p>
+
+    <h3>Rozdział 6. Testy i eksperymenty</h3>
+    <p>
+      Testy jednostkowe, testy z kamerą, testy z nagraniami, pomiar opóźnienia,
+      ocena stabilności kątów oraz porównanie ruchu człowieka z ruchem robota
+      albo symulatora.
+    </p>
+
+    <h3>Rozdział 7. Wnioski i dalszy rozwój</h3>
+    <p>
+      Podsumowanie efektów, opis ograniczeń, ocena osiągnięcia celu oraz możliwe
+      kierunki rozbudowy: lepsza filtracja, śledzenie 3D, obsługa dłoni, bardziej
+      zaawansowany robot i sprzężenie zwrotne.
+    </p>
+  </section>
+
+  <section>
+    <h2>9. Metody testowania i oceny jakości</h2>
+    <p>
+      Aby praca inżynierska miała mocną część praktyczną, warto przewidzieć
+      konkretne metody oceny działania systemu. Same zrzuty ekranu z działającej
+      kamerki mogą być niewystarczające. Lepiej przygotować mierzalne kryteria.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Kryterium</th>
+          <th>Proponowany sposób pomiaru</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Stabilność detekcji</td>
+          <td>Pomiar odchylenia kątów, gdy użytkownik stoi nieruchomo.</td>
+        </tr>
+        <tr>
+          <td>Opóźnienie</td>
+          <td>Pomiar czasu od ruchu użytkownika do wygenerowania komendy robota.</td>
+        </tr>
+        <tr>
+          <td>Powtarzalność</td>
+          <td>Kilkukrotne wykonanie tego samego ruchu i porównanie uzyskanych zakresów kątów.</td>
+        </tr>
+        <tr>
+          <td>Odporność na utratę punktów</td>
+          <td>Sprawdzenie zachowania programu przy zasłonięciu ręki lub wyjściu poza kadr.</td>
+        </tr>
+        <tr>
+          <td>Bezpieczeństwo robota</td>
+          <td>Weryfikacja limitów prędkości, zakresów ruchu i reakcji na brak poprawnej detekcji.</td>
+        </tr>
+        <tr>
+          <td>Poprawność zapisu danych</td>
+          <td>Analiza plików CSV i zgodności timestampów, kątów oraz gestów.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      W obecnym projekcie istnieją już testy jednostkowe dla części logiki. W
+      dalszym rozwoju warto rozszerzyć je o testy walidacji parametrów,
+      zachowania kalibracji, odporności na brak landmarków oraz mapowania komend
+      robota dla różnych pozy wejściowych.
+    </p>
+  </section>
+
+  <section>
+    <h2>10. Ryzyka techniczne i dalszy rozwój</h2>
+    <div class="two-columns">
+      <div>
+        <h3>Ryzyka</h3>
+        <ul>
+          <li>Drgania punktów wykrywanych przez model wizyjny.</li>
+          <li>Opóźnienie między ruchem człowieka a ruchem robota.</li>
+          <li>Utrata śledzenia przy zasłonięciu ręki albo słabym oświetleniu.</li>
+          <li>Różnice między biomechaniką człowieka a geometrią robota.</li>
+          <li>Niebezpieczne ruchy wynikające z błędnego odczytu pozy.</li>
+          <li>Ograniczona dokładność kątów liczonych z obrazu 2D.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Możliwe usprawnienia</h3>
+        <ul>
+          <li>Dokładniejsza walidacja parametrów wejściowych.</li>
+          <li>Lepsze zabezpieczenie zapisu CSV przed nadpisaniem plików.</li>
+          <li>Kalibracja odrzucająca zbyt słabą detekcję.</li>
+          <li>Filtry dobrane eksperymentalnie do ruchu ramion.</li>
+          <li>Sterownik sprzętowy z limitami prędkości i zakresu ruchu.</li>
+          <li>Tryb symulacji robota przed testami na fizycznym ramieniu.</li>
+        </ul>
+      </div>
+    </div>
+
+    <p>
+      W obecnym kodzie najbardziej naturalnym kolejnym krokiem jest dopracowanie
+      warstwy pośredniej między stanem pozy a robotem. Powinna ona przyjmować
+      stabilne, przefiltrowane wartości kątów i zamieniać je na komendy zgodne
+      z wybranym sprzętem. Dobrą praktyką będzie pozostawienie trybu debugowego
+      oraz dodanie drugiego kontrolera, który komunikuje się z rzeczywistym
+      urządzeniem.
+    </p>
+  </section>
+
+  <section>
+    <h2>11. Podsumowanie</h2>
+    <p>
+      Projekt Vision Robot Arm stanowi dobry punkt startowy do pracy inżynierskiej
+      związanej z wizyjnym śledzeniem ruchu człowieka i sterowaniem ramionami
+      robotycznymi. Obecna implementacja realizuje podstawowe elementy systemu:
+      pobieranie obrazu, detekcję pozy, liczenie kątów, wygładzanie danych,
+      kalibrację, rozpoznawanie prostych gestów, zapis CSV i debugowe mapowanie
+      na komendy robota.
+    </p>
+    <p>
+      Najważniejszym etapem dalszej pracy będzie przejście od samego śledzenia
+      pozy do bezpiecznego sterowania ruchem robota. Wymaga to dopracowania
+      kalibracji, filtracji, mapowania kinematycznego, komunikacji ze sprzętem
+      oraz metod testowania. Dzięki modularnej strukturze obecnego kodu te
+      elementy można rozwijać stopniowo, bez burzenia istniejącego prototypu.
+    </p>
+
+    <div class="note">
+      Dokument można później rozszerzyć o zrzuty ekranu działania programu,
+      schemat stanowiska testowego, opis konkretnego modelu ramienia robotycznego
+      oraz wyniki eksperymentów.
+    </div>
+  </section>
+</body>
+</html>
