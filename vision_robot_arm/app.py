@@ -27,15 +27,16 @@ from vision_robot_arm.vision.hand_gestures import (
     HandGestureFilter,
     WristAngleHold,
     assign_hand_sides,
-    detect_hand_gestures,
-    hand_wrist_angles,
+    gestures_from_sides,
     refine_pose_wrists,
+    wrist_angles_from_sides,
 )
 from vision_robot_arm.vision.hand_tracker import HandTracker
 from vision_robot_arm.vision.landmarks import build_landmark_indices, build_landmark_names
 from vision_robot_arm.vision.output import emit_console_data
 from vision_robot_arm.vision.pose_tracker import PoseTracker
 from vision_robot_arm.vision.recording import CsvPoseRecorder
+from vision_robot_arm.vision.smoothing import LandmarkSmoother
 from vision_robot_arm.vision.state_builder import PoseStateBuilder
 
 WINDOW_NAME = "Motion Twin - Dual UR7e Control"
@@ -86,6 +87,7 @@ def run_app(config: AppConfig) -> int:
         tracker = PoseTracker(deps, config)
         wrist_hold = WristAngleHold()
         gesture_filter = HandGestureFilter()
+        hand_smoothers: dict[str, LandmarkSmoother] = {}
         if config.hands:
             hand_tracker = HandTracker(deps, config)
         recorder = CsvPoseRecorder(config.recording_dir)
@@ -135,6 +137,7 @@ def run_app(config: AppConfig) -> int:
                 robot_controller.reset()
                 wrist_hold.reset()
                 gesture_filter.reset()
+                hand_smoothers.clear()
                 continue
             rewind_attempts = 0
 
@@ -157,29 +160,27 @@ def run_app(config: AppConfig) -> int:
             pose_landmarks = detection.landmarks
             if hand_tracker is not None and pose_landmarks:
                 hands = hand_tracker.detect(rgb_frame, timestamp_ms)
-                hands_by_side = assign_hand_sides(
-                    hands,
-                    pose_landmarks,
-                    indices,
-                    aspect_ratio=frame_aspect_ratio,
-                    min_visibility=config.visibility_threshold,
-                )
-                # Everything downstream hinges on the wrist, so correct it first.
-                pose_landmarks = refine_pose_wrists(pose_landmarks, hands_by_side, indices)
-                hand_gestures = gesture_filter.update(
-                    detect_hand_gestures(
+                hands_by_side = _smooth_hands(
+                    assign_hand_sides(
                         hands,
                         pose_landmarks,
                         indices,
                         aspect_ratio=frame_aspect_ratio,
                         min_visibility=config.visibility_threshold,
                     ),
+                    hand_smoothers,
+                    config.smoothing_alpha,
+                )
+                # Everything downstream hinges on the wrist, so correct it first.
+                pose_landmarks = refine_pose_wrists(pose_landmarks, hands_by_side, indices)
+                hand_gestures = gesture_filter.update(
+                    gestures_from_sides(hands_by_side, aspect_ratio=frame_aspect_ratio),
                     timestamp_ms,
                 )
                 extra_angles.update(
                     wrist_hold.update(
-                        hand_wrist_angles(
-                            hands,
+                        wrist_angles_from_sides(
+                            hands_by_side,
                             pose_landmarks,
                             indices,
                             frame_aspect_ratio,
@@ -225,11 +226,7 @@ def run_app(config: AppConfig) -> int:
                     config.visibility_threshold,
                 )
                 display_hands = {
-                    side: (
-                        mirror_landmarks([LandmarkPoint.from_landmark(point) for point in hand])
-                        if mirrored
-                        else hand
-                    )
+                    side: mirror_landmarks(hand) if mirrored else hand
                     for side, hand in hands_by_side.items()
                 }
                 draw_hands(
@@ -273,6 +270,7 @@ def run_app(config: AppConfig) -> int:
                 robot_controller.reset()
                 wrist_hold.reset()
                 gesture_filter.reset()
+                hand_smoothers.clear()
 
             now = time.monotonic()
             frame_elapsed = now - last_frame_at
@@ -336,6 +334,21 @@ def run_app(config: AppConfig) -> int:
             ("camera", capture.release),
         )
         cv2.destroyAllWindows()
+
+
+def _smooth_hands(
+    hands_by_side: dict[str, list],
+    smoothers: dict[str, LandmarkSmoother],
+    alpha: float,
+) -> dict[str, list]:
+    """The hand tracker output is raw, and it was drawn and measured exactly as it arrived."""
+    for side in set(smoothers) - set(hands_by_side):
+        del smoothers[side]
+    smoothed = {}
+    for side, hand in hands_by_side.items():
+        smoother = smoothers.setdefault(side, LandmarkSmoother(alpha))
+        smoothed[side] = smoother.update([LandmarkPoint.from_landmark(point) for point in hand])
+    return smoothed
 
 
 def _release_all(*resources: tuple[str, object]) -> None:

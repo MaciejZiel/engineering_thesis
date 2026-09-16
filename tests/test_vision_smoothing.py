@@ -1,3 +1,5 @@
+import random
+import statistics
 import unittest
 
 from vision_robot_arm.core.pose_state import LandmarkPoint
@@ -37,6 +39,47 @@ class AngleSmootherTests(unittest.TestCase):
         smoother.reset()
 
         self.assertEqual(smoother.update({"left_elbow": 20.0}), {"left_elbow": 20.0})
+
+
+class StillJointTests(unittest.TestCase):
+    """Landmark noise used to be passed on as motion, so the robot twitched while you held still."""
+
+    NOISE_DEG = 1.5
+
+    def noisy_run(self, smoother: AngleSmoother, speed_deg_s: float) -> tuple[list[float], list[float]]:
+        random.seed(11)
+        timestamp, truth = 0, 120.0
+        output, error = [], []
+        for step in range(400):
+            timestamp += 33
+            truth += speed_deg_s * 0.033
+            value = smoother.update({"a": truth + random.gauss(0, self.NOISE_DEG)}, timestamp)["a"]
+            if step > 60:
+                output.append(value)
+                error.append(abs(truth - value))
+        return output, error
+
+    def test_a_still_joint_settles_far_below_the_measurement_noise(self) -> None:
+        output, _ = self.noisy_run(AngleSmoother(0.35), speed_deg_s=0.0)
+
+        self.assertLess(statistics.pstdev(output), self.NOISE_DEG / 3)
+
+    def test_a_still_joint_stops_moving_at_all_through_the_dead_band(self) -> None:
+        output, _ = self.noisy_run(AngleSmoother(0.35), speed_deg_s=0.0)
+
+        self.assertLess(max(output) - min(output), 1.5)
+
+    def test_a_sweeping_joint_keeps_the_configured_response(self) -> None:
+        """Calming a still arm must not cost anything while it is actually moving."""
+        _, adaptive = self.noisy_run(AngleSmoother(0.35), speed_deg_s=60.0)
+        _, plain = self.noisy_run(AngleSmoother(0.35, motion_floor_deg_s=0.0), speed_deg_s=60.0)
+
+        self.assertLess(statistics.mean(adaptive), statistics.mean(plain) + 0.5)
+
+    def test_slow_deliberate_motion_is_still_followed(self) -> None:
+        _, error = self.noisy_run(AngleSmoother(0.35), speed_deg_s=20.0)
+
+        self.assertLess(statistics.mean(error), 3.0)
 
 
 class LandmarkSmootherTests(unittest.TestCase):

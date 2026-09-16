@@ -118,9 +118,21 @@ def detect_hand_gestures(
     aspect_ratio: float = 1.0,
     min_visibility: float = 0.55,
 ) -> tuple[str, ...]:
+    return gestures_from_sides(
+        assign_hand_sides(hands, pose_landmarks, indices,
+                          aspect_ratio=aspect_ratio, min_visibility=min_visibility),
+        aspect_ratio=aspect_ratio,
+    )
+
+
+def gestures_from_sides(
+    sides: dict[str, list[Any]],
+    *,
+    aspect_ratio: float = 1.0,
+) -> tuple[str, ...]:
+    """Classify hands that were already matched to a side, so matching happens once."""
     gestures: list[str] = []
-    for side, hand in assign_hand_sides(hands, pose_landmarks, indices,
-                                       aspect_ratio=aspect_ratio, min_visibility=min_visibility).items():
+    for side, hand in sides.items():
         shape = classify_hand(hand, aspect_ratio)
         if shape == HAND_OPEN:
             gestures.append(f"{side}_hand_open")
@@ -184,9 +196,27 @@ def hand_wrist_angles(
     to a different origin for the pose model than for the hand model, so mixing them
     moved the reported angle by tens of degrees for no real motion.
     """
+    return wrist_angles_from_sides(
+        assign_hand_sides(hands, pose_landmarks, indices,
+                          aspect_ratio=aspect_ratio, min_visibility=min_visibility),
+        pose_landmarks,
+        indices,
+        aspect_ratio,
+        min_visibility=min_visibility,
+    )
+
+
+def wrist_angles_from_sides(
+    sides: dict[str, list[Any]],
+    pose_landmarks: list[Any],
+    indices: dict[str, int],
+    aspect_ratio: float = DEFAULT_ASPECT_RATIO,
+    *,
+    min_visibility: float = 0.55,
+) -> dict[str, float]:
+    """Wrist angles for hands that were already matched to a side."""
     angles: dict[str, float] = {}
-    for side, hand in assign_hand_sides(hands, pose_landmarks, indices,
-                                       aspect_ratio=aspect_ratio, min_visibility=min_visibility).items():
+    for side, hand in sides.items():
         if len(hand) <= HAND_MIDDLE_MCP:
             continue
         elbow_index = indices.get(f"{side.upper()}_ELBOW")
