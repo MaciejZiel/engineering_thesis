@@ -7,6 +7,8 @@ from vision_robot_arm.vision.hand_gestures import (
     count_extended_fingers,
     detect_hand_gestures,
     hand_wrist_angles,
+    signed_wrist_deviation,
+    WristAngleHold,
 )
 
 
@@ -87,18 +89,44 @@ class HandWristAngleTests(unittest.TestCase):
         hand = make_hand((0.7, 0.6), (True, True, True, True))
         hand[9] = P(0.7, 0.4)
 
-        angles = hand_wrist_angles([hand], POSE, POSE_INDICES)
+        angles = hand_wrist_angles([hand], POSE, POSE_INDICES, aspect_ratio=1.0)
 
         self.assertAlmostEqual(angles["right_wrist"], 180.0)
         self.assertNotIn("left_wrist", angles)
 
-    def test_bent_wrist_gives_ninety_degrees(self) -> None:
+    def test_sideways_bend_gives_ninety_degrees(self) -> None:
         hand = make_hand((0.3, 0.6), (False, False, False, False))
         hand[9] = P(0.5, 0.6)
 
-        angles = hand_wrist_angles([hand], POSE, POSE_INDICES)
+        angles = hand_wrist_angles([hand], POSE, POSE_INDICES, aspect_ratio=1.0)
 
         self.assertAlmostEqual(angles["left_wrist"], 90.0)
+
+    def test_hand_toward_camera_uses_depth(self) -> None:
+        hand = make_hand((0.7, 0.6), (True, True, True, True))
+        hand[9] = P(0.7, 0.6, -0.2)
+
+        angles = hand_wrist_angles([hand], POSE, POSE_INDICES, aspect_ratio=1.0)
+
+        self.assertAlmostEqual(angles["right_wrist"], 90.0)
+
+    def test_bend_direction_is_signed(self) -> None:
+        forearm = (1.0, 0.0, 0.0)
+
+        self.assertAlmostEqual(signed_wrist_deviation(forearm, (1.0, -1.0, 0.0)), 45.0)
+        self.assertAlmostEqual(signed_wrist_deviation(forearm, (1.0, 1.0, 0.0)), -45.0)
+        self.assertAlmostEqual(signed_wrist_deviation(forearm, (1.0, 0.0, 0.0)), 0.0)
+        self.assertEqual(signed_wrist_deviation(forearm, (-1.0, 0.0, 0.0)), 90.0)
+        self.assertIsNone(signed_wrist_deviation(forearm, (0.0, 0.0, 0.0)))
+
+    def test_bending_down_gives_more_than_180(self) -> None:
+        horizontal_forearm_pose = [P(0.3, 0.6), P(0.7, 0.6), P(0.3, 0.9), P(0.4, 0.6)]
+        hand = make_hand((0.7, 0.6), (True, True, True, True))
+        hand[9] = P(0.9, 0.8)
+
+        angles = hand_wrist_angles([hand], horizontal_forearm_pose, POSE_INDICES, aspect_ratio=1.0)
+
+        self.assertAlmostEqual(angles["right_wrist"], 225.0)
 
     def test_missing_elbow_index_is_skipped(self) -> None:
         hand = make_hand((0.7, 0.6), (True, True, True, True))
@@ -106,6 +134,28 @@ class HandWristAngleTests(unittest.TestCase):
         angles = hand_wrist_angles([hand], POSE[:2], {"LEFT_WRIST": 0, "RIGHT_WRIST": 1})
 
         self.assertEqual(angles, {})
+
+
+class WristAngleHoldTests(unittest.TestCase):
+    def test_holds_recent_value_and_forgets_old_one(self) -> None:
+        hold = WristAngleHold(max_age_ms=500)
+
+        self.assertEqual(hold.update({"right_wrist": 150.0}, 1000), {"right_wrist": 150.0})
+        self.assertEqual(hold.update({}, 1400), {"right_wrist": 150.0})
+        self.assertEqual(hold.update({}, 1600), {})
+
+    def test_new_value_replaces_held_one(self) -> None:
+        hold = WristAngleHold(max_age_ms=500)
+        hold.update({"left_wrist": 150.0}, 0)
+
+        self.assertEqual(hold.update({"left_wrist": 120.0}, 100), {"left_wrist": 120.0})
+
+    def test_reset_forgets_everything(self) -> None:
+        hold = WristAngleHold()
+        hold.update({"left_wrist": 150.0}, 0)
+        hold.reset()
+
+        self.assertEqual(hold.update({}, 10), {})
 
 
 class HandGestureTests(unittest.TestCase):
