@@ -248,9 +248,11 @@ def _fit_frame(cv2: object, frame: object, config: AppConfig) -> object:
     if config.width <= 0 or config.height <= 0:
         return frame
     height, width = frame.shape[:2]
-    if (width, height) == (config.width, config.height):
+    scale = min(config.width / width, config.height / height, 1.0)
+    if scale >= 1.0:
         return frame
-    return cv2.resize(frame, (config.width, config.height), interpolation=cv2.INTER_LINEAR)
+    target = (max(1, round(width * scale)), max(1, round(height * scale)))
+    return cv2.resize(frame, target, interpolation=cv2.INTER_AREA)
 
 
 def _source_started_message(config: AppConfig) -> str:

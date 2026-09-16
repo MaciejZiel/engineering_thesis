@@ -73,10 +73,11 @@ To loop a video while testing:
 python main.py --video sample.mp4 --loop-video
 ```
 
-Frames are shown at 1920x1080 by default. The camera is asked for that size
-and frames of another size are resized, so the overlay always has the same
-proportions. Pick a smaller size for slow machines or `0 0` to keep the
-camera's native size:
+The camera is asked for 1920x1080 by default. A smaller or differently shaped
+camera image keeps its native resolution and aspect ratio, so 4:3 cameras are
+never stretched to 16:9. Frames larger than the configured bounds are reduced
+proportionally. Pick a smaller processing limit for slow machines or `0 0` to
+keep every source at its native size:
 
 ```powershell
 python main.py --width 1280 --height 720
