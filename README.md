@@ -120,7 +120,10 @@ python main.py --model path\to\pose_landmarker.task
 
 Hand tracking (open hand / fist for the gripper) uses the MediaPipe Hand
 Landmarker. Point `--hand-model` at another `.task` file or disable it with
-`--no-hands` on slow machines.
+`--no-hands` on slow machines. With `--no-hands` there are no gripper gestures,
+and the wrist angle falls back to the pose model (elbow-wrist-index), which is
+unsigned: the robot wrist can then only bend one way, and `angle_*_wrist` in a
+recording means something different from a run with hand tracking on.
 
 ## Dashboard UI
 
