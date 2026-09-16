@@ -2,7 +2,7 @@ import time
 
 from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE, AppConfig
 from vision_robot_arm.core.display import enable_high_dpi_awareness
-from vision_robot_arm.core.pose_state import mirror_landmarks
+from vision_robot_arm.core.pose_state import LandmarkPoint, mirror_landmarks
 from vision_robot_arm.core.runtime import load_runtime_dependencies
 from vision_robot_arm.robot.controller import RobotController
 from vision_robot_arm.robot.factory import create_robot_controller
@@ -17,14 +17,16 @@ from vision_robot_arm.vision.dashboard import (
     cycle_output_mode,
 )
 from vision_robot_arm.vision.drawing import (
+    draw_hands,
     draw_joint_angle_labels,
     draw_stick_figure,
     landmark_visibility_ratio,
 )
 from vision_robot_arm.vision.hand_gestures import (
     WristAngleHold,
-    detect_hand_gestures,
-    hand_wrist_angles,
+    assign_hand_sides,
+    gestures_from_sides,
+    wrist_angles_from_sides,
 )
 from vision_robot_arm.vision.hand_tracker import HandTracker
 from vision_robot_arm.vision.landmarks import build_landmark_indices, build_landmark_names
@@ -130,12 +132,14 @@ def run_app(config: AppConfig) -> int:
             detection = tracker.detect(rgb_frame, timestamp_ms)
             hand_gestures: tuple[str, ...] = ()
             wrist_angles: dict[str, float] = {}
+            hands_by_side: dict[str, list] = {}
             if hand_tracker is not None and detection.landmarks:
                 hands = hand_tracker.detect(rgb_frame, timestamp_ms)
-                hand_gestures = detect_hand_gestures(hands, detection.landmarks, indices)
+                hands_by_side = assign_hand_sides(hands, detection.landmarks, indices)
+                hand_gestures = gestures_from_sides(hands_by_side)
                 aspect_ratio = frame.shape[1] / max(1, frame.shape[0])
                 wrist_angles = wrist_hold.update(
-                    hand_wrist_angles(hands, detection.landmarks, indices, aspect_ratio),
+                    wrist_angles_from_sides(hands_by_side, detection.landmarks, indices, aspect_ratio),
                     timestamp_ms,
                 )
             if mirrored:
@@ -159,6 +163,22 @@ def run_app(config: AppConfig) -> int:
                 draw_stick_figure(
                     cv2,
                     frame,
+                    display_landmarks,
+                    indices,
+                    config.visibility_threshold,
+                )
+                display_hands = {
+                    side: (
+                        mirror_landmarks([LandmarkPoint.from_landmark(point) for point in hand])
+                        if mirrored
+                        else hand
+                    )
+                    for side, hand in hands_by_side.items()
+                }
+                draw_hands(
+                    cv2,
+                    frame,
+                    display_hands,
                     display_landmarks,
                     indices,
                     config.visibility_threshold,

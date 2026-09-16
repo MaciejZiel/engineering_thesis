@@ -8,6 +8,7 @@ FINGER_TIPS = (8, 12, 16, 20)
 EXTENDED_RATIO = 1.1
 OPEN_HAND_MIN_FINGERS = 3
 MAX_WRIST_DISTANCE = 0.15
+WRIST_DISTANCE_PER_HAND_SPAN = 1.2
 
 HAND_OPEN = "open"
 HAND_FIST = "fist"
@@ -47,12 +48,16 @@ def assign_hand_sides(
     for hand_number, hand in enumerate(hands):
         if not hand:
             continue
+        allowed = max_distance
+        if len(hand) > HAND_MIDDLE_MCP:
+            span = _distance(hand[HAND_WRIST], hand[HAND_MIDDLE_MCP])
+            allowed = max(max_distance, span * WRIST_DISTANCE_PER_HAND_SPAN)
         for side in SIDES:
             wrist_index = indices.get(f"{side.upper()}_WRIST")
             if wrist_index is None or wrist_index >= len(pose_landmarks):
                 continue
             distance = _distance(hand[HAND_WRIST], pose_landmarks[wrist_index])
-            if distance <= max_distance:
+            if distance <= allowed:
                 candidates.append((distance, side, hand_number))
 
     assigned: dict[str, list[Any]] = {}
@@ -70,8 +75,12 @@ def detect_hand_gestures(
     pose_landmarks: list[Any],
     indices: dict[str, int],
 ) -> tuple[str, ...]:
+    return gestures_from_sides(assign_hand_sides(hands, pose_landmarks, indices))
+
+
+def gestures_from_sides(sides: dict[str, list[Any]]) -> tuple[str, ...]:
     gestures: list[str] = []
-    for side, hand in assign_hand_sides(hands, pose_landmarks, indices).items():
+    for side, hand in sides.items():
         shape = classify_hand(hand)
         if shape == HAND_OPEN:
             gestures.append(f"{side}_hand_open")
@@ -94,8 +103,19 @@ def hand_wrist_angles(
     aspect_ratio: float = DEFAULT_ASPECT_RATIO,
 ) -> dict[str, float]:
     """Signed wrist angle per side: 180 = straight, below 180 = bent up, above = bent down."""
+    return wrist_angles_from_sides(
+        assign_hand_sides(hands, pose_landmarks, indices), pose_landmarks, indices, aspect_ratio
+    )
+
+
+def wrist_angles_from_sides(
+    sides: dict[str, list[Any]],
+    pose_landmarks: list[Any],
+    indices: dict[str, int],
+    aspect_ratio: float = DEFAULT_ASPECT_RATIO,
+) -> dict[str, float]:
     angles: dict[str, float] = {}
-    for side, hand in assign_hand_sides(hands, pose_landmarks, indices).items():
+    for side, hand in sides.items():
         if len(hand) <= HAND_MIDDLE_MCP:
             continue
         elbow_index = indices.get(f"{side.upper()}_ELBOW")
