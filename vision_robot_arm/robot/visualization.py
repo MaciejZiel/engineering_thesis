@@ -98,12 +98,33 @@ def draw_simulation(cv2: Any, canvas: Any, state: RobotState | None, *, compact:
 def draw_compact_simulation(cv2: Any, canvas: Any, state: RobotState | None) -> None:
     """Draw only the schematic arms; the dashboard owns labels and telemetry.
 
-    Each arm is clipped to its own viewport. The maximum reach includes the
-    wrist and gripper, keeping every joint configuration inside that viewport.
+    Fit the schematic to both poses with a shared link scale. Each arm is
+    clipped to its own viewport and the bounds include room for the gripper.
     No pose is drawn when the backend has not supplied an arm state.
     """
     canvas[:] = (30, 28, 27)
     height, width = canvas.shape[:2]
+    geometry = {}
+    for name in DISPLAY_ORDER:
+        arm = state.arm(name) if state is not None else None
+        if arm is None:
+            continue
+        points = []
+        for pose in (arm.joints, arm.targets):
+            points.extend(arm_points(
+                pose.get(JOINT_SHOULDER, UR_HOME_DEG[JOINT_SHOULDER]),
+                pose.get(JOINT_ELBOW, UR_HOME_DEG[JOINT_ELBOW]),
+                pose.get(JOINT_WRIST_1, UR_HOME_DEG[JOINT_WRIST_1]),
+                (0, 0), 1000, name == ARM_LEFT,
+            ))
+        xs, ys = [p[0]/1000 for p in points], [p[1]/1000 for p in points]
+        geometry[name] = (min(xs), min(ys), max(xs), max(ys))
+    if not geometry:
+        return
+    link = min(
+        min((width//2)*0.84/(right-left+0.8), height*0.84/(bottom-top+0.8))
+        for left, top, right, bottom in geometry.values()
+    )
     for column, name in enumerate(DISPLAY_ORDER):
         arm = state.arm(name) if state is not None else None
         if arm is None:
@@ -111,8 +132,9 @@ def draw_compact_simulation(cv2: Any, canvas: Any, state: RobotState | None) -> 
         left, right = column * width // 2, (column + 1) * width // 2
         view = canvas[:, left:right]
         extent = min(right-left, height)
-        base = ((right-left)//2, height//2)
-        link = extent * 0.44 / (2 + HAND_LINK_RATIO + 0.3)
+        min_x, min_y, max_x, max_y = geometry[name]
+        base = (round((right-left)/2-(min_x+max_x)*link/2),
+                round(height/2-(min_y+max_y)*link/2))
         thickness = max(2, round(extent / 65))
         # A small pedestal identifies the fixed shoulder pivot without a grid.
         half = max(5, round(extent * 0.05))
