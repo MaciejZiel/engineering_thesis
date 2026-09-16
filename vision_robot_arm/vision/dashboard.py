@@ -71,6 +71,16 @@ class DashboardLayout:
     footer: Rect
 
 
+def preview_target_rect(rect: Rect, px: Any) -> Rect:
+    """Area inside the arm preview panel that shows the simulation image."""
+    pad = px(20)
+    return Rect(rect.x + pad, rect.y + px(82), rect.width - 2 * pad, rect.height - px(127))
+
+
+def preview_target(layout: DashboardLayout) -> Rect:
+    return preview_target_rect(layout.preview, lambda value: max(1, round(value * layout.scale)))
+
+
 def dashboard_layout(width: int, height: int) -> DashboardLayout:
     """Allocate panels from one scale; width as well as height limits density."""
     scale = max(0.65, min(width / 1440, height / 900, 2.0))
@@ -407,12 +417,7 @@ class DashboardUi:
             color=MUTED,
             align="center",
         )
-        target = Rect(
-            rect.x + pad,
-            rect.y + p.px(82),
-            rect.width - 2 * pad,
-            rect.height - p.px(127),
-        )
+        target = preview_target_rect(rect, p.px)
         if available and robot not in ("off", "none"):
             self._place_image(p.canvas, simulation, target)
         else:
@@ -673,8 +678,17 @@ class DashboardUi:
                 align="right",
             )
 
+    def simulation_target_size(self) -> tuple[int, int]:
+        """Pixel size of the arm preview area, so the simulation renders without rescaling."""
+        width, height = self._canvas_size or (1280, 720)
+        target = preview_target(dashboard_layout(width, height))
+        return max(2, target.width), max(2, target.height)
+
     def _place_image(self, canvas: Any, image: Any, target: Rect) -> None:
         source_height, source_width = image.shape[:2]
+        if (source_width, source_height) == (target.width, target.height):
+            canvas[target.y : target.bottom, target.x : target.right] = image
+            return
         fitted = fit_inside((source_width, source_height), target)
         if fitted.width <= 0 or fitted.height <= 0:
             return

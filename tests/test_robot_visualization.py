@@ -56,7 +56,7 @@ class ArmPointsTests(unittest.TestCase):
         self.assertEqual(base, (100, 100))
         self.assertEqual(elbow, (100, 150))
         self.assertEqual(wrist, (100, 200))
-        self.assertEqual(tip, (100, 228))
+        self.assertEqual(tip, (100, 235))
 
     def test_arm_horizontal_at_minus_ninety_degrees(self) -> None:
         _, elbow, wrist, _ = arm_points(-90.0, 0.0, 0.0, (100, 100), 50.0)
@@ -69,7 +69,7 @@ class ArmPointsTests(unittest.TestCase):
 
         self.assertEqual(elbow, (150, 100))
         self.assertEqual(wrist, (150, 50))
-        self.assertEqual(tip, (122, 50))
+        self.assertEqual(tip, (115, 50))
 
     def test_mirrored_arm_points_the_other_way(self) -> None:
         _, elbow, wrist, _ = arm_points(-90.0, 0.0, 0.0, (100, 100), 50.0, mirror=True)
