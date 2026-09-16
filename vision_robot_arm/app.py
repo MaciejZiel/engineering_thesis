@@ -372,9 +372,11 @@ def _frame_timestamp_ms(
 ) -> int:
     """Strictly increasing stamps that keep real spacing, which MediaPipe and the filters need."""
     if config.video_path is None:
-        return int((time.monotonic() - started_at) * 1000)
-
-    timestamp_ms = int(capture.get(cv2.CAP_PROP_POS_MSEC)) + offset_ms
+        timestamp_ms = int((time.monotonic() - started_at) * 1000)
+    else:
+        timestamp_ms = int(capture.get(cv2.CAP_PROP_POS_MSEC)) + offset_ms
+    # Two camera frames inside the same millisecond would make the landmarker raise
+    # "Input timestamp must be monotonically increasing" and kill the loop.
     if timestamp_ms <= last_timestamp_ms:
         timestamp_ms = last_timestamp_ms + 1
     return timestamp_ms

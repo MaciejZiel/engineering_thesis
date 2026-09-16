@@ -92,6 +92,16 @@ class TimestampTests(unittest.TestCase):
         self.assertEqual(first, 933)
         self.assertEqual(second - first, 33)
 
+    def test_two_camera_frames_in_one_millisecond_still_advance(self) -> None:
+        import time
+
+        started = time.monotonic()
+
+        first = _frame_timestamp_ms(self.cv2(), FakeCapture(0.0), AppConfig(), started, -1)
+        second = _frame_timestamp_ms(self.cv2(), FakeCapture(0.0), AppConfig(), started, first)
+
+        self.assertGreater(second, first)
+
     def test_camera_time_runs_on_the_wall_clock(self) -> None:
         import time
 
