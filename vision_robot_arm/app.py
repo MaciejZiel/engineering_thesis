@@ -16,6 +16,7 @@ from vision_robot_arm.vision.dashboard import (
     DashboardUi,
     cycle_output_mode,
 )
+from vision_robot_arm.vision.arm_pose import arm_elevation_angles
 from vision_robot_arm.vision.drawing import (
     draw_hands,
     draw_joint_angle_labels,
@@ -132,12 +133,20 @@ def run_app(config: AppConfig) -> int:
             )
             last_timestamp_ms = timestamp_ms
             detection = tracker.detect(rgb_frame, timestamp_ms)
+            frame_aspect_ratio = frame.shape[1] / max(1, frame.shape[0])
             hand_gestures: tuple[str, ...] = ()
-            wrist_angles: dict[str, float] = {}
+            extra_angles: dict[str, float] = {}
             hands_by_side: dict[str, list] = {}
+            if detection.landmarks:
+                extra_angles = arm_elevation_angles(
+                    detection.landmarks,
+                    indices,
+                    config.visibility_threshold,
+                    frame_aspect_ratio,
+                )
             if hand_tracker is not None and detection.landmarks:
                 hands = hand_tracker.detect(rgb_frame, timestamp_ms)
-                aspect_ratio = frame.shape[1] / max(1, frame.shape[0])
+                aspect_ratio = frame_aspect_ratio
                 hands_by_side = assign_hand_sides(
                     hands,
                     detection.landmarks,
@@ -155,15 +164,17 @@ def run_app(config: AppConfig) -> int:
                     ),
                     timestamp_ms,
                 )
-                wrist_angles = wrist_hold.update(
-                    hand_wrist_angles(
-                        hands,
-                        detection.landmarks,
-                        indices,
-                        aspect_ratio,
-                        min_visibility=config.visibility_threshold,
-                    ),
-                    timestamp_ms,
+                extra_angles.update(
+                    wrist_hold.update(
+                        hand_wrist_angles(
+                            hands,
+                            detection.landmarks,
+                            indices,
+                            aspect_ratio,
+                            min_visibility=config.visibility_threshold,
+                        ),
+                        timestamp_ms,
+                    )
                 )
             if mirrored:
                 frame = cv2.flip(frame, 1)
@@ -176,7 +187,7 @@ def run_app(config: AppConfig) -> int:
                     detection.landmarks,
                     detection.world_landmarks,
                     extra_gestures=hand_gestures,
-                    extra_angles=wrist_angles,
+                    extra_angles=extra_angles,
                 )
                 display_landmarks = (
                     mirror_landmarks(current_state.landmarks)

@@ -188,6 +188,7 @@ vision_robot_arm/
     pose_state.py          # shared pose data object
     runtime.py             # optional dependency loading
   vision/                  # camera, pose detection, gestures, drawing
+    arm_pose.py            # arm elevation that works without visible hips
     calibration.py         # neutral pose calibration
     drawing.py             # custom stick figure and overlay
     gestures.py            # simple rule-based body gesture detection
@@ -390,7 +391,7 @@ Body angle to UR joint mapping (`vision_robot_arm/robot/config.py`,
 
 | Body angle (deg)                        | UR joint  | Formula        | Default range |
 | --------------------------------------- | --------- | -------------- | ------------- |
-| shoulder (elbow-shoulder-hip), 0 = down | `shoulder`| body - 180     | -180 .. 0     |
+| shoulder elevation, 0 = down, 180 = up | `shoulder`| body - 180     | -180 .. 0     |
 | elbow (shoulder-elbow-wrist), 180 = straight | `elbow` | 180 - body   | -160 .. 160   |
 | wrist (3D forearm vs hand, signed), 180 = straight | `wrist_1` | 180 - body | -180 .. 180 |
 
@@ -430,7 +431,9 @@ and is expected to change once the hardware is chosen.
 
 Current mapping (`vision_robot_arm/robot/mapping.py`), applied to each arm:
 
-- shoulder angle (elbow-shoulder-hip) -> UR `shoulder`
+- shoulder elevation (shoulder-to-elbow against the torso, or against image
+  vertical when the hips are out of frame): 0 = arm down, 90 = horizontal,
+  180 = raised -> UR `shoulder`
 - elbow angle (shoulder-elbow-wrist) -> UR `elbow`
 - wrist angle: signed 3D angle between the forearm (pose elbow to wrist, with
   depth) and the hand (hand-tracker wrist to middle knuckle, with depth);

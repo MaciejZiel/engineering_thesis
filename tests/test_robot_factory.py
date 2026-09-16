@@ -53,7 +53,7 @@ class FactoryTests(unittest.TestCase):
         output = io.StringIO()
 
         with contextlib.redirect_stdout(output):
-            controller.update(make_state({"right_shoulder": 45.0}, ("right_fist",)))
+            controller.update(make_state({"right_shoulder_elevation": 45.0}, ("right_fist",)))
 
         self.assertEqual(
             output.getvalue().strip(),
@@ -67,7 +67,7 @@ class FactoryTests(unittest.TestCase):
     def test_sim_backend_reports_two_arms(self) -> None:
         controller = create_robot_controller(RobotConfig(backend="sim"))
 
-        controller.update(make_state({"right_shoulder": 45.0, "left_wrist": 120.0}))
+        controller.update(make_state({"right_shoulder_elevation": 45.0, "left_wrist": 120.0}))
 
         state = controller.robot_state()
         self.assertEqual(state.arm("right").targets["shoulder"], -135.0)

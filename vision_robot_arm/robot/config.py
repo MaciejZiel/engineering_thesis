@@ -46,7 +46,7 @@ class JointMapping:
 
 
 DEFAULT_SHOULDER_MAPPING = JointMapping(
-    source="shoulder", offset_deg=-180.0, sign=1.0, limit=JointLimit(-180.0, 0.0)
+    source="shoulder_elevation", offset_deg=-180.0, sign=1.0, limit=JointLimit(-180.0, 0.0)
 )
 DEFAULT_ELBOW_MAPPING = JointMapping(
     source="elbow", offset_deg=180.0, sign=-1.0, limit=UR7E_ELBOW_RANGE

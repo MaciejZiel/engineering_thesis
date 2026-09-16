@@ -9,13 +9,18 @@ Point = tuple[int, int]
 Color = tuple[int, int, int]
 
 ARM_JOINT_LABELS = (
-    "left_shoulder",
-    "right_shoulder",
+    "left_shoulder_elevation",
+    "right_shoulder_elevation",
     "left_elbow",
     "right_elbow",
     "left_wrist",
     "right_wrist",
 )
+# Angles that come from outside ANGLE_DEFINITIONS still need a landmark to sit next to.
+EXTRA_LABEL_ANCHORS = {
+    "left_shoulder_elevation": "LEFT_SHOULDER",
+    "right_shoulder_elevation": "RIGHT_SHOULDER",
+}
 JOINT_LABEL_COLOR: Color = (112, 169, 238)
 HUD_MARGIN = 12
 HINT_SCALE = 0.42
@@ -103,9 +108,10 @@ def draw_joint_angle_labels(
     for name in joints:
         value = angles.get(name)
         definition = ANGLE_DEFINITIONS.get(name)
-        if value is None or definition is None:
+        anchor = definition[1] if definition else EXTRA_LABEL_ANCHORS.get(name)
+        if value is None or anchor is None:
             continue
-        point = reliable_point(landmarks, indices, definition[1], min_visibility, width, height)
+        point = reliable_point(landmarks, indices, anchor, min_visibility, width, height)
         if point is None:
             continue
         label = f"{joint_label(name)} {value:.0f}"
@@ -115,7 +121,7 @@ def draw_joint_angle_labels(
 
 def joint_label(name: str) -> str:
     side, _, joint = name.partition("_")
-    return f"{side[:1].upper()} {joint}"
+    return f"{side[:1].upper()} {joint.removesuffix('_elevation')}"
 
 
 def draw_stick_figure(

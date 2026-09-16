@@ -39,6 +39,7 @@ def make_state(
 
 class JointMappingTests(unittest.TestCase):
     def test_default_shoulder_mapping_matches_ur_conventions(self) -> None:
+        self.assertEqual(DEFAULT_SHOULDER_MAPPING.source, "shoulder_elevation")
         self.assertEqual(DEFAULT_SHOULDER_MAPPING.to_robot(90.0), -90.0)
         self.assertEqual(DEFAULT_SHOULDER_MAPPING.to_robot(180.0), 0.0)
         self.assertEqual(DEFAULT_SHOULDER_MAPPING.to_robot(0.0), -180.0)
@@ -62,10 +63,10 @@ class RobotMapperTests(unittest.TestCase):
         targets = mapper.map(
             make_state(
                 {
-                    "right_shoulder": 90.0,
+                    "right_shoulder_elevation": 90.0,
                     "right_elbow": 120.0,
                     "right_wrist": 160.0,
-                    "left_shoulder": 45.0,
+                    "left_shoulder_elevation": 45.0,
                     "left_elbow": 180.0,
                 }
             )
@@ -88,7 +89,7 @@ class RobotMapperTests(unittest.TestCase):
         mapper = RobotMapper(config)
 
         targets = mapper.map(
-            make_state({"right_shoulder": 210.0, "right_elbow": 5.0, "right_wrist": 20.0})
+            make_state({"right_shoulder_elevation": 210.0, "right_elbow": 5.0, "right_wrist": 20.0})
         )
 
         self.assertEqual(
@@ -99,26 +100,26 @@ class RobotMapperTests(unittest.TestCase):
     def test_omits_joints_without_reliable_angle(self) -> None:
         mapper = RobotMapper(RobotConfig())
 
-        targets = mapper.map(make_state({"right_shoulder": None, "right_elbow": 90.0}))
+        targets = mapper.map(make_state({"right_shoulder_elevation": None, "right_elbow": 90.0}))
 
         self.assertEqual(targets.arm("right").joints, {"elbow": 90.0})
         self.assertEqual(targets.arm("left").joints, {})
 
     def test_deadband_is_tracked_per_arm_and_joint(self) -> None:
         mapper = RobotMapper(RobotConfig(joint_deadband_deg=2.0))
-        mapper.map(make_state({"right_shoulder": 90.0, "left_shoulder": 90.0}))
+        mapper.map(make_state({"right_shoulder_elevation": 90.0, "left_shoulder_elevation": 90.0}))
 
-        targets = mapper.map(make_state({"right_shoulder": 91.0, "left_shoulder": 93.0}))
+        targets = mapper.map(make_state({"right_shoulder_elevation": 91.0, "left_shoulder_elevation": 93.0}))
 
         self.assertEqual(targets.arm("right").joints["shoulder"], -90.0)
         self.assertEqual(targets.arm("left").joints["shoulder"], -87.0)
 
     def test_reset_forgets_deadband_reference(self) -> None:
         mapper = RobotMapper(RobotConfig(joint_deadband_deg=2.0))
-        mapper.map(make_state({"right_shoulder": 90.0}))
+        mapper.map(make_state({"right_shoulder_elevation": 90.0}))
         mapper.reset()
 
-        targets = mapper.map(make_state({"right_shoulder": 91.0}))
+        targets = mapper.map(make_state({"right_shoulder_elevation": 91.0}))
 
         self.assertEqual(targets.arm("right").joints["shoulder"], -89.0)
 
