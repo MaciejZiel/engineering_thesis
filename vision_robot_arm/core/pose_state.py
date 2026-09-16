@@ -15,8 +15,13 @@ class LandmarkPoint:
             x=float(landmark.x),
             y=float(landmark.y),
             z=float(landmark.z),
-            visibility=float(getattr(landmark, "visibility", 1.0)),
+            visibility=_visibility_or_default(landmark),
         )
+
+
+def _visibility_or_default(landmark: Any) -> float:
+    visibility = getattr(landmark, "visibility", None)
+    return 1.0 if visibility is None else float(visibility)
 
 
 def mirror_landmarks(landmarks: list[LandmarkPoint]) -> list[LandmarkPoint]:

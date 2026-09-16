@@ -31,7 +31,17 @@ MUTED_COLOR: Color = (130, 130, 130)
 TEXT_SCALE = 0.45
 LINE_HEIGHT = 18
 PADDING = 10
-HAND_LINK_RATIO = 0.55
+HAND_LINK_RATIO = 0.7
+GRIPPER_RATIO = 0.42
+COMPACT_BACKGROUND: Color = (30, 28, 27)
+COMPACT_LINK: Color = (112, 169, 238)
+COMPACT_LINK_EDGE: Color = (52, 86, 134)
+COMPACT_JOINT: Color = (241, 239, 237)
+COMPACT_TARGET: Color = (108, 103, 98)
+COMPACT_PEDESTAL: Color = (72, 67, 62)
+COMPACT_GRIP_OPEN: Color = (162, 200, 137)
+COMPACT_GRIP_CLOSED: Color = (134, 136, 240)
+COMPACT_FIT_MARGIN = 1.1
 DISPLAY_ORDER = (ARM_LEFT, ARM_RIGHT)
 
 
@@ -98,54 +108,151 @@ def draw_simulation(cv2: Any, canvas: Any, state: RobotState | None, *, compact:
 def draw_compact_simulation(cv2: Any, canvas: Any, state: RobotState | None) -> None:
     """Draw only the schematic arms; the dashboard owns labels and telemetry.
 
-    Fit the schematic to both poses with a shared link scale. Each arm is
-    clipped to its own viewport and the bounds include room for the gripper.
+    Both arms share one link scale so their sizes stay comparable. Each arm is
+    clipped to its own viewport and the fit leaves room for the gripper jaws.
     No pose is drawn when the backend has not supplied an arm state.
     """
-    canvas[:] = (30, 28, 27)
+    canvas[:] = COMPACT_BACKGROUND
     height, width = canvas.shape[:2]
-    geometry = {}
+    geometry: dict[str, tuple[float, float, float, float]] = {}
     for name in DISPLAY_ORDER:
         arm = state.arm(name) if state is not None else None
         if arm is None:
             continue
         points = []
         for pose in (arm.joints, arm.targets):
-            points.extend(arm_points(
-                pose.get(JOINT_SHOULDER, UR_HOME_DEG[JOINT_SHOULDER]),
-                pose.get(JOINT_ELBOW, UR_HOME_DEG[JOINT_ELBOW]),
-                pose.get(JOINT_WRIST_1, UR_HOME_DEG[JOINT_WRIST_1]),
-                (0, 0), 1000, name == ARM_LEFT,
-            ))
-        xs, ys = [p[0]/1000 for p in points], [p[1]/1000 for p in points]
+            points.extend(_points_for(pose, (0, 0), 1000.0, name == ARM_LEFT))
+        xs = [point[0] / 1000.0 for point in points]
+        ys = [point[1] / 1000.0 for point in points]
         geometry[name] = (min(xs), min(ys), max(xs), max(ys))
     if not geometry:
         return
+
+    half_width = width // 2
     link = min(
-        min((width//2)*0.84/(right-left+0.8), height*0.84/(bottom-top+0.8))
+        min(
+            half_width * 0.84 / (right - left + COMPACT_FIT_MARGIN),
+            height * 0.84 / (bottom - top + COMPACT_FIT_MARGIN),
+        )
         for left, top, right, bottom in geometry.values()
     )
+    if link < 4:
+        return
+
     for column, name in enumerate(DISPLAY_ORDER):
         arm = state.arm(name) if state is not None else None
         if arm is None:
             continue
-        left, right = column * width // 2, (column + 1) * width // 2
+        left, right = column * half_width, (column + 1) * half_width
         view = canvas[:, left:right]
-        extent = min(right-left, height)
+        mirror = name == ARM_LEFT
         min_x, min_y, max_x, max_y = geometry[name]
-        base = (round((right-left)/2-(min_x+max_x)*link/2),
-                round(height/2-(min_y+max_y)*link/2))
-        thickness = max(2, round(extent / 65))
-        # A small pedestal identifies the fixed shoulder pivot without a grid.
-        half = max(5, round(extent * 0.05))
-        cv2.line(view, (base[0]-half, base[1]+half), (base[0]+half, base[1]+half),
-                 (72, 67, 62), max(1, thickness//2), cv2.LINE_AA)
-        _draw_arm(cv2, view, arm.targets, base, link, (108, 103, 98), max(1, thickness//2), name == ARM_LEFT)
-        _, _, wrist, tip = _draw_arm(
-            cv2, view, arm.joints, base, link, (112, 169, 238), thickness, name == ARM_LEFT,
+        base = (
+            round((right - left) / 2 - (min_x + max_x) * link / 2),
+            round(height / 2 - (min_y + max_y) * link / 2),
         )
-        _draw_gripper(cv2, view, wrist, tip, arm.gripper == GRIPPER_CLOSE,
-                      max(4, round(link * 0.3)), color=(207, 215, 226))
+        thickness = max(3, round(link * 0.16))
+        _draw_pedestal(cv2, view, base, link, thickness)
+        target_points = _points_for(arm.targets, base, link, mirror)
+        for start_point, end_point in zip(target_points, target_points[1:]):
+            _dashed_line(cv2, view, start_point, end_point, COMPACT_TARGET, max(1, thickness // 3), max(4, round(link * 0.12)))
+        points = _points_for(arm.joints, base, link, mirror)
+        _draw_compact_links(cv2, view, points, thickness)
+        _draw_jaw_gripper(
+            cv2,
+            view,
+            points[2],
+            points[3],
+            arm.gripper == GRIPPER_CLOSE,
+            link * GRIPPER_RATIO,
+            max(2, round(thickness * 0.5)),
+        )
+
+
+def _points_for(
+    angles: dict[str, float],
+    base: Point,
+    link_length: float,
+    mirror: bool,
+) -> tuple[Point, Point, Point, Point]:
+    return arm_points(
+        angles.get(JOINT_SHOULDER, UR_HOME_DEG[JOINT_SHOULDER]),
+        angles.get(JOINT_ELBOW, UR_HOME_DEG[JOINT_ELBOW]),
+        angles.get(JOINT_WRIST_1, UR_HOME_DEG[JOINT_WRIST_1]),
+        base,
+        link_length,
+        mirror,
+    )
+
+
+def _draw_pedestal(cv2: Any, view: Any, base: Point, link: float, thickness: int) -> None:
+    half = max(5, round(link * 0.28))
+    top = base[1] + max(3, thickness // 2)
+    cv2.rectangle(
+        view,
+        (base[0] - half, top),
+        (base[0] + half, top + max(3, round(link * 0.14))),
+        COMPACT_PEDESTAL,
+        -1,
+    )
+
+
+def _draw_compact_links(cv2: Any, view: Any, points: tuple[Point, Point, Point, Point], thickness: int) -> None:
+    widths = (thickness, thickness, max(2, thickness - 2))
+    for (start_point, end_point), width_px in zip(zip(points, points[1:]), widths):
+        cv2.line(view, start_point, end_point, COMPACT_LINK_EDGE, width_px + 3, cv2.LINE_AA)
+    for (start_point, end_point), width_px in zip(zip(points, points[1:]), widths):
+        cv2.line(view, start_point, end_point, COMPACT_LINK, width_px, cv2.LINE_AA)
+    radius = max(3, round(thickness * 0.75))
+    for point in points[:3]:
+        cv2.circle(view, point, radius + 2, COMPACT_LINK_EDGE, -1, cv2.LINE_AA)
+        cv2.circle(view, point, radius, COMPACT_JOINT, -1, cv2.LINE_AA)
+
+
+def _draw_jaw_gripper(
+    cv2: Any,
+    view: Any,
+    wrist: Point,
+    tip: Point,
+    closed: bool,
+    gripper_length: float,
+    thickness: int,
+) -> None:
+    dx, dy = tip[0] - wrist[0], tip[1] - wrist[1]
+    length = math.hypot(dx, dy) or 1.0
+    direction = (dx / length, dy / length)
+    normal = (-direction[1], direction[0])
+    color = COMPACT_GRIP_CLOSED if closed else COMPACT_GRIP_OPEN
+    palm_half = gripper_length * (0.22 if closed else 0.55)
+    mount_radius = max(2, thickness)
+    cv2.circle(view, tip, mount_radius + 2, COMPACT_LINK_EDGE, -1, cv2.LINE_AA)
+    cv2.circle(view, tip, mount_radius, color, -1, cv2.LINE_AA)
+    palm_a = _offset(tip, normal, palm_half)
+    palm_b = _offset(tip, normal, -palm_half)
+    cv2.line(view, palm_a, palm_b, color, thickness, cv2.LINE_AA)
+    for side_point, inward in ((palm_a, -1.0), (palm_b, 1.0)):
+        jaw_end = _offset(side_point, direction, gripper_length)
+        cv2.line(view, side_point, jaw_end, color, thickness, cv2.LINE_AA)
+        pad_start = _offset(jaw_end, direction, -gripper_length * 0.35)
+        cv2.line(view, pad_start, _offset(pad_start, normal, inward * palm_half * 0.4), color, max(1, thickness - 1), cv2.LINE_AA)
+
+
+def _dashed_line(cv2: Any, view: Any, start: Point, end: Point, color: Color, thickness: int, dash: int) -> None:
+    dx, dy = end[0] - start[0], end[1] - start[1]
+    length = math.hypot(dx, dy)
+    if length < 1:
+        return
+    steps = max(1, int(length // max(dash, 1)))
+    for step in range(0, steps, 2):
+        t0 = step / steps
+        t1 = min(1.0, (step + 1) / steps)
+        a = (round(start[0] + dx * t0), round(start[1] + dy * t0))
+        b = (round(start[0] + dx * t1), round(start[1] + dy * t1))
+        cv2.line(view, a, b, color, thickness, cv2.LINE_AA)
+
+
+def _offset(point: Point, direction: tuple[float, float], distance: float) -> Point:
+    return round(point[0] + direction[0] * distance), round(point[1] + direction[1] * distance)
 
 
 def draw_arm_panel(

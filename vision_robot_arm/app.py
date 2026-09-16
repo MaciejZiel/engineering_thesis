@@ -2,7 +2,7 @@ import time
 
 from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE, AppConfig
 from vision_robot_arm.core.display import enable_high_dpi_awareness
-from vision_robot_arm.core.pose_state import mirror_landmarks
+from vision_robot_arm.core.pose_state import LandmarkPoint, mirror_landmarks
 from vision_robot_arm.core.runtime import load_runtime_dependencies
 from vision_robot_arm.robot.controller import RobotController
 from vision_robot_arm.robot.factory import create_robot_controller
@@ -17,14 +17,16 @@ from vision_robot_arm.vision.dashboard import (
     cycle_output_mode,
 )
 from vision_robot_arm.vision.drawing import (
+    draw_hands,
     draw_joint_angle_labels,
     draw_stick_figure,
     landmark_visibility_ratio,
 )
 from vision_robot_arm.vision.hand_gestures import (
     WristAngleHold,
-    detect_hand_gestures,
-    hand_wrist_angles,
+    assign_hand_sides,
+    gestures_from_sides,
+    wrist_angles_from_sides,
 )
 from vision_robot_arm.vision.hand_tracker import HandTracker
 from vision_robot_arm.vision.landmarks import build_landmark_indices, build_landmark_names
@@ -33,7 +35,6 @@ from vision_robot_arm.vision.pose_tracker import PoseTracker
 from vision_robot_arm.vision.recording import CsvPoseRecorder
 from vision_robot_arm.vision.state_builder import PoseStateBuilder
 
-SIMULATION_SIZE = (960, 540)
 WINDOW_NAME = "Motion Twin - Dual UR7e Control"
 
 
@@ -93,11 +94,9 @@ def run_app(config: AppConfig) -> int:
         last_timestamp_ms = -1
         wait_delay_ms = _frame_wait_delay_ms(cv2, capture, config)
         mirrored = config.mirror and config.video_path is None
-        simulation_canvas = deps.np.zeros(
-            (SIMULATION_SIZE[1], SIMULATION_SIZE[0], 3), dtype=deps.np.uint8
-        )
         dashboard = DashboardUi(cv2, deps.np, WINDOW_NAME)
         dashboard.open()
+        simulation_canvas = _simulation_canvas(deps.np, dashboard.simulation_target_size())
         last_frame_at = time.monotonic()
         display_fps = 0.0
 
@@ -133,12 +132,14 @@ def run_app(config: AppConfig) -> int:
             detection = tracker.detect(rgb_frame, timestamp_ms)
             hand_gestures: tuple[str, ...] = ()
             wrist_angles: dict[str, float] = {}
+            hands_by_side: dict[str, list] = {}
             if hand_tracker is not None and detection.landmarks:
                 hands = hand_tracker.detect(rgb_frame, timestamp_ms)
-                hand_gestures = detect_hand_gestures(hands, detection.landmarks, indices)
+                hands_by_side = assign_hand_sides(hands, detection.landmarks, indices)
+                hand_gestures = gestures_from_sides(hands_by_side)
                 aspect_ratio = frame.shape[1] / max(1, frame.shape[0])
                 wrist_angles = wrist_hold.update(
-                    hand_wrist_angles(hands, detection.landmarks, indices, aspect_ratio),
+                    wrist_angles_from_sides(hands_by_side, detection.landmarks, indices, aspect_ratio),
                     timestamp_ms,
                 )
             if mirrored:
@@ -162,6 +163,22 @@ def run_app(config: AppConfig) -> int:
                 draw_stick_figure(
                     cv2,
                     frame,
+                    display_landmarks,
+                    indices,
+                    config.visibility_threshold,
+                )
+                display_hands = {
+                    side: (
+                        mirror_landmarks([LandmarkPoint.from_landmark(point) for point in hand])
+                        if mirrored
+                        else hand
+                    )
+                    for side, hand in hands_by_side.items()
+                }
+                draw_hands(
+                    cv2,
+                    frame,
+                    display_hands,
                     display_landmarks,
                     indices,
                     config.visibility_threshold,
@@ -207,6 +224,9 @@ def run_app(config: AppConfig) -> int:
             last_frame_at = now
 
             robot_state = robot_controller.robot_state()
+            simulation_size = dashboard.simulation_target_size()
+            if (simulation_canvas.shape[1], simulation_canvas.shape[0]) != simulation_size:
+                simulation_canvas = _simulation_canvas(deps.np, simulation_size)
             draw_simulation(cv2, simulation_canvas, robot_state, compact=True)
             can_calibrate = current_state is not None and any(
                 value is not None for value in current_state.angles.values()
@@ -260,6 +280,10 @@ def run_app(config: AppConfig) -> int:
             tracker.close()
         capture.release()
         cv2.destroyAllWindows()
+
+
+def _simulation_canvas(np: object, size: tuple[int, int]) -> object:
+    return np.zeros((size[1], size[0], 3), dtype=np.uint8)
 
 
 def _fit_frame(cv2: object, frame: object, config: AppConfig) -> object:

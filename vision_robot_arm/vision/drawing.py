@@ -226,6 +226,47 @@ def draw_stick_figure(
         cv2.circle(frame, nose, radius, head_color, 2, cv2.LINE_AA)
 
 
+HAND_PALM_OUTLINE = (0, 5, 9, 13, 17, 0)
+HAND_FINGER_CHAINS = ((5, 6, 7, 8), (9, 10, 11, 12), (13, 14, 15, 16), (17, 18, 19, 20), (0, 1, 2, 3, 4))
+HAND_MIDDLE_MCP = 9
+HAND_COLOR: Color = (162, 200, 137)
+HAND_LINK_COLOR: Color = (112, 169, 238)
+
+
+def draw_hands(
+    cv2: Any,
+    frame: Any,
+    hands_by_side: dict[str, list[Any]],
+    landmarks: list[Any],
+    indices: dict[str, int],
+    min_visibility: float,
+) -> None:
+    """Draw the tracked hands and the wrist-to-palm link that defines the wrist angle."""
+    height, width = frame.shape[:2]
+    thin = max(1, round(2 * height / 1080))
+    thick = max(2, round(4 * height / 1080))
+    for side, hand in hands_by_side.items():
+        if len(hand) < 21:
+            continue
+        points = [pixel_point(point, width, height) for point in hand]
+        for chain in (HAND_PALM_OUTLINE, *HAND_FINGER_CHAINS):
+            for first, second in zip(chain, chain[1:]):
+                cv2.line(frame, points[first], points[second], HAND_COLOR, thin, cv2.LINE_AA)
+        for point in points:
+            cv2.circle(frame, point, thin + 1, HAND_COLOR, -1, cv2.LINE_AA)
+
+        wrist_name = f"{side.upper()}_WRIST"
+        if wrist_name not in indices:
+            continue
+        wrist = reliable_point(landmarks, indices, wrist_name, min_visibility, width, height)
+        if wrist is None:
+            continue
+        palm = points[HAND_MIDDLE_MCP]
+        cv2.line(frame, wrist, palm, HAND_LINK_COLOR, thick, cv2.LINE_AA)
+        cv2.circle(frame, wrist, thick + 2, HAND_LINK_COLOR, -1, cv2.LINE_AA)
+        cv2.circle(frame, palm, thick + 1, HAND_LINK_COLOR, -1, cv2.LINE_AA)
+
+
 def landmark_visibility_ratio(landmarks: list[Any], min_visibility: float) -> float:
     if not landmarks:
         return 0.0
