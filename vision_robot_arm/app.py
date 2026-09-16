@@ -2,6 +2,7 @@ import time
 
 from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE, AppConfig
 from vision_robot_arm.core.hud import scaled
+from vision_robot_arm.core.pose_state import mirror_landmarks
 from vision_robot_arm.core.runtime import load_runtime_dependencies
 from vision_robot_arm.robot.controller import RobotController
 from vision_robot_arm.robot.factory import create_robot_controller
@@ -71,6 +72,7 @@ def run_app(config: AppConfig) -> int:
         started_at = time.monotonic()
         last_timestamp_ms = -1
         wait_delay_ms = _frame_wait_delay_ms(cv2, capture, config)
+        mirrored = config.mirror and config.video_path is None
         window_name = "Vision Robot Arm - Pose Tracker"
 
         print(_source_started_message(config))
@@ -103,6 +105,8 @@ def run_app(config: AppConfig) -> int:
             )
             last_timestamp_ms = timestamp_ms
             detection = tracker.detect(rgb_frame, timestamp_ms)
+            if mirrored:
+                frame = cv2.flip(frame, 1)
 
             current_state = None
             if detection.landmarks:
@@ -111,10 +115,15 @@ def run_app(config: AppConfig) -> int:
                     detection.landmarks,
                     detection.world_landmarks,
                 )
+                display_landmarks = (
+                    mirror_landmarks(current_state.landmarks)
+                    if mirrored
+                    else current_state.landmarks
+                )
                 draw_stick_figure(
                     cv2,
                     frame,
-                    current_state.landmarks,
+                    display_landmarks,
                     indices,
                     config.visibility_threshold,
                 )
@@ -122,7 +131,7 @@ def run_app(config: AppConfig) -> int:
                     draw_joint_angle_labels(
                         cv2,
                         frame,
-                        current_state.landmarks,
+                        display_landmarks,
                         indices,
                         current_state.angles,
                         config.visibility_threshold,

@@ -75,6 +75,15 @@ python main.py --width 1280 --height 720
 python main.py --width 0 --height 0
 ```
 
+The camera image is mirrored like a selfie view, so your right arm appears on
+the right side of the window. Detection still runs on the original image, so
+`right_*` angles and gestures always mean your own right side. Turn mirroring
+off with:
+
+```powershell
+python main.py --no-mirror
+```
+
 Other useful options:
 
 ```powershell

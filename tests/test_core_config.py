@@ -2,6 +2,14 @@ from pathlib import Path
 import unittest
 
 from vision_robot_arm.core.config import DEFAULT_MODEL_PATH, AppConfig
+from vision_robot_arm.core.pose_state import LandmarkPoint, mirror_landmarks
+
+
+class MirrorLandmarksTests(unittest.TestCase):
+    def test_mirrors_x_and_keeps_other_fields(self) -> None:
+        mirrored = mirror_landmarks([LandmarkPoint(0.25, 0.4, -0.1, visibility=0.8)])
+
+        self.assertEqual(mirrored, [LandmarkPoint(0.75, 0.4, -0.1, visibility=0.8)])
 
 
 class ConfigTests(unittest.TestCase):

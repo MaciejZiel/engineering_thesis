@@ -19,6 +19,13 @@ class LandmarkPoint:
         )
 
 
+def mirror_landmarks(landmarks: list[LandmarkPoint]) -> list[LandmarkPoint]:
+    return [
+        LandmarkPoint(x=1.0 - point.x, y=point.y, z=point.z, visibility=point.visibility)
+        for point in landmarks
+    ]
+
+
 @dataclass(frozen=True)
 class PoseState:
     timestamp_ms: int

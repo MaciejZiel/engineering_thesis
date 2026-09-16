@@ -65,6 +65,10 @@ class CliRobotOptionsTests(unittest.TestCase):
 
         self.assertEqual(config.robot.backend, "debug")
 
+    def test_mirror_is_on_by_default_and_can_be_disabled(self) -> None:
+        self.assertTrue(parse_args([]).mirror)
+        self.assertFalse(parse_args(["--no-mirror"]).mirror)
+
     def test_existing_flags_still_parse(self) -> None:
         config = parse_args(["--camera", "1", "--smoothing-alpha", "0.2", "--loop-video"])
 

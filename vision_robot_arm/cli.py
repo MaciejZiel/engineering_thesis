@@ -47,6 +47,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Frame height in pixels; frames are resized when the camera gives another size. 0 keeps the camera size. Default: 1080.",
     )
     parser.add_argument(
+        "--no-mirror",
+        dest="mirror",
+        action="store_false",
+        help="Do not mirror the camera image. Video files are never mirrored.",
+    )
+    parser.add_argument(
         "--print-interval",
         type=float,
         default=0.5,
@@ -214,6 +220,7 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         test_mode=args.test_mode,
         width=args.width,
         height=args.height,
+        mirror=args.mirror,
         print_interval=args.print_interval,
         visibility_threshold=args.visibility_threshold,
         smoothing_alpha=args.smoothing_alpha,
