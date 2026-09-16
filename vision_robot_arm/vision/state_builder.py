@@ -31,6 +31,7 @@ class PoseStateBuilder:
         landmarks: list[Any],
         world_landmarks: list[Any] | None,
         extra_gestures: tuple[str, ...] = (),
+        extra_angles: dict[str, float] | None = None,
     ) -> PoseState:
         raw_landmarks = [LandmarkPoint.from_landmark(landmark) for landmark in landmarks]
         smoothed_landmarks = self._landmark_smoother.update(raw_landmarks)
@@ -50,13 +51,15 @@ class PoseStateBuilder:
             self._indices,
             self._min_visibility,
         )
-        smoothed_angles = self._angle_smoother.update(
-            calculate_angles(
-                smoothed_landmarks,
-                self._indices,
-                self._min_visibility,
-            )
+        current_angles = calculate_angles(
+            smoothed_landmarks,
+            self._indices,
+            self._min_visibility,
         )
+        if extra_angles:
+            raw_angles.update(extra_angles)
+            current_angles.update(extra_angles)
+        smoothed_angles = self._angle_smoother.update(current_angles)
         relative_angles = self._calibration.relative_angles(smoothed_angles)
         gestures = detect_gestures(
             smoothed_landmarks,

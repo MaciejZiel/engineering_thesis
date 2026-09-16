@@ -1,7 +1,10 @@
 import math
 from typing import Any
 
+from vision_robot_arm.vision.metrics import calculate_angle
+
 HAND_WRIST = 0
+HAND_MIDDLE_MCP = 9
 FINGER_PIPS = (6, 10, 14, 18)
 FINGER_TIPS = (8, 12, 16, 20)
 EXTENDED_RATIO = 1.1
@@ -77,6 +80,29 @@ def detect_hand_gestures(
         elif shape == HAND_FIST:
             gestures.append(f"{side}_fist")
     return tuple(sorted(gestures))
+
+
+def hand_wrist_angles(
+    hands: list[list[Any]],
+    pose_landmarks: list[Any],
+    indices: dict[str, int],
+) -> dict[str, float]:
+    angles: dict[str, float] = {}
+    for side, hand in assign_hand_sides(hands, pose_landmarks, indices).items():
+        if len(hand) <= HAND_MIDDLE_MCP:
+            continue
+        elbow_index = indices.get(f"{side.upper()}_ELBOW")
+        wrist_index = indices.get(f"{side.upper()}_WRIST")
+        if elbow_index is None or wrist_index is None:
+            continue
+        if max(elbow_index, wrist_index) >= len(pose_landmarks):
+            continue
+        angles[f"{side}_wrist"] = calculate_angle(
+            pose_landmarks[elbow_index],
+            pose_landmarks[wrist_index],
+            hand[HAND_MIDDLE_MCP],
+        )
+    return angles
 
 
 def _distance(a: Any, b: Any) -> float:
