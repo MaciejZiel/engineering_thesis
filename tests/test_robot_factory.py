@@ -39,6 +39,10 @@ class FactoryTests(unittest.TestCase):
         self.assertEqual(controller.status_lines(), [])
         self.assertIsNone(controller.robot_state())
 
+    def test_ur_backend_without_hosts_exits(self) -> None:
+        with self.assertRaises(SystemExit):
+            create_robot_controller(RobotConfig(backend="ur"))
+
     def test_debug_backend_creates_mapped_controller(self) -> None:
         controller = create_robot_controller(RobotConfig(backend="debug"))
 
@@ -53,11 +57,11 @@ class FactoryTests(unittest.TestCase):
 
         self.assertEqual(
             output.getvalue().strip(),
-            "robot R: shoulder= 45.0 gripper=close | lift_mode=off",
+            "robot R: shoulder=-135.0 gripper=close | lift_mode=off",
         )
         self.assertEqual(
             controller.status_lines(),
-            ["robot debug: R: shoulder= 45.0 gripper=close | lift_mode=off"],
+            ["robot debug: R: shoulder=-135.0 gripper=close | lift_mode=off"],
         )
 
     def test_sim_backend_reports_two_arms(self) -> None:
@@ -66,8 +70,8 @@ class FactoryTests(unittest.TestCase):
         controller.update(make_state({"right_shoulder": 45.0, "left_wrist": 120.0}))
 
         state = controller.robot_state()
-        self.assertEqual(state.arm("right").targets["shoulder"], 45.0)
-        self.assertEqual(state.arm("left").targets["wrist"], 120.0)
+        self.assertEqual(state.arm("right").targets["shoulder"], -135.0)
+        self.assertEqual(state.arm("left").targets["wrist_1"], 60.0)
         self.assertTrue(controller.status_lines()[0].startswith("sim R:"))
 
 

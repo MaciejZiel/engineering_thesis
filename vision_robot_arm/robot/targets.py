@@ -1,14 +1,38 @@
 import math
 from dataclasses import dataclass, field
 
+ROBOT_MODEL = "UR7e"
+
 ARM_RIGHT = "right"
 ARM_LEFT = "left"
 ARM_NAMES = (ARM_RIGHT, ARM_LEFT)
 
+JOINT_BASE = "base"
 JOINT_SHOULDER = "shoulder"
 JOINT_ELBOW = "elbow"
-JOINT_WRIST = "wrist"
-JOINT_NAMES = (JOINT_SHOULDER, JOINT_ELBOW, JOINT_WRIST)
+JOINT_WRIST_1 = "wrist_1"
+JOINT_WRIST_2 = "wrist_2"
+JOINT_WRIST_3 = "wrist_3"
+JOINT_WRIST = JOINT_WRIST_1
+JOINT_NAMES = (
+    JOINT_BASE,
+    JOINT_SHOULDER,
+    JOINT_ELBOW,
+    JOINT_WRIST_1,
+    JOINT_WRIST_2,
+    JOINT_WRIST_3,
+)
+MAPPED_JOINTS = (JOINT_SHOULDER, JOINT_ELBOW, JOINT_WRIST_1)
+HELD_JOINTS = (JOINT_BASE, JOINT_WRIST_2, JOINT_WRIST_3)
+
+UR_HOME_DEG = {
+    JOINT_BASE: 0.0,
+    JOINT_SHOULDER: -90.0,
+    JOINT_ELBOW: 0.0,
+    JOINT_WRIST_1: -90.0,
+    JOINT_WRIST_2: 0.0,
+    JOINT_WRIST_3: 0.0,
+}
 
 GRIPPER_OPEN = "open"
 GRIPPER_CLOSE = "close"
@@ -24,7 +48,7 @@ class ArmTargets:
         return bool(self.joints) or self.gripper is not None
 
     def format(self) -> str:
-        parts = [f"{name}={value:5.1f}" for name, value in self.joints.items()]
+        parts = [f"{name}={value:6.1f}" for name, value in self.joints.items()]
         if self.gripper is not None:
             parts.append(f"gripper={self.gripper}")
         return " ".join(parts) if parts else "no data"
@@ -70,3 +94,11 @@ class RobotState:
 
     def arm(self, name: str) -> ArmState | None:
         return self.arms.get(name)
+
+
+def full_joint_pose(joints: dict[str, float]) -> dict[str, float]:
+    pose = dict(UR_HOME_DEG)
+    for name, value in joints.items():
+        if name in pose:
+            pose[name] = value
+    return pose

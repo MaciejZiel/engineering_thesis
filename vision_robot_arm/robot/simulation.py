@@ -7,18 +7,26 @@ from vision_robot_arm.robot.targets import (
     ARM_NAMES,
     GRIPPER_OPEN,
     JOINT_NAMES,
+    MAPPED_JOINTS,
     ArmState,
     JointTargets,
     RobotState,
 )
 
+JOINT_SHORT_NAMES = {
+    "base": "B",
+    "shoulder": "S",
+    "elbow": "E",
+    "wrist_1": "W1",
+    "wrist_2": "W2",
+    "wrist_3": "W3",
+}
+
 
 class SimulatedArm:
     def __init__(self, config: RobotConfig) -> None:
         self._config = config
-        self.joints = {
-            name: config.limit_for(name).clamp(config.home_deg) for name in JOINT_NAMES
-        }
+        self.joints = {name: config.home_for(name) for name in JOINT_NAMES}
         self.targets = dict(self.joints)
         self.gripper = GRIPPER_OPEN
 
@@ -83,8 +91,8 @@ class SimulationBackend:
         lines = []
         for name, arm in self._arms.items():
             joints = " ".join(
-                f"{joint[0].upper()} {arm.joints[joint]:5.1f}->{arm.targets[joint]:5.1f}"
-                for joint in JOINT_NAMES
+                f"{JOINT_SHORT_NAMES[joint]} {arm.joints[joint]:6.1f}->{arm.targets[joint]:6.1f}"
+                for joint in MAPPED_JOINTS
             )
             lines.append(f"sim {name[0].upper()}: {joints} grip {arm.gripper}")
         lines.append(f"sim lift_mode={'on' if self._lift_mode else 'off'}")

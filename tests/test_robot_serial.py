@@ -62,7 +62,7 @@ class EncodeTargetsTests(unittest.TestCase):
             timestamp_ms=1,
             arms={
                 "right": ArmTargets(
-                    joints={"shoulder": 90.0, "elbow": 45.0, "wrist": 120.0},
+                    joints={"shoulder": 90.0, "elbow": 45.0, "wrist_1": 120.0},
                     gripper=GRIPPER_CLOSE,
                 ),
                 "left": ArmTargets(joints={"shoulder": 30.0}, gripper=GRIPPER_OPEN),

@@ -13,14 +13,20 @@ from vision_robot_arm.robot.config import (
     BACKEND_DEBUG,
     BACKEND_NONE,
     BACKEND_SIM,
+    DEFAULT_ELBOW_MAPPING,
+    DEFAULT_SHOULDER_MAPPING,
+    DEFAULT_WRIST_MAPPING,
+    UR7E_MAX_JOINT_SPEED_DEG_S,
+    UR_SECONDARY_PORT,
     JointLimit,
+    JointMapping,
     RobotConfig,
 )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Webcam pose tracker for the vision robot arm prototype."
+        description="Webcam pose tracker for the vision robot arm prototype (two UR7e cobots)."
     )
     parser.add_argument(
         "--camera",
@@ -128,8 +134,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--test-mode",
         action="store_true",
         help=(
-            "Show joint angles next to the arm joints and draw the robot arm panel on the "
-            "camera image. Uses the simulated robot when no --robot-backend is given."
+            "Show joint angles next to the arm joints and open the robot simulation window. "
+            "Uses the simulated robots when no --robot-backend is given."
         ),
     )
 
@@ -139,8 +145,9 @@ def build_parser() -> argparse.ArgumentParser:
         choices=BACKEND_CHOICES,
         default=BACKEND_NONE,
         help=(
-            "Where mapped robot commands go: none, debug (print), sim (simulated arm) "
-            "or serial (hardware over a serial port). Default: none."
+            "Where mapped robot commands go: none, debug (print), sim (two simulated UR7e arms), "
+            "ur (real UR7e cobots over URScript/TCP) or serial (generic serial line protocol). "
+            "Default: none."
         ),
     )
     robot.add_argument(
@@ -155,6 +162,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds between robot debug command prints. Default: 0.5.",
     )
     robot.add_argument(
+        "--robot-right-host",
+        default=None,
+        help="IP address of the UR7e driven by your right arm (--robot-backend ur).",
+    )
+    robot.add_argument(
+        "--robot-left-host",
+        default=None,
+        help="IP address of the UR7e driven by your left arm (--robot-backend ur).",
+    )
+    robot.add_argument(
+        "--robot-ur-port",
+        type=int,
+        default=UR_SECONDARY_PORT,
+        help=f"URScript TCP port on the UR controller (30001 primary, 30002 secondary). Default: {UR_SECONDARY_PORT}.",
+    )
+    robot.add_argument(
+        "--robot-servo-gain",
+        type=int,
+        default=300,
+        help="servoj proportional gain, 100..2000. Default: 300.",
+    )
+    robot.add_argument(
+        "--robot-servo-lookahead",
+        type=float,
+        default=0.1,
+        help="servoj lookahead time in seconds, 0.03..0.2. Default: 0.1.",
+    )
+    robot.add_argument(
+        "--robot-send-interval",
+        type=float,
+        default=0.05,
+        help="Seconds between servoj / serial frames. Default: 0.05.",
+    )
+    robot.add_argument(
         "--robot-port",
         default=None,
         help="Serial port for --robot-backend serial, for example COM3.",
@@ -166,22 +207,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Serial baud rate. Default: 115200.",
     )
     robot.add_argument(
-        "--robot-send-interval",
-        type=float,
-        default=0.05,
-        help="Minimum seconds between serial frames. Default: 0.05.",
-    )
-    robot.add_argument(
         "--robot-max-speed",
         type=float,
-        default=90.0,
-        help="Maximum simulated joint speed in degrees per second. Default: 90.",
-    )
-    robot.add_argument(
-        "--robot-home",
-        type=float,
-        default=90.0,
-        help="Starting joint angle of the simulated arm in degrees. Default: 90.",
+        default=60.0,
+        help=(
+            "Maximum simulated joint speed in degrees per second. "
+            f"UR7e hardware limit is {UR7E_MAX_JOINT_SPEED_DEG_S:.0f}. Default: 60."
+        ),
     )
     robot.add_argument(
         "--robot-deadband",
@@ -193,25 +225,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--robot-shoulder-range",
         type=float,
         nargs=2,
-        default=(0.0, 180.0),
+        default=(DEFAULT_SHOULDER_MAPPING.limit.minimum, DEFAULT_SHOULDER_MAPPING.limit.maximum),
         metavar=("MIN", "MAX"),
-        help="Allowed shoulder joint range in degrees. Default: 0 180.",
+        help="Allowed UR shoulder joint range in degrees. Default: -180 0.",
     )
     robot.add_argument(
         "--robot-elbow-range",
         type=float,
         nargs=2,
-        default=(0.0, 180.0),
+        default=(DEFAULT_ELBOW_MAPPING.limit.minimum, DEFAULT_ELBOW_MAPPING.limit.maximum),
         metavar=("MIN", "MAX"),
-        help="Allowed elbow joint range in degrees. Default: 0 180.",
+        help="Allowed UR elbow joint range in degrees (UR7e hardware: -160 160). Default: -160 160.",
     )
     robot.add_argument(
         "--robot-wrist-range",
         type=float,
         nargs=2,
-        default=(0.0, 180.0),
+        default=(DEFAULT_WRIST_MAPPING.limit.minimum, DEFAULT_WRIST_MAPPING.limit.maximum),
         metavar=("MIN", "MAX"),
-        help="Allowed wrist joint range in degrees. Default: 0 180.",
+        help="Allowed UR wrist 1 joint range in degrees. Default: -180 180.",
     )
     return parser
 
@@ -228,15 +260,19 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
     robot = RobotConfig(
         backend=backend,
         print_interval=args.robot_print_interval,
+        right_host=args.robot_right_host,
+        left_host=args.robot_left_host,
+        ur_port=args.robot_ur_port,
+        servo_gain=args.robot_servo_gain,
+        servo_lookahead_s=args.robot_servo_lookahead,
         port=args.robot_port,
         baud_rate=args.robot_baud,
         send_interval=args.robot_send_interval,
         max_speed_deg_s=args.robot_max_speed,
-        home_deg=args.robot_home,
         joint_deadband_deg=args.robot_deadband,
-        shoulder_limit=JointLimit(*args.robot_shoulder_range),
-        elbow_limit=JointLimit(*args.robot_elbow_range),
-        wrist_limit=JointLimit(*args.robot_wrist_range),
+        shoulder=_with_limit(DEFAULT_SHOULDER_MAPPING, args.robot_shoulder_range),
+        elbow=_with_limit(DEFAULT_ELBOW_MAPPING, args.robot_elbow_range),
+        wrist=_with_limit(DEFAULT_WRIST_MAPPING, args.robot_wrist_range),
     )
     return AppConfig(
         camera=args.camera,
@@ -258,6 +294,15 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         min_detection_confidence=args.min_detection_confidence,
         min_pose_presence_confidence=args.min_pose_presence_confidence,
         min_tracking_confidence=args.min_tracking_confidence,
+    )
+
+
+def _with_limit(mapping: JointMapping, limits: tuple[float, float]) -> JointMapping:
+    return JointMapping(
+        source=mapping.source,
+        offset_deg=mapping.offset_deg,
+        sign=mapping.sign,
+        limit=JointLimit(limits[0], limits[1]),
     )
 
 

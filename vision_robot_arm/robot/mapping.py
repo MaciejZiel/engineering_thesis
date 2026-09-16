@@ -4,7 +4,7 @@ from vision_robot_arm.robot.targets import (
     ARM_NAMES,
     GRIPPER_CLOSE,
     GRIPPER_OPEN,
-    JOINT_NAMES,
+    MAPPED_JOINTS,
     ArmTargets,
     JointTargets,
 )
@@ -32,12 +32,14 @@ class RobotMapper:
 
     def _map_arm(self, arm: str, state: PoseState) -> ArmTargets:
         joints: dict[str, float] = {}
-        for joint in JOINT_NAMES:
-            angle = state.angles.get(f"{arm}_{joint}")
-            if angle is None:
+        for joint in MAPPED_JOINTS:
+            mapping = self._config.mapping_for(joint)
+            if mapping is None:
                 continue
-            clamped = self._config.limit_for(joint).clamp(angle)
-            joints[joint] = self._apply_deadband(f"{arm}_{joint}", clamped)
+            body_angle = state.angles.get(f"{arm}_{mapping.source}")
+            if body_angle is None:
+                continue
+            joints[joint] = self._apply_deadband(f"{arm}_{joint}", mapping.to_robot(body_angle))
         return ArmTargets(joints=joints, gripper=_gripper_from_gestures(arm, state.gestures))
 
     def _apply_deadband(self, key: str, value: float) -> float:

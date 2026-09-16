@@ -1,7 +1,9 @@
 # Vision Robot Arm
 
 Prototype for recognizing a person from a webcam, drawing a custom stick
-figure, and printing joint data that can later feed a robot arm controller.
+figure, and turning the joint data into commands for two Universal Robots
+UR7e cobots (the PJA Arm Robotics lab setup: two UR7e, UR AI Accelerator with
+NVIDIA Jetson AGX Orin and an Orbbec Gemini 335Lg 3D camera).
 
 ## Status
 
@@ -148,9 +150,10 @@ vision_robot_arm/
     controller.py          # RobotController glue between mapper and backend
     factory.py             # backend selection from --robot-backend
     mapping.py             # PoseState -> JointTargets
-    serial_backend.py      # serial line protocol and pyserial backend
-    simulation.py          # simulated two-arm robot backend
-    targets.py             # JointTargets, ArmState and RobotState value objects
+    serial_backend.py      # generic serial line protocol (pyserial)
+    simulation.py          # two simulated UR7e arms
+    targets.py             # UR joint names, JointTargets, ArmState, RobotState
+    ur_backend.py          # URScript servoj over TCP to the UR7e controllers
     visualization.py       # robot simulation window drawn in test mode
 models/
   hand_landmarker.task
@@ -162,6 +165,7 @@ tests/
   test_robot_mapping.py
   test_robot_serial.py
   test_robot_simulation.py
+  test_robot_ur.py
   test_robot_visualization.py
   test_vision_drawing.py
   test_vision_hand_gestures.py
@@ -178,8 +182,9 @@ rules, and `docs/OWNERSHIP.md` for who owns which area and how we commit.
 Test mode is the quickest way to see what the robot side receives. It draws
 the current shoulder, elbow and wrist angles next to the joints on the camera
 image, prints the robot state to the console, and opens a second window,
-"Robot Simulation", with two schematic three-link arms. The left panel is
-the robot arm driven by your left arm, the right panel by your right arm
+"Robot Simulation", with two schematic UR7e arms (shoulder, elbow, wrist 1;
+base, wrist 2 and wrist 3 are held at the home pose). The left panel is
+the cobot driven by your left arm, the right panel by your right arm
 (mirrored like the camera view). The grey arm is the mapped target, the green
 arm is where the simulated robot currently is, the blue jaws show the gripper.
 The top-left panel of the camera window shows detection, robot backend,
@@ -259,18 +264,24 @@ fist when none are:
 
 ## Robot Backends
 
+The target hardware is two **Universal Robots UR7e** cobots (6 joints: base,
+shoulder, elbow, wrist 1, wrist 2, wrist 3; payload 7.5 kg, reach 850 mm,
+joint range +-360 deg except elbow +-160 deg, max joint speed 180 deg/s).
 The robot side turns every `PoseState` into `JointTargets`: for each of the
-two robot arms (`right`, `left`) the shoulder, elbow and wrist angles in
-degrees plus a gripper command, and one lift-mode flag. Your right arm drives
-the right robot arm and your left arm the left one. The targets go to a
-backend selected with `--robot-backend`:
+two cobots (`right`, `left`) the UR `shoulder`, `elbow` and `wrist_1` joint
+angles in degrees plus a gripper command, and one lift-mode flag. `base`,
+`wrist_2` and `wrist_3` are held at the UR home pose
+`[0, -90, 0, -90, 0, 0]`. Your right arm drives the right cobot and your left
+arm the left one. The targets go to a backend selected with
+`--robot-backend`:
 
 | Backend  | What it does                                                    |
 | -------- | --------------------------------------------------------------- |
 | `none`   | default, robot side disabled                                    |
 | `debug`  | prints the mapped targets to the console                        |
-| `sim`    | two simulated arms with speed limit, shown in the test window   |
-| `serial` | sends targets to hardware over a serial port (pyserial)         |
+| `sim`    | two simulated UR7e arms with speed limit, shown in the test window |
+| `ur`     | real UR7e cobots: URScript `servoj` over TCP (ports 30001/30002) |
+| `serial` | generic serial line protocol for a microcontroller (pyserial)   |
 
 ```powershell
 python main.py --robot-backend debug
@@ -278,19 +289,59 @@ python main.py --robot-backend debug
 
 `--robot-debug` still works as a deprecated alias for `--robot-backend debug`.
 
-Each simulated arm starts at `--robot-home` degrees (default `90`) and moves
-toward the mapped targets at most `--robot-max-speed` degrees per second
-(default `90`). With `--test-mode` the current and target angles are drawn in
-the simulation window, so you can test the mapping without hardware:
+Each simulated arm starts at the UR home pose and moves toward the mapped
+targets at most `--robot-max-speed` degrees per second (default `60`, UR7e
+hardware limit `180`). With `--test-mode` the current and target angles are
+drawn in the simulation window, so you can test the mapping without hardware:
 
 ```powershell
 python main.py --robot-backend sim --robot-max-speed 60
 ```
 
+### UR7e over URScript
+
+Put each cobot in **Remote Control** mode on the teach pendant, give the
+PC a route to the controllers, then:
+
+```powershell
+python main.py --robot-backend ur --robot-right-host 192.168.1.10 --robot-left-host 192.168.1.11
+```
+
+The backend opens one TCP connection per cobot to the URScript secondary
+interface (`--robot-ur-port`, default `30002`; `30001` is the primary
+interface) and streams one line every `--robot-send-interval` seconds:
+
+```text
+servoj([0.0000, -0.7854, 1.5708, -1.5708, 0.0000, 0.0000], 0, 0, 0.050, 0.100, 300)
+```
+
+The six values are the joint angles in radians in UR order (base, shoulder,
+elbow, wrist 1, wrist 2, wrist 3). The remaining parameters are `a` and `v`
+(ignored by `servoj`), `t` (`--robot-send-interval`), `lookahead_time`
+(`--robot-servo-lookahead`, default `0.1`) and `gain` (`--robot-servo-gain`,
+default `300`). The gripper is driven through tool digital output 0
+(`set_tool_digital_out(0, True)` = close); swap `encode_gripper` in
+`vision_robot_arm/robot/ur_backend.py` for the URCap call of the gripper the
+lab mounts (for example Robotiq). Start with a low `--robot-max-speed` and
+narrow joint ranges when testing on the real cobots.
+
+Body angle to UR joint mapping (`vision_robot_arm/robot/config.py`,
+`JointMapping`):
+
+| Body angle (deg)                        | UR joint  | Formula        | Default range |
+| --------------------------------------- | --------- | -------------- | ------------- |
+| shoulder (elbow-shoulder-hip), 0 = down | `shoulder`| body - 180     | -180 .. 0     |
+| elbow (shoulder-elbow-wrist), 180 = straight | `elbow` | 180 - body   | -160 .. 160   |
+| wrist (elbow-wrist-index), 180 = straight | `wrist_1` | 180 - body   | -180 .. 180   |
+
+So an arm held horizontally with a straight elbow gives the UR home pose
+`shoulder=-90, elbow=0`. Offsets and signs are constants in `config.py`;
+the ranges are the `--robot-*-range` flags.
+
 ### Serial protocol
 
-The serial backend needs the `serial` extra (`pip install -e .[serial]`) and a
-port:
+The serial backend is a generic fallback for a microcontroller-driven arm. It
+needs the `serial` extra (`pip install -e .[serial]`) and a port:
 
 ```powershell
 python main.py --robot-backend serial --robot-port COM3 --robot-baud 115200
@@ -309,7 +360,7 @@ Every field except `L` starts with the arm, `R` (right) or `L` (left):
 | ----- | --------------------------------------------- |
 | `?S`  | shoulder angle in degrees                     |
 | `?E`  | elbow angle in degrees                        |
-| `?W`  | wrist angle in degrees                        |
+| `?W`  | wrist 1 angle in degrees                      |
 | `?G`  | gripper, `1` close / `0` open, omitted = hold  |
 | `L`   | lift mode, `1` on / `0` off                    |
 
@@ -319,15 +370,15 @@ and is expected to change once the hardware is chosen.
 
 Current mapping (`vision_robot_arm/robot/mapping.py`), applied to each arm:
 
-- shoulder angle (elbow-shoulder-hip) -> `shoulder`
-- elbow angle (shoulder-elbow-wrist) -> `elbow`
-- wrist angle (elbow-wrist-index finger) -> `wrist`
+- shoulder angle (elbow-shoulder-hip) -> UR `shoulder`
+- elbow angle (shoulder-elbow-wrist) -> UR `elbow`
+- wrist angle (elbow-wrist-index finger) -> UR `wrist_1`
 - `<side>_fist` -> `gripper=close`
 - `<side>_hand_open` -> `gripper=open`
 - `right_hand_up` -> `lift_mode=on`
 
-Joint angles are clamped to `--robot-shoulder-range`, `--robot-elbow-range`
-and `--robot-wrist-range`
-(default `0 180`) and changes smaller than `--robot-deadband` degrees (default
+UR joint angles are clamped to `--robot-shoulder-range` (default `-180 0`),
+`--robot-elbow-range` (default `-160 160`) and `--robot-wrist-range` (default
+`-180 180`) and changes smaller than `--robot-deadband` degrees (default
 `1.5`) are ignored to suppress jitter. When neither gripper gesture is active
 the gripper keeps its previous state.

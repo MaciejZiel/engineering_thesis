@@ -73,20 +73,28 @@ PoseState -> RobotMapper -> JointTargets -> RobotBackend
              robot/mapping.py  robot/targets.py  robot/backend.py
 ```
 
-- `RobotMapper` (`robot/mapping.py`) picks the source angles and gestures,
-  clamps them to the configured `JointLimit`s and applies a dead-band so tiny
-  changes do not reach the hardware. It knows nothing about transport.
-- `JointTargets` (`robot/targets.py`) is the robot-side value object: joint
-  name to angle in degrees, an optional gripper command (`None` means keep
-  the previous state) and a lift-mode flag.
+- Target hardware: two Universal Robots UR7e cobots. `robot/targets.py` uses
+  the UR joint names (`base`, `shoulder`, `elbow`, `wrist_1`, `wrist_2`,
+  `wrist_3`); only shoulder, elbow and wrist_1 are driven by the body, the
+  rest stay at the UR home pose `[0, -90, 0, -90, 0, 0]` deg.
+- `RobotMapper` (`robot/mapping.py`) converts body angles into UR joint angles
+  through `JointMapping` (offset, sign, limit; defaults in `robot/config.py`),
+  clamps them to UR7e ranges and applies a dead-band so tiny changes do not
+  reach the hardware. It knows nothing about transport.
+- `JointTargets` (`robot/targets.py`) is the robot-side value object: per arm
+  the UR joint name to angle in degrees and an optional gripper command
+  (`None` means keep the previous state), plus a lift-mode flag.
 - `RobotBackend` (`robot/backend.py`) is the transport protocol:
   `send(targets)`, `status_lines()` for the overlay and `close()`. Backends:
   `DebugBackend` prints, `SimulationBackend` (`robot/simulation.py`) keeps two
   in-memory arms that move toward the targets with a speed limit,
-  `SerialBackend` (`robot/serial_backend.py`) writes one ASCII line per frame
-  over pyserial. pyserial is an optional dependency loaded the same way as
-  OpenCV and MediaPipe: missing module means a `SystemExit` with an install
-  hint, never an import error at startup.
+  `URBackend` (`robot/ur_backend.py`) opens one TCP socket per cobot to the
+  URScript interface (port 30002) and streams `servoj([...6 radians...], 0, 0,
+  t, lookahead_time, gain)` lines, plus `set_tool_digital_out` for the gripper;
+  `SerialBackend` (`robot/serial_backend.py`) is a generic fallback that
+  writes one ASCII line per frame over pyserial. pyserial is an optional
+  dependency loaded the same way as OpenCV and MediaPipe: missing module means
+  a `SystemExit` with an install hint, never an import error at startup.
 - The overlay hook: `draw_overlay(..., status_lines=...)` in
   `vision/drawing.py` appends whatever the active backend reports, so the
   robot side can show state on screen without touching drawing code.

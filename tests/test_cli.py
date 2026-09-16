@@ -38,19 +38,37 @@ class CliRobotOptionsTests(unittest.TestCase):
                 "--robot-wrist-range",
                 "20",
                 "160",
+                "--robot-right-host",
+                "192.168.1.10",
+                "--robot-ur-port",
+                "30001",
+                "--robot-servo-gain",
+                "500",
             ]
         )
 
         self.assertEqual(config.robot.port, "COM3")
         self.assertEqual(config.robot.baud_rate, 9600)
         self.assertEqual(config.robot.max_speed_deg_s, 45.0)
-        self.assertEqual(config.robot.elbow_limit, JointLimit(10.0, 170.0))
-        self.assertEqual(config.robot.shoulder_limit, JointLimit(0.0, 180.0))
-        self.assertEqual(config.robot.wrist_limit, JointLimit(20.0, 160.0))
+        self.assertEqual(config.robot.elbow.limit, JointLimit(10.0, 170.0))
+        self.assertEqual(config.robot.shoulder.limit, JointLimit(-180.0, 0.0))
+        self.assertEqual(config.robot.wrist.limit, JointLimit(20.0, 160.0))
+        self.assertEqual(config.robot.elbow.offset_deg, 180.0)
+        self.assertEqual(config.robot.hosts, {"right": "192.168.1.10"})
+        self.assertEqual(config.robot.ur_port, 30001)
+        self.assertEqual(config.robot.servo_gain, 500)
 
     def test_unknown_backend_is_rejected(self) -> None:
         with self.assertRaises(SystemExit):
             parse_args(["--robot-backend", "teleport"])
+
+    def test_ur_backend_without_host_fails_validation(self) -> None:
+        config = parse_args(["--robot-backend", "ur"])
+
+        with self.assertRaises(SystemExit):
+            config.validate()
+
+        parse_args(["--robot-backend", "ur", "--robot-left-host", "10.0.0.5"]).robot.validate()
 
     def test_serial_backend_without_port_fails_validation(self) -> None:
         config = parse_args(["--robot-backend", "serial"])

@@ -6,10 +6,13 @@ from vision_robot_arm.robot.targets import (
     ARM_LEFT,
     ARM_RIGHT,
     GRIPPER_CLOSE,
+    HELD_JOINTS,
     JOINT_ELBOW,
-    JOINT_NAMES,
     JOINT_SHOULDER,
-    JOINT_WRIST,
+    JOINT_WRIST_1,
+    MAPPED_JOINTS,
+    ROBOT_MODEL,
+    UR_HOME_DEG,
     ArmState,
     RobotState,
 )
@@ -41,9 +44,9 @@ def arm_points(
     mirror: bool = False,
 ) -> tuple[Point, Point, Point, Point]:
     sign = -1.0 if mirror else 1.0
-    upper_direction = math.radians(shoulder_deg - 90.0)
-    forearm_direction = upper_direction + math.radians(180.0 - elbow_deg)
-    hand_direction = forearm_direction + math.radians(180.0 - wrist_deg)
+    upper_direction = math.radians(shoulder_deg + 90.0)
+    forearm_direction = upper_direction + math.radians(elbow_deg)
+    hand_direction = forearm_direction + math.radians(wrist_deg)
 
     def advance(start: tuple[float, float], direction: float, length: float) -> tuple[float, float]:
         return (
@@ -73,7 +76,7 @@ def draw_simulation(cv2: Any, canvas: Any, state: RobotState | None) -> None:
             state.arm(arm) if state is not None else None,
             (left, margin),
             (panel_width, panel_height),
-            title=f"{arm} arm",
+            title=f"{arm} {ROBOT_MODEL}",
             mirror=arm == ARM_LEFT,
         )
 
@@ -82,7 +85,7 @@ def draw_simulation(cv2: Any, canvas: Any, state: RobotState | None) -> None:
     put_text(
         cv2,
         canvas,
-        f"lift mode: {lift}    grey = target, green = current, blue = gripper",
+        f"lift mode: {lift}    grey = target, green = current, blue = gripper    angles in UR joint degrees",
         (margin, height - margin - round(6 * footer_scale / TEXT_SCALE)),
         MUTED_COLOR,
         footer_scale,
@@ -95,7 +98,7 @@ def draw_arm_panel(
     state: ArmState | None,
     origin: Point,
     size: tuple[int, int],
-    title: str = "robot arm",
+    title: str = ROBOT_MODEL,
     mirror: bool = False,
 ) -> None:
     left, top = origin
@@ -110,15 +113,16 @@ def draw_arm_panel(
     fill_translucent(cv2, frame, (left, top), (right, bottom))
     cv2.rectangle(frame, (left, top), (right, bottom), PANEL_BORDER, 1, cv2.LINE_AA)
 
-    lines = [title] + [_joint_line(joint, state) for joint in JOINT_NAMES]
+    lines = [title] + [_joint_line(joint, state) for joint in MAPPED_JOINTS]
     lines.append(f"gripper {state.gripper if state is not None else 'n/a'}")
+    lines.append(_held_line(state))
     for row, text in enumerate(lines):
         put_text(
             cv2,
             frame,
             text,
             (left + padding, top + padding + (row + 1) * line_height - round(4 * factor)),
-            TITLE_COLOR if row == 0 else VALUE_COLOR,
+            TITLE_COLOR if row == 0 else (MUTED_COLOR if row == len(lines) - 1 else VALUE_COLOR),
             text_scale,
             2 if row == 0 else thick_text,
         )
@@ -151,9 +155,9 @@ def _draw_arm(
     mirror: bool,
 ) -> tuple[Point, Point, Point, Point]:
     points = arm_points(
-        angles.get(JOINT_SHOULDER, 90.0),
-        angles.get(JOINT_ELBOW, 180.0),
-        angles.get(JOINT_WRIST, 180.0),
+        angles.get(JOINT_SHOULDER, UR_HOME_DEG[JOINT_SHOULDER]),
+        angles.get(JOINT_ELBOW, UR_HOME_DEG[JOINT_ELBOW]),
+        angles.get(JOINT_WRIST_1, UR_HOME_DEG[JOINT_WRIST_1]),
         base,
         link_length,
         mirror,
@@ -197,7 +201,15 @@ def _joint_line(joint: str, state: ArmState | None) -> str:
     target = state.targets.get(joint)
     if current is None or target is None:
         return f"{joint} n/a"
-    return f"{joint} {current:5.1f} -> {target:5.1f}"
+    return f"{joint} {current:6.1f} -> {target:6.1f}"
+
+
+def _held_line(state: ArmState | None) -> str:
+    values = []
+    for joint in HELD_JOINTS:
+        value = state.joints.get(joint, UR_HOME_DEG[joint]) if state is not None else UR_HOME_DEG[joint]
+        values.append(f"{joint} {value:.0f}")
+    return "held: " + "  ".join(values)
 
 
 def _scale_for(extent: int) -> float:
