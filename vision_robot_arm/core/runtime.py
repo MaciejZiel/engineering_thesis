@@ -17,7 +17,7 @@ def load_runtime_dependencies() -> RuntimeDeps:
         import cv2  # type: ignore
     except ImportError:
         cv2 = None
-        missing.append("opencv-python")
+        missing.append("opencv-contrib-python")
 
     try:
         import mediapipe as mp  # type: ignore

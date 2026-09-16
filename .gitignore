@@ -29,6 +29,10 @@ recordings/
 # IDE/editor files
 .idea/
 .vscode/
+.codex/
+
+# Local UI previews and generated artifacts
+artifacts/
 
 # OS files
 Thumbs.db
