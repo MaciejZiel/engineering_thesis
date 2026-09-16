@@ -23,8 +23,9 @@ class LowPassValueFilter:
 
 
 class LandmarkSmoother:
-    def __init__(self, alpha: float) -> None:
+    def __init__(self, alpha: float, min_visibility: float = 0.55) -> None:
         self._alpha = alpha
+        self._min_visibility = min_visibility
         self._previous: list[LandmarkPoint] | None = None
 
     def update(self, landmarks: list[LandmarkPoint]) -> list[LandmarkPoint]:
@@ -50,9 +51,10 @@ class LandmarkSmoother:
     def _smooth(self, current: float, previous: float) -> float:
         return self._alpha * current + (1.0 - self._alpha) * previous
 
-    @staticmethod
-    def _valid(point: LandmarkPoint) -> bool:
-        return point.visibility >= 0.55 and all(math.isfinite(v) for v in (point.x, point.y, point.z))
+    def _valid(self, point: LandmarkPoint) -> bool:
+        return point.visibility >= self._min_visibility and all(
+            math.isfinite(value) for value in (point.x, point.y, point.z)
+        )
 
 
 class AngleSmoother:

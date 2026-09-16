@@ -232,12 +232,18 @@ class HandGestureFilter:
         self._pending: dict[str, tuple[str, int, int]] = {}
         self._stable: dict[str, str] = {}
         self._last_timestamp: int | None = None
+        self._last_interval: int | None = None
 
     def update(self, gestures: tuple[str, ...], timestamp_ms: int) -> tuple[str, ...]:
-        if self._last_timestamp is not None and (
-            timestamp_ms <= self._last_timestamp or timestamp_ms-self._last_timestamp > self.max_gap_ms
-        ):
-            self.reset()
+        if self._last_timestamp is not None:
+            gap = timestamp_ms - self._last_timestamp
+            # A slow but steady camera is not a dropout; judge the gap against the
+            # rate this camera actually delivers, not against a fixed 30 fps.
+            allowed = max(self.max_gap_ms, 2.5 * (self._last_interval or gap))
+            if gap <= 0 or gap > allowed:
+                self.reset()
+            else:
+                self._last_interval = gap
         self._last_timestamp = timestamp_ms
         output = []
         for side in SIDES:
@@ -263,6 +269,7 @@ class HandGestureFilter:
         self._pending.clear()
         self._stable.clear()
         self._last_timestamp = None
+        self._last_interval = None
 
 
 def _finite(point: Any) -> bool:

@@ -164,6 +164,42 @@ class GestureTests(unittest.TestCase):
         self.assertIn("left_elbow_bent", gestures)
         self.assertNotIn("right_elbow_bent", gestures)
 
+    def test_arm_side_fires_when_the_arm_is_extended_not_when_it_is_crossed(self) -> None:
+        """Detection runs on the un-mirrored frame: the person's left is at larger image x."""
+        indices = {
+            "LEFT_SHOULDER": 0,
+            "RIGHT_SHOULDER": 1,
+            "LEFT_ELBOW": 2,
+            "RIGHT_ELBOW": 3,
+            "LEFT_WRIST": 4,
+            "RIGHT_WRIST": 5,
+        }
+        straight = {"left_elbow": 175.0, "right_elbow": 175.0}
+        extended = [
+            FakeLandmark(0.60, 0.50),
+            FakeLandmark(0.40, 0.50),
+            FakeLandmark(0.75, 0.50),
+            FakeLandmark(0.25, 0.50),
+            FakeLandmark(0.90, 0.50),
+            FakeLandmark(0.10, 0.50),
+        ]
+        crossed = [
+            FakeLandmark(0.60, 0.50),
+            FakeLandmark(0.40, 0.50),
+            FakeLandmark(0.50, 0.50),
+            FakeLandmark(0.50, 0.50),
+            FakeLandmark(0.30, 0.50),
+            FakeLandmark(0.70, 0.50),
+        ]
+
+        spread = detect_gestures(extended, straight, indices, min_visibility=0.55)
+        folded = detect_gestures(crossed, straight, indices, min_visibility=0.55)
+
+        self.assertIn("left_arm_side", spread)
+        self.assertIn("right_arm_side", spread)
+        self.assertNotIn("left_arm_side", folded)
+        self.assertNotIn("right_arm_side", folded)
+
 
 if __name__ == "__main__":
     unittest.main()

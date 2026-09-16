@@ -6,6 +6,7 @@ from vision_robot_arm.vision.hand_gestures import (
     assign_hand_sides,
     classify_hand,
     count_extended_fingers,
+    HandGestureFilter,
     detect_hand_gestures,
     hand_wrist_angles,
     signed_wrist_deviation,
@@ -194,6 +195,27 @@ class WristAngleHoldTests(unittest.TestCase):
         hold.update({"left_wrist": 150.0}, 0)
 
         self.assertEqual(hold.update({"left_wrist": 120.0}, 100), {"left_wrist": 120.0})
+
+    def test_a_slow_but_steady_camera_still_confirms_a_gesture(self) -> None:
+        """Below about 4 fps every frame looked like a dropout and nothing was ever confirmed."""
+        gesture_filter = HandGestureFilter()
+        timestamp = 0
+        confirmed: tuple[str, ...] = ()
+
+        for _ in range(10):
+            timestamp += 300
+            confirmed = gesture_filter.update(("left_fist",), timestamp)
+
+        self.assertEqual(confirmed, ("left_fist",))
+
+    def test_a_real_dropout_still_clears_the_confirmed_gesture(self) -> None:
+        gesture_filter = HandGestureFilter()
+        for step in range(1, 6):
+            gesture_filter.update(("left_fist",), step * 33)
+
+        after_gap = gesture_filter.update(("left_fist",), 5 * 33 + 3000)
+
+        self.assertEqual(after_gap, ())
 
     def test_reset_forgets_everything(self) -> None:
         hold = WristAngleHold()

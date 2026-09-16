@@ -56,6 +56,15 @@ class LandmarkSmootherTests(unittest.TestCase):
 
         self.assertEqual(smoothed, [LandmarkPoint(1.0, 2.0, 4.0, visibility=0.3)])
 
+    def test_the_configured_visibility_threshold_is_honoured(self) -> None:
+        """A lower --visibility-threshold must also mean those landmarks get smoothed."""
+        smoother = LandmarkSmoother(alpha=0.5, min_visibility=0.3)
+        smoother.update([LandmarkPoint(0.0, 0.0, 0.0, visibility=0.5)])
+
+        smoothed = smoother.update([LandmarkPoint(1.0, 0.0, 0.0, visibility=0.5)])
+
+        self.assertAlmostEqual(smoothed[0].x, 0.5)
+
     def test_restarts_when_landmark_count_changes(self) -> None:
         smoother = LandmarkSmoother(alpha=0.5)
         smoother.update([LandmarkPoint(0.0, 0.0, 0.0)])

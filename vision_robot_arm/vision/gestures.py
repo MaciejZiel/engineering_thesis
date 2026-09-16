@@ -77,16 +77,12 @@ def _arm_extended_side(
         return False
 
     close_to_shoulder_height = abs(wrist.y - shoulder.y) < 0.18
-    outside_shoulder = (
-        wrist.x < shoulder.x - 0.18
-        if side == "LEFT"
-        else wrist.x > shoulder.x + 0.18
-    )
-    elbow_between = (
-        wrist.x < elbow.x < shoulder.x
-        if side == "LEFT"
-        else shoulder.x < elbow.x < wrist.x
-    )
+    # Detection runs on the un-mirrored frame, so the person's left side sits at larger x.
+    outward = 1.0 if side == "LEFT" else -1.0
+    wrist_reach = (wrist.x - shoulder.x) * outward
+    elbow_reach = (elbow.x - shoulder.x) * outward
+    outside_shoulder = wrist_reach > 0.18
+    elbow_between = 0.0 < elbow_reach < wrist_reach
     return close_to_shoulder_height and outside_shoulder and elbow_between
 
 

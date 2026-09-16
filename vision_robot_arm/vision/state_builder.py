@@ -17,8 +17,8 @@ class PoseStateBuilder:
     ) -> None:
         self._indices = indices
         self._min_visibility = min_visibility
-        self._landmark_smoother = LandmarkSmoother(smoothing_alpha)
-        self._world_landmark_smoother = LandmarkSmoother(smoothing_alpha)
+        self._landmark_smoother = LandmarkSmoother(smoothing_alpha, min_visibility)
+        self._world_landmark_smoother = LandmarkSmoother(smoothing_alpha, min_visibility)
         self._angle_smoother = AngleSmoother(smoothing_alpha)
         self._calibration = PoseCalibration()
 
