@@ -151,8 +151,7 @@ class SerialBackendTests(unittest.TestCase):
         clock.now = 0.1
         backend.send(JointTargets(2, {"right": ArmTargets()}, lift_mode=False))
 
-        self.assertEqual(module.ports[0].written[-1], b"RS:-90.0;L:0
-")
+        self.assertEqual(module.ports[0].written[-1], b"RS:-90.0;L:0\n")
 
     def test_frames_carry_the_accumulated_state_of_both_arms(self) -> None:
         module = FakeSerialModule()
@@ -163,8 +162,7 @@ class SerialBackendTests(unittest.TestCase):
         clock.now = 0.1
         backend.send(JointTargets(2, {"left": ArmTargets(joints={"elbow": 20.0})}))
 
-        self.assertEqual(module.ports[0].written[-1], b"RS:-90.0;LE:20.0;L:0
-")
+        self.assertEqual(module.ports[0].written[-1], b"RS:-90.0;LE:20.0;L:0\n")
 
     def test_empty_targets_are_not_sent(self) -> None:
         module = FakeSerialModule()
