@@ -60,7 +60,10 @@ def arm_points(
     return base, _rounded(elbow), _rounded(wrist), _rounded(tip)
 
 
-def draw_simulation(cv2: Any, canvas: Any, state: RobotState | None) -> None:
+def draw_simulation(cv2: Any, canvas: Any, state: RobotState | None, *, compact: bool = False) -> None:
+    if compact:
+        draw_compact_simulation(cv2, canvas, state)
+        return
     canvas[:] = BACKGROUND
     height, width = canvas.shape[:2]
     margin = max(8, round(width * 0.02))
@@ -90,6 +93,37 @@ def draw_simulation(cv2: Any, canvas: Any, state: RobotState | None) -> None:
         MUTED_COLOR,
         footer_scale,
     )
+
+
+def draw_compact_simulation(cv2: Any, canvas: Any, state: RobotState | None) -> None:
+    """Draw only the schematic arms; the dashboard owns labels and telemetry.
+
+    Each arm is clipped to its own viewport. The maximum reach includes the
+    wrist and gripper, keeping every joint configuration inside that viewport.
+    No pose is drawn when the backend has not supplied an arm state.
+    """
+    canvas[:] = (30, 28, 27)
+    height, width = canvas.shape[:2]
+    for column, name in enumerate(DISPLAY_ORDER):
+        arm = state.arm(name) if state is not None else None
+        if arm is None:
+            continue
+        left, right = column * width // 2, (column + 1) * width // 2
+        view = canvas[:, left:right]
+        extent = min(right-left, height)
+        base = ((right-left)//2, height//2)
+        link = extent * 0.44 / (2 + HAND_LINK_RATIO + 0.3)
+        thickness = max(2, round(extent / 65))
+        # A small pedestal identifies the fixed shoulder pivot without a grid.
+        half = max(5, round(extent * 0.05))
+        cv2.line(view, (base[0]-half, base[1]+half), (base[0]+half, base[1]+half),
+                 (72, 67, 62), max(1, thickness//2), cv2.LINE_AA)
+        _draw_arm(cv2, view, arm.targets, base, link, (108, 103, 98), max(1, thickness//2), name == ARM_LEFT)
+        _, _, wrist, tip = _draw_arm(
+            cv2, view, arm.joints, base, link, (112, 169, 238), thickness, name == ARM_LEFT,
+        )
+        _draw_gripper(cv2, view, wrist, tip, arm.gripper == GRIPPER_CLOSE,
+                      max(4, round(link * 0.3)), color=(207, 215, 226))
 
 
 def draw_arm_panel(
@@ -176,6 +210,7 @@ def _draw_gripper(
     tip: Point,
     closed: bool,
     jaw_length: int,
+    color: Color = GRIPPER_COLOR,
 ) -> None:
     dx, dy = tip[0] - wrist[0], tip[1] - wrist[1]
     length = math.hypot(dx, dy) or 1.0
@@ -191,7 +226,7 @@ def _draw_gripper(
             round(start[0] + jaw_length * direction[0]),
             round(start[1] + jaw_length * direction[1]),
         )
-        cv2.line(frame, start, end, GRIPPER_COLOR, 2, cv2.LINE_AA)
+        cv2.line(frame, start, end, color, 2, cv2.LINE_AA)
 
 
 def _joint_line(joint: str, state: ArmState | None) -> str:

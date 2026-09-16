@@ -1,6 +1,7 @@
 import unittest
 
 import numpy as np
+import cv2
 
 from vision_robot_arm.robot.backend import DebugBackend, TargetTracker
 from vision_robot_arm.robot.targets import (
@@ -134,6 +135,30 @@ class DrawSimulationTests(unittest.TestCase):
         draw_simulation(cv2, canvas, None)
 
         self.assertEqual(cv2.texts().count("shoulder n/a"), 2)
+
+
+class CompactSimulationTests(unittest.TestCase):
+    def test_missing_arm_does_not_draw_an_active_home_pose(self) -> None:
+        canvas = np.zeros((240, 480, 3), dtype=np.uint8)
+        state = RobotState({"left": arm_state(-90, 0, -90)}, False)
+        draw_simulation(cv2, canvas, state, compact=True)
+        background = np.array((30, 28, 27), dtype=np.uint8)
+        self.assertTrue(np.any(canvas[:, :240] != background))
+        self.assertTrue(np.all(canvas[:, 240:] == background))
+
+    def test_full_reach_stays_inside_each_viewport(self) -> None:
+        for shoulder in (-180, -135, -90, -45, 0):
+            for elbow in (-160, 0, 160):
+                with self.subTest(shoulder=shoulder, elbow=elbow):
+                    canvas = np.zeros((240, 480, 3), dtype=np.uint8)
+                    arm = arm_state(shoulder, elbow, 0)
+                    draw_simulation(cv2, canvas, RobotState({"left": arm, "right": arm}, False), compact=True)
+                    background = np.array((30, 28, 27), dtype=np.uint8)
+                    self.assertTrue(np.all(canvas[:5] == background))
+                    self.assertTrue(np.all(canvas[-5:] == background))
+                    self.assertTrue(np.all(canvas[:, 235:245] == background))
+                    self.assertTrue(np.all(canvas[:, :5] == background))
+                    self.assertTrue(np.all(canvas[:, -5:] == background))
 
 
 class TargetTrackerTests(unittest.TestCase):
