@@ -135,6 +135,10 @@ MAX_WRIST_DEVIATION_DEG = 90.0
 STRAIGHT_WRIST_DEG = 180.0
 # Shorter than this on screen and the direction of a vector is noise, not a measurement.
 MIN_PROJECTION = 0.02
+# The two arms are mirror images, so the same bend turns opposite ways on screen.
+SIDE_ROTATION = {"left": 1.0, "right": -1.0}
+# A wrist cannot cross its whole range in one frame; anything faster is a measurement jump.
+MAX_WRIST_RATE_DEG_S = 240.0
 
 
 def hand_wrist_angles(
@@ -169,7 +173,7 @@ def hand_wrist_angles(
         deviation = signed_wrist_deviation(forearm, hand_direction)
         if deviation is None:
             continue
-        angles[f"{side}_wrist"] = STRAIGHT_WRIST_DEG - deviation
+        angles[f"{side}_wrist"] = STRAIGHT_WRIST_DEG - deviation * SIDE_ROTATION[side]
     return angles
 
 
@@ -196,10 +200,16 @@ def signed_wrist_deviation(forearm: Vector, hand_direction: Vector) -> float | N
 
 
 class WristAngleHold:
-    """Keep the last wrist angle for a short time when the hand tracker drops a frame."""
+    """Hold the last wrist angle briefly, and refuse jumps no wrist could perform.
 
-    def __init__(self, max_age_ms: int = 500) -> None:
+    A foreshortened hand makes the measured angle flip by more than a hundred degrees
+    between frames. Following that puts the robot into a long sweep, so the value is
+    allowed to travel at most MAX_WRIST_RATE_DEG_S and catches up over a few frames.
+    """
+
+    def __init__(self, max_age_ms: int = 500, max_rate_deg_s: float = MAX_WRIST_RATE_DEG_S) -> None:
         self._max_age_ms = max_age_ms
+        self._max_rate_deg_s = max_rate_deg_s
         self._last: dict[str, tuple[float, int]] = {}
         self._timestamp_ms: int | None = None
 
@@ -209,7 +219,7 @@ class WristAngleHold:
         self._timestamp_ms = timestamp_ms
         for name, value in angles.items():
             if math.isfinite(value):
-                self._last[name] = (value, timestamp_ms)
+                self._last[name] = (self._rate_limited(name, value, timestamp_ms), timestamp_ms)
         merged: dict[str, float] = {}
         for name, (value, seen_at) in list(self._last.items()):
             if timestamp_ms - seen_at <= self._max_age_ms:
@@ -217,6 +227,16 @@ class WristAngleHold:
             else:
                 del self._last[name]
         return merged
+
+    def _rate_limited(self, name: str, value: float, timestamp_ms: int) -> float:
+        previous = self._last.get(name)
+        if previous is None:
+            return value
+        elapsed_ms = timestamp_ms - previous[1]
+        if elapsed_ms <= 0:
+            return previous[0]
+        allowed = self._max_rate_deg_s * elapsed_ms / 1000.0
+        return max(previous[0] - allowed, min(previous[0] + allowed, value))
 
     def reset(self) -> None:
         self._last.clear()

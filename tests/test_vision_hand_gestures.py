@@ -126,6 +126,20 @@ class HandWristAngleTests(unittest.TestCase):
         self.assertNotAlmostEqual(one, other)
         self.assertAlmostEqual(one + other, 360.0, places=3)
 
+    def test_both_wrists_report_the_same_anatomical_bend_the_same_way(self) -> None:
+        """The arms are mirror images, so an unmirrored screen rotation inverts one of them."""
+        pose = [P(0.65, 0.60), P(0.35, 0.60), P(0.65, 0.85), P(0.35, 0.85)]
+        indices = {"LEFT_WRIST": 0, "RIGHT_WRIST": 1, "LEFT_ELBOW": 2, "RIGHT_ELBOW": 3}
+        left = make_hand((0.65, 0.60), (True, True, True, True))
+        left[9] = P(0.58, 0.45)
+        right = make_hand((0.35, 0.60), (True, True, True, True))
+        right[9] = P(0.42, 0.45)
+
+        angles = hand_wrist_angles([left, right], pose, indices, aspect_ratio=16 / 9)
+
+        self.assertAlmostEqual(angles["left_wrist"], angles["right_wrist"], places=6)
+        self.assertNotAlmostEqual(angles["left_wrist"], 180.0)
+
     def test_a_hand_pointing_at_the_camera_is_left_unmeasured(self) -> None:
         """Its projection is a few pixels long, so its direction would be pure noise."""
         hand = make_hand((0.7, 0.6), (True, True, True, True))
@@ -165,14 +179,14 @@ class HandWristAngleTests(unittest.TestCase):
         self.assertIsNone(signed_wrist_deviation((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)))
         self.assertIsNone(signed_wrist_deviation(forearm, (float("nan"), 0.0, 0.0)))
 
-    def test_bending_down_gives_more_than_180(self) -> None:
+    def test_the_two_bend_directions_land_on_opposite_sides_of_180(self) -> None:
         horizontal_forearm_pose = [P(0.3, 0.6), P(0.7, 0.6), P(0.3, 0.9), P(0.4, 0.6)]
         hand = make_hand((0.7, 0.6), (True, True, True, True))
         hand[9] = P(0.9, 0.8)
 
         angles = hand_wrist_angles([hand], horizontal_forearm_pose, POSE_INDICES, aspect_ratio=1.0)
 
-        self.assertAlmostEqual(angles["right_wrist"], 225.0)
+        self.assertAlmostEqual(angles["right_wrist"], 135.0)
 
     def test_missing_elbow_index_is_skipped(self) -> None:
         hand = make_hand((0.7, 0.6), (True, True, True, True))
@@ -190,11 +204,33 @@ class WristAngleHoldTests(unittest.TestCase):
         self.assertEqual(hold.update({}, 1400), {"right_wrist": 150.0})
         self.assertEqual(hold.update({}, 1600), {})
 
+    def test_an_impossible_jump_is_slewed_instead_of_followed(self) -> None:
+        """A foreshortened hand can flip the measured angle; no wrist moves 150 deg in 33 ms."""
+        hold = WristAngleHold(max_rate_deg_s=240.0)
+        hold.update({"left_wrist": 90.0}, 1000)
+
+        after_one_frame = hold.update({"left_wrist": 240.0}, 1033)["left_wrist"]
+
+        self.assertAlmostEqual(after_one_frame, 90.0 + 240.0 * 0.033, places=3)
+
+    def test_a_plausible_change_passes_through_untouched(self) -> None:
+        hold = WristAngleHold(max_rate_deg_s=240.0)
+        hold.update({"left_wrist": 150.0}, 1000)
+
+        self.assertAlmostEqual(hold.update({"left_wrist": 155.0}, 1033)["left_wrist"], 155.0)
+
+    def test_the_first_value_after_a_reset_is_taken_as_it_is(self) -> None:
+        hold = WristAngleHold(max_rate_deg_s=240.0)
+        hold.update({"left_wrist": 90.0}, 1000)
+        hold.reset()
+
+        self.assertAlmostEqual(hold.update({"left_wrist": 240.0}, 1033)["left_wrist"], 240.0)
+
     def test_new_value_replaces_held_one(self) -> None:
         hold = WristAngleHold(max_age_ms=500)
         hold.update({"left_wrist": 150.0}, 0)
 
-        self.assertEqual(hold.update({"left_wrist": 120.0}, 100), {"left_wrist": 120.0})
+        self.assertEqual(hold.update({"left_wrist": 120.0}, 200), {"left_wrist": 120.0})
 
     def test_a_slow_but_steady_camera_still_confirms_a_gesture(self) -> None:
         """Below about 4 fps every frame looked like a dropout and nothing was ever confirmed."""
