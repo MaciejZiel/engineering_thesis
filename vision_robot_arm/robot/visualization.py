@@ -1,17 +1,21 @@
 import math
 from typing import Any
 
+from vision_robot_arm.core.hud import fill_translucent, put_text
 from vision_robot_arm.robot.targets import GRIPPER_CLOSE, JOINT_ELBOW, JOINT_SHOULDER, ArmState
 
 Point = tuple[int, int]
 Color = tuple[int, int, int]
 
-PANEL_BACKGROUND: Color = (30, 30, 30)
-PANEL_BORDER: Color = (120, 120, 120)
+PANEL_BORDER: Color = (90, 90, 90)
 CURRENT_ARM: Color = (80, 220, 80)
-TARGET_ARM: Color = (110, 110, 110)
+TARGET_ARM: Color = (120, 120, 120)
 GRIPPER_COLOR: Color = (60, 200, 255)
-TEXT_COLOR: Color = (240, 240, 240)
+TITLE_COLOR: Color = (235, 235, 235)
+VALUE_COLOR: Color = (200, 200, 200)
+TEXT_SCALE = 0.45
+LINE_HEIGHT = 18
+PADDING = 10
 
 
 def arm_points(
@@ -42,11 +46,34 @@ def draw_arm_panel(
 ) -> None:
     left, top = origin
     right, bottom = left + size, top + size
-    cv2.rectangle(frame, (left, top), (right, bottom), PANEL_BACKGROUND, -1)
+    factor = size / 240.0
+    padding = round(PADDING * factor)
+    line_height = round(LINE_HEIGHT * factor)
+    text_scale = TEXT_SCALE * factor
+    fill_translucent(cv2, frame, (left, top), (right, bottom))
     cv2.rectangle(frame, (left, top), (right, bottom), PANEL_BORDER, 1, cv2.LINE_AA)
 
-    base = (left + int(size * 0.5), top + int(size * 0.5))
-    link_length = size * 0.2
+    lines = [
+        "robot arm",
+        _joint_line(JOINT_SHOULDER, state),
+        _joint_line(JOINT_ELBOW, state),
+        f"gripper {state.gripper}   lift {'on' if state.lift_mode else 'off'}",
+    ]
+    for row, text in enumerate(lines):
+        put_text(
+            cv2,
+            frame,
+            text,
+            (left + padding, top + padding + (row + 1) * line_height - round(4 * factor)),
+            TITLE_COLOR if row == 0 else VALUE_COLOR,
+            text_scale,
+            2 if row == 0 or factor >= 1.4 else 1,
+        )
+
+    text_bottom = top + padding + len(lines) * line_height
+    sketch_height = bottom - text_bottom
+    base = (left + size // 2, text_bottom + sketch_height // 2)
+    link_length = min(size, sketch_height) * 0.24
 
     _draw_arm(
         cv2,
@@ -56,7 +83,7 @@ def draw_arm_panel(
         base,
         link_length,
         TARGET_ARM,
-        thickness=2,
+        thickness=max(1, round(2 * factor)),
     )
     _, elbow, wrist = _draw_arm(
         cv2,
@@ -66,18 +93,9 @@ def draw_arm_panel(
         base,
         link_length,
         CURRENT_ARM,
-        thickness=4,
+        thickness=max(2, round(4 * factor)),
     )
     _draw_gripper(cv2, frame, elbow, wrist, state.gripper == GRIPPER_CLOSE, int(size * 0.06))
-
-    lines = [
-        "robot arm",
-        _joint_line(JOINT_SHOULDER, state),
-        _joint_line(JOINT_ELBOW, state),
-        f"gripper {state.gripper} | lift {'on' if state.lift_mode else 'off'}",
-    ]
-    for row, text in enumerate(lines):
-        _draw_text(cv2, frame, text, (left + 8, top + 18 + row * 18), row == 0)
 
 
 def _draw_arm(
@@ -130,16 +148,3 @@ def _joint_line(joint: str, state: ArmState) -> str:
     if current is None or target is None:
         return f"{joint} n/a"
     return f"{joint} {current:5.1f} -> {target:5.1f}"
-
-
-def _draw_text(cv2: Any, frame: Any, text: str, position: Point, bold: bool) -> None:
-    cv2.putText(
-        frame,
-        text,
-        position,
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        TEXT_COLOR,
-        2 if bold else 1,
-        cv2.LINE_AA,
-    )

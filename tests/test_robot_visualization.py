@@ -1,5 +1,7 @@
 import unittest
 
+import numpy as np
+
 from vision_robot_arm.robot.backend import DebugBackend, TargetTracker
 from vision_robot_arm.robot.targets import GRIPPER_CLOSE, GRIPPER_OPEN, ArmState, JointTargets
 from vision_robot_arm.robot.visualization import arm_points, draw_arm_panel
@@ -11,6 +13,12 @@ class FakeCv2:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple]] = []
+
+    def getTextSize(self, text: str, font: int, scale: float, thickness: int) -> tuple[tuple[int, int], int]:
+        return (int(len(text) * 10 * scale), int(20 * scale)), 2
+
+    def addWeighted(self, *args: object) -> None:
+        self.calls.append(("addWeighted", args))
 
     def rectangle(self, *args: object) -> None:
         self.calls.append(("rectangle", args))
@@ -56,21 +64,25 @@ class DrawArmPanelTests(unittest.TestCase):
             lift_mode=True,
         )
 
-        draw_arm_panel(cv2, frame=object(), state=state, origin=(10, 20), size=200)
+        frame = np.zeros((360, 640, 3), dtype=np.uint8)
+
+        draw_arm_panel(cv2, frame, state=state, origin=(10, 20), size=200)
 
         kinds = [kind for kind, _ in cv2.calls]
-        self.assertEqual(kinds.count("rectangle"), 2)
+        self.assertEqual(kinds.count("addWeighted"), 1)
+        self.assertEqual(kinds.count("rectangle"), 1)
         self.assertEqual(kinds.count("line"), 6)
         texts = [args[1] for kind, args in cv2.calls if kind == "putText"]
         self.assertIn("shoulder  90.0 -> 120.0", texts)
         self.assertIn("elbow 150.0 -> 150.0", texts)
-        self.assertIn("gripper close | lift on", texts)
+        self.assertIn("gripper close   lift on", texts)
 
     def test_missing_joints_are_reported_as_not_available(self) -> None:
         cv2 = FakeCv2()
+        frame = np.zeros((360, 640, 3), dtype=np.uint8)
         state = ArmState(joints={}, targets={}, gripper=GRIPPER_OPEN, lift_mode=False)
 
-        draw_arm_panel(cv2, frame=object(), state=state, origin=(0, 0))
+        draw_arm_panel(cv2, frame, state=state, origin=(0, 0))
 
         texts = [args[1] for kind, args in cv2.calls if kind == "putText"]
         self.assertIn("shoulder n/a", texts)

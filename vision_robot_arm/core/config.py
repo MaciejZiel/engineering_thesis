@@ -16,8 +16,8 @@ DEFAULT_RECORDING_DIR = PROJECT_ROOT / "recordings"
 @dataclass(frozen=True)
 class AppConfig:
     camera: int = 0
-    width: int = 0
-    height: int = 0
+    width: int = 1920
+    height: int = 1080
     print_interval: float = 0.5
     visibility_threshold: float = 0.55
     smoothing_alpha: float = 0.35

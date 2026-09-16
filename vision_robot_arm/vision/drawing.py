@@ -1,5 +1,6 @@
 from typing import Any
 
+from vision_robot_arm.core.hud import draw_label, draw_text_panel, panel_height, scaled
 from vision_robot_arm.vision.landmarks import is_reliable
 from vision_robot_arm.vision.metrics import ANGLE_DEFINITIONS
 
@@ -8,6 +9,12 @@ Point = tuple[int, int]
 Color = tuple[int, int, int]
 
 ARM_JOINT_LABELS = ("left_shoulder", "right_shoulder", "left_elbow", "right_elbow")
+JOINT_LABEL_COLOR: Color = (0, 230, 255)
+HUD_MARGIN = 12
+HINT_SCALE = 0.42
+HINT_LINE_HEIGHT = 16
+HINT_PADDING = 6
+HINT_COLOR: Color = (190, 190, 190)
 
 
 def pixel_point(landmark: Any, width: int, height: int) -> Point:
@@ -94,27 +101,8 @@ def draw_joint_angle_labels(
         if point is None:
             continue
         label = f"{joint_label(name)} {value:.0f}"
-        position = (point[0] + 10, point[1] - 10)
-        cv2.putText(
-            frame,
-            label,
-            position,
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (0, 0, 0),
-            3,
-            cv2.LINE_AA,
-        )
-        cv2.putText(
-            frame,
-            label,
-            position,
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (0, 255, 255),
-            1,
-            cv2.LINE_AA,
-        )
+        offset = scaled(10, frame)
+        draw_label(cv2, frame, label, (point[0] + offset, point[1] - offset), JOINT_LABEL_COLOR)
 
 
 def joint_label(name: str) -> str:
@@ -237,44 +225,33 @@ def draw_overlay(
     person_detected: bool,
     calibrated: bool = False,
     recording: bool = False,
-    robot_debug: bool = False,
+    robot_label: str = "off",
     gestures: tuple[str, ...] = (),
     status_lines: tuple[str, ...] = (),
 ) -> None:
-    status = "detected" if person_detected else "not detected"
-    calibration = "on" if calibrated else "off"
-    recording_status = "on" if recording else "off"
-    robot_status = "on" if robot_debug else "off"
-    lines = [
-        f"Mode: {mode} | 1 angles  2 points  3 both",
-        (
-            f"Person: {status} | calibration: {calibration} | "
-            f"recording: {recording_status} | robot: {robot_status}"
-        ),
-        "c calibrate | r record | q/Esc quit",
-    ]
+    person = "person" if person_detected else "no person"
+    flags = []
+    if calibrated:
+        flags.append("calibrated")
+    if recording:
+        flags.append("REC")
+    lines = ["   ".join([person, f"robot: {robot_label}", *flags])]
     if gestures:
-        lines.append("Gestures: " + ", ".join(gestures[:3]))
+        lines.append("gestures: " + ", ".join(gestures[:4]))
     lines.extend(status_lines)
-    for row, text in enumerate(lines):
-        y = 28 + row * 26
-        cv2.putText(
-            frame,
-            text,
-            (12, y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.65,
-            (0, 0, 0),
-            3,
-            cv2.LINE_AA,
-        )
-        cv2.putText(
-            frame,
-            text,
-            (12, y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.65,
-            (255, 255, 255),
-            1,
-            cv2.LINE_AA,
-        )
+    margin = scaled(HUD_MARGIN, frame)
+    draw_text_panel(cv2, frame, lines, (margin, margin))
+
+    hint = f"output: {mode}   1 angles  2 points  3 both   c calibrate   r record   q quit"
+    height = frame.shape[0]
+    hint_top = height - margin - panel_height(frame, 1, HINT_LINE_HEIGHT, HINT_PADDING)
+    draw_text_panel(
+        cv2,
+        frame,
+        [hint],
+        (margin, hint_top),
+        scale=HINT_SCALE,
+        line_height=HINT_LINE_HEIGHT,
+        padding=HINT_PADDING,
+        color=HINT_COLOR,
+    )

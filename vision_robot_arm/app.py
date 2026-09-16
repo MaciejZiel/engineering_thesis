@@ -1,6 +1,7 @@
 import time
 
 from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE, AppConfig
+from vision_robot_arm.core.hud import scaled
 from vision_robot_arm.core.runtime import load_runtime_dependencies
 from vision_robot_arm.robot.controller import RobotController
 from vision_robot_arm.robot.factory import create_robot_controller
@@ -91,6 +92,7 @@ def run_app(config: AppConfig) -> int:
                 print("Camera frame could not be read.")
                 return 1
 
+            frame = _fit_frame(cv2, frame, config)
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             timestamp_ms = _frame_timestamp_ms(
                 cv2,
@@ -151,23 +153,22 @@ def run_app(config: AppConfig) -> int:
                 detection.has_pose,
                 calibrated=state_builder.calibrated,
                 recording=recorder.is_recording,
-                robot_debug=config.robot.enabled,
+                robot_label=config.robot.backend if config.robot.enabled else "off",
                 gestures=current_state.gestures if current_state else (),
-                status_lines=tuple(robot_controller.status_lines()),
+                status_lines=() if config.test_mode else tuple(robot_controller.status_lines()),
             )
             if config.test_mode:
                 arm_state = robot_controller.arm_state()
                 if arm_state is not None:
                     height, width = frame.shape[:2]
+                    panel_size = scaled(ARM_PANEL_SIZE, frame)
+                    margin = scaled(ARM_PANEL_MARGIN, frame)
                     draw_arm_panel(
                         cv2,
                         frame,
                         arm_state,
-                        origin=(
-                            width - ARM_PANEL_SIZE - ARM_PANEL_MARGIN,
-                            height - ARM_PANEL_SIZE - ARM_PANEL_MARGIN,
-                        ),
-                        size=ARM_PANEL_SIZE,
+                        origin=(width - panel_size - margin, height - panel_size - margin),
+                        size=panel_size,
                     )
             cv2.imshow(window_name, frame)
 
@@ -193,6 +194,15 @@ def run_app(config: AppConfig) -> int:
             tracker.close()
         capture.release()
         cv2.destroyAllWindows()
+
+
+def _fit_frame(cv2: object, frame: object, config: AppConfig) -> object:
+    if config.width <= 0 or config.height <= 0:
+        return frame
+    height, width = frame.shape[:2]
+    if (width, height) == (config.width, config.height):
+        return frame
+    return cv2.resize(frame, (config.width, config.height), interpolation=cv2.INTER_LINEAR)
 
 
 def _source_started_message(config: AppConfig) -> str:

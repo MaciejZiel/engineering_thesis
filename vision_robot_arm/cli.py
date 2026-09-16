@@ -37,14 +37,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--width",
         type=int,
-        default=0,
-        help="Optional requested camera width in pixels.",
+        default=1920,
+        help="Frame width in pixels; frames are resized when the camera gives another size. 0 keeps the camera size. Default: 1920.",
     )
     parser.add_argument(
         "--height",
         type=int,
-        default=0,
-        help="Optional requested camera height in pixels.",
+        default=1080,
+        help="Frame height in pixels; frames are resized when the camera gives another size. 0 keeps the camera size. Default: 1080.",
     )
     parser.add_argument(
         "--print-interval",

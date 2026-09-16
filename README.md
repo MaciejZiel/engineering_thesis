@@ -65,10 +65,20 @@ To loop a video while testing:
 python main.py --video sample.mp4 --loop-video
 ```
 
-Useful options:
+Frames are shown at 1920x1080 by default. The camera is asked for that size
+and frames of another size are resized, so the overlay always has the same
+proportions. Pick a smaller size for slow machines or `0 0` to keep the
+camera's native size:
 
 ```powershell
-python main.py --camera 0 --width 1280 --height 720 --print-interval 0.5
+python main.py --width 1280 --height 720
+python main.py --width 0 --height 0
+```
+
+Other useful options:
+
+```powershell
+python main.py --camera 0 --print-interval 0.5
 ```
 
 For stronger smoothing, lower the alpha value:
@@ -102,6 +112,7 @@ vision_robot_arm/
   cli.py                   # command-line arguments (shared)
   core/                    # shared contract between vision and robot
     config.py              # runtime settings and defaults
+    hud.py                 # translucent panels and text used by both areas
     pose_state.py          # shared pose data object
     runtime.py             # optional dependency loading
   vision/                  # camera, pose detection, gestures, drawing
@@ -151,7 +162,8 @@ the current shoulder and elbow angles next to the joints on the camera image,
 prints the robot state to the console, and shows a panel in the bottom-right
 corner with a schematic two-link arm: the grey arm is the mapped target, the
 green arm is where the (simulated) robot currently is, the blue jaws show the
-gripper.
+gripper. The top-left panel shows detection, robot backend, calibration and
+recording state plus detected gestures; the key hints sit at the bottom.
 
 ```powershell
 python main.py --test-mode
