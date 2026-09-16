@@ -110,13 +110,21 @@ vision_robot_arm/
     smoothing.py           # low-pass filters
     state_builder.py       # raw detections -> smoothed pose state
   robot/                   # robot arm control
-    controller.py          # robot command abstraction/debug controller
+    backend.py             # RobotBackend protocol and debug backend
+    config.py              # RobotConfig and joint limits
+    controller.py          # RobotController glue between mapper and backend
+    factory.py             # backend selection from --robot-backend
+    mapping.py             # PoseState -> JointTargets
+    targets.py             # JointTargets value object
 models/
   pose_landmarker_lite.task
 tests/
+  test_cli.py
   test_core_config.py
+  test_robot_factory.py
   test_robot_mapping.py
   test_vision_metrics.py
+  test_vision_smoothing.py
 ```
 
 Test files follow the `test_<area>_<topic>.py` convention so that each area
@@ -174,19 +182,34 @@ The first gesture layer is rule-based and prints/records:
 - `left_arm_side`, `right_arm_side`
 - `left_elbow_bent`, `right_elbow_bent`
 
-## Robot Debug Mode
+## Robot Backends
 
-The app does not control real hardware yet. For now, robot mode maps the current
-pose state to printed debug commands:
+The robot side turns every `PoseState` into `JointTargets` (named joint angles
+in degrees, a gripper command and a lift-mode flag) and hands them to a backend
+selected with `--robot-backend`:
+
+| Backend  | What it does                                                    |
+| -------- | --------------------------------------------------------------- |
+| `none`   | default, robot side disabled                                    |
+| `debug`  | prints the mapped targets to the console                        |
+| `sim`    | simulated arm (planned)                                         |
+| `serial` | sends targets to hardware over a serial port (planned)          |
 
 ```powershell
-python main.py --robot-debug
+python main.py --robot-backend debug
 ```
 
-Current debug mapping:
+`--robot-debug` still works as a deprecated alias for `--robot-backend debug`.
+
+Current mapping (`vision_robot_arm/robot/mapping.py`):
 
 - right shoulder angle -> `shoulder`
 - right elbow angle -> `elbow`
 - `right_hand_up` -> `lift_mode=on`
 - `right_elbow_bent` -> `gripper=close`
 - `right_arm_side` -> `gripper=open`
+
+Joint angles are clamped to `--robot-shoulder-range` / `--robot-elbow-range`
+(default `0 180`) and changes smaller than `--robot-deadband` degrees (default
+`1.5`) are ignored to suppress jitter. When neither gripper gesture is active
+the gripper keeps its previous state.

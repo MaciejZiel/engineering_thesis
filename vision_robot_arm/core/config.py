@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from vision_robot_arm.robot.config import RobotConfig
+
 
 ANGLE_MODE = "angles"
 LANDMARK_MODE = "landmarks"
@@ -23,8 +25,7 @@ class AppConfig:
     model_path: Path = DEFAULT_MODEL_PATH
     video_path: Path | None = None
     loop_video: bool = False
-    robot_debug: bool = False
-    robot_print_interval: float = 0.5
+    robot: RobotConfig = RobotConfig()
     num_poses: int = 1
     min_detection_confidence: float = 0.5
     min_pose_presence_confidence: float = 0.5
@@ -39,8 +40,7 @@ class AppConfig:
             raise SystemExit("--smoothing-alpha must be greater than 0 and at most 1")
         if self.num_poses <= 0:
             raise SystemExit("--num-poses must be greater than 0")
-        if self.robot_print_interval <= 0:
-            raise SystemExit("--robot-print-interval must be greater than 0")
+        self.robot.validate()
         if self.video_path is not None and not self.video_path.exists():
             raise SystemExit(f"Video file not found: {self.video_path.resolve()}")
 

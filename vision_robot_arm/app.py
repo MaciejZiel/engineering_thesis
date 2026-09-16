@@ -6,8 +6,9 @@ from vision_robot_arm.vision.landmarks import build_landmark_indices, build_land
 from vision_robot_arm.vision.output import emit_console_data
 from vision_robot_arm.vision.pose_tracker import PoseTracker
 from vision_robot_arm.vision.recording import CsvPoseRecorder
-from vision_robot_arm.robot.controller import create_robot_controller
 from vision_robot_arm.core.runtime import load_runtime_dependencies
+from vision_robot_arm.robot.controller import RobotController
+from vision_robot_arm.robot.factory import create_robot_controller
 from vision_robot_arm.vision.state_builder import PoseStateBuilder
 
 
@@ -29,7 +30,9 @@ def run_app(config: AppConfig) -> int:
 
     source = str(config.video_path) if config.video_path is not None else config.camera
     capture = cv2.VideoCapture(source)
-    tracker = None
+    tracker: PoseTracker | None = None
+    recorder: CsvPoseRecorder | None = None
+    robot_controller: RobotController | None = None
 
     try:
         if config.video_path is None and config.width > 0:
@@ -48,10 +51,7 @@ def run_app(config: AppConfig) -> int:
 
         tracker = PoseTracker(deps, config)
         recorder = CsvPoseRecorder(config.recording_dir)
-        robot_controller = create_robot_controller(
-            enabled=config.robot_debug,
-            print_interval=config.robot_print_interval,
-        )
+        robot_controller = create_robot_controller(config.robot)
         state_builder = PoseStateBuilder(
             indices=indices,
             min_visibility=config.visibility_threshold,
@@ -74,6 +74,7 @@ def run_app(config: AppConfig) -> int:
                     if config.loop_video:
                         capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
                         state_builder.reset_tracking()
+                        robot_controller.reset()
                         continue
                     print("Video ended.")
                     return 0
@@ -119,6 +120,7 @@ def run_app(config: AppConfig) -> int:
                 robot_controller.update(current_state)
             else:
                 state_builder.reset_tracking()
+                robot_controller.reset()
 
             draw_overlay(
                 cv2,
@@ -127,7 +129,7 @@ def run_app(config: AppConfig) -> int:
                 detection.has_pose,
                 calibrated=state_builder.calibrated,
                 recording=recorder.is_recording,
-                robot_debug=config.robot_debug,
+                robot_debug=config.robot.enabled,
                 gestures=current_state.gestures if current_state else (),
             )
             cv2.imshow(window_name, frame)
@@ -146,9 +148,9 @@ def run_app(config: AppConfig) -> int:
                     print(f"Recording stopped: {path}")
             mode = update_mode_from_key(key, mode)
     finally:
-        if "recorder" in locals():
+        if recorder is not None:
             recorder.stop()
-        if "robot_controller" in locals():
+        if robot_controller is not None:
             robot_controller.close()
         if tracker is not None:
             tracker.close()

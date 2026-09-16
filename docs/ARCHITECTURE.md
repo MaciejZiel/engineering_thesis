@@ -25,11 +25,11 @@ above and runs the frame loop. `cli.py` parses command-line flags into a frozen
 ## Layers and import rules
 
 ```text
-core    -> (stdlib only)
+core    -> (stdlib only, plus robot/config.py for RobotConfig)
 vision  -> core
 robot   -> core
 app.py  -> core, vision, robot
-cli.py  -> core, app
+cli.py  -> core, robot/config.py, app
 ```
 
 - `core` is the shared contract: `AppConfig`, `PoseState`, `LandmarkPoint` and
@@ -64,7 +64,24 @@ Angle and gesture names are lowercase snake case (`right_elbow`,
 
 ## Robot side
 
-The robot side consumes `PoseState` through the `RobotController` protocol
-(`update(state)`, `close()`). The default controller does nothing; the debug
-controller prints mapped commands. Real hardware plugs in behind the same
-protocol without touching the vision side.
+```text
+PoseState -> RobotMapper -> JointTargets -> RobotBackend
+             robot/mapping.py  robot/targets.py  robot/backend.py
+```
+
+- `RobotMapper` (`robot/mapping.py`) picks the source angles and gestures,
+  clamps them to the configured `JointLimit`s and applies a dead-band so tiny
+  changes do not reach the hardware. It knows nothing about transport.
+- `JointTargets` (`robot/targets.py`) is the robot-side value object: joint
+  name to angle in degrees, an optional gripper command (`None` means keep
+  the previous state) and a lift-mode flag.
+- `RobotBackend` (`robot/backend.py`) is the transport protocol:
+  `send(targets)`, `status_lines()` for the overlay and `close()`. Backends:
+  `DebugBackend` prints, further backends (simulation, serial) plug in here.
+- `MappedRobotController` (`robot/controller.py`) glues a mapper to a backend
+  and is what `app.py` talks to through the `RobotController` protocol.
+- `create_robot_controller(RobotConfig)` (`robot/factory.py`) chooses the
+  backend from `--robot-backend`.
+- `RobotConfig` (`robot/config.py`) holds all robot settings and is embedded
+  in `AppConfig` as `config.robot`. This is the one place where `core`
+  imports from `robot`; `robot/config.py` depends on the standard library only.

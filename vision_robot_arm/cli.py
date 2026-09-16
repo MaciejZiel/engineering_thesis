@@ -3,9 +3,16 @@ from pathlib import Path
 
 from vision_robot_arm.app import run_app
 from vision_robot_arm.core.config import DEFAULT_MODEL_PATH, DEFAULT_RECORDING_DIR, AppConfig
+from vision_robot_arm.robot.config import (
+    BACKEND_CHOICES,
+    BACKEND_DEBUG,
+    BACKEND_NONE,
+    JointLimit,
+    RobotConfig,
+)
 
 
-def parse_args() -> AppConfig:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Webcam pose tracker for the vision robot arm prototype."
     )
@@ -25,17 +32,6 @@ def parse_args() -> AppConfig:
         "--loop-video",
         action="store_true",
         help="Loop the video file when it reaches the end.",
-    )
-    parser.add_argument(
-        "--robot-debug",
-        action="store_true",
-        help="Print mapped robot commands without controlling real hardware.",
-    )
-    parser.add_argument(
-        "--robot-print-interval",
-        type=float,
-        default=0.5,
-        help="Seconds between robot debug command prints. Default: 0.5.",
     )
     parser.add_argument(
         "--width",
@@ -104,13 +100,105 @@ def parse_args() -> AppConfig:
         help="Minimum pose tracking confidence. Default: 0.5.",
     )
 
-    args = parser.parse_args()
+    robot = parser.add_argument_group("robot")
+    robot.add_argument(
+        "--robot-backend",
+        choices=BACKEND_CHOICES,
+        default=BACKEND_NONE,
+        help=(
+            "Where mapped robot commands go: none, debug (print), sim (simulated arm) "
+            "or serial (hardware over a serial port). Default: none."
+        ),
+    )
+    robot.add_argument(
+        "--robot-debug",
+        action="store_true",
+        help="Deprecated alias for --robot-backend debug.",
+    )
+    robot.add_argument(
+        "--robot-print-interval",
+        type=float,
+        default=0.5,
+        help="Seconds between robot debug command prints. Default: 0.5.",
+    )
+    robot.add_argument(
+        "--robot-port",
+        default=None,
+        help="Serial port for --robot-backend serial, for example COM3.",
+    )
+    robot.add_argument(
+        "--robot-baud",
+        type=int,
+        default=115200,
+        help="Serial baud rate. Default: 115200.",
+    )
+    robot.add_argument(
+        "--robot-send-interval",
+        type=float,
+        default=0.05,
+        help="Minimum seconds between serial frames. Default: 0.05.",
+    )
+    robot.add_argument(
+        "--robot-max-speed",
+        type=float,
+        default=90.0,
+        help="Maximum simulated joint speed in degrees per second. Default: 90.",
+    )
+    robot.add_argument(
+        "--robot-home",
+        type=float,
+        default=90.0,
+        help="Starting joint angle of the simulated arm in degrees. Default: 90.",
+    )
+    robot.add_argument(
+        "--robot-deadband",
+        type=float,
+        default=1.5,
+        help="Ignore joint changes smaller than this many degrees. Default: 1.5.",
+    )
+    robot.add_argument(
+        "--robot-shoulder-range",
+        type=float,
+        nargs=2,
+        default=(0.0, 180.0),
+        metavar=("MIN", "MAX"),
+        help="Allowed shoulder joint range in degrees. Default: 0 180.",
+    )
+    robot.add_argument(
+        "--robot-elbow-range",
+        type=float,
+        nargs=2,
+        default=(0.0, 180.0),
+        metavar=("MIN", "MAX"),
+        help="Allowed elbow joint range in degrees. Default: 0 180.",
+    )
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> AppConfig:
+    args = build_parser().parse_args(argv)
+
+    backend = args.robot_backend
+    if args.robot_debug and backend == BACKEND_NONE:
+        backend = BACKEND_DEBUG
+
+    robot = RobotConfig(
+        backend=backend,
+        print_interval=args.robot_print_interval,
+        port=args.robot_port,
+        baud_rate=args.robot_baud,
+        send_interval=args.robot_send_interval,
+        max_speed_deg_s=args.robot_max_speed,
+        home_deg=args.robot_home,
+        joint_deadband_deg=args.robot_deadband,
+        shoulder_limit=JointLimit(*args.robot_shoulder_range),
+        elbow_limit=JointLimit(*args.robot_elbow_range),
+    )
     return AppConfig(
         camera=args.camera,
         video_path=args.video,
         loop_video=args.loop_video,
-        robot_debug=args.robot_debug,
-        robot_print_interval=args.robot_print_interval,
+        robot=robot,
         width=args.width,
         height=args.height,
         print_interval=args.print_interval,
