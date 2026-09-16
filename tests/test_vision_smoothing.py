@@ -44,9 +44,17 @@ class LandmarkSmootherTests(unittest.TestCase):
         smoother = LandmarkSmoother(alpha=0.5)
         smoother.update([LandmarkPoint(0.0, 0.0, 0.0, visibility=0.9)])
 
+        smoothed = smoother.update([LandmarkPoint(1.0, 2.0, 4.0, visibility=0.8)])
+
+        self.assertEqual(smoothed, [LandmarkPoint(0.5, 1.0, 2.0, visibility=0.8)])
+
+    def test_low_visibility_points_pass_through_unsmoothed(self) -> None:
+        smoother = LandmarkSmoother(alpha=0.5)
+        smoother.update([LandmarkPoint(0.0, 0.0, 0.0, visibility=0.9)])
+
         smoothed = smoother.update([LandmarkPoint(1.0, 2.0, 4.0, visibility=0.3)])
 
-        self.assertEqual(smoothed, [LandmarkPoint(0.5, 1.0, 2.0, visibility=0.3)])
+        self.assertEqual(smoothed, [LandmarkPoint(1.0, 2.0, 4.0, visibility=0.3)])
 
     def test_restarts_when_landmark_count_changes(self) -> None:
         smoother = LandmarkSmoother(alpha=0.5)

@@ -23,10 +23,11 @@ from vision_robot_arm.vision.drawing import (
     landmark_visibility_ratio,
 )
 from vision_robot_arm.vision.hand_gestures import (
+    HandGestureFilter,
     WristAngleHold,
     assign_hand_sides,
-    gestures_from_sides,
-    wrist_angles_from_sides,
+    detect_hand_gestures,
+    hand_wrist_angles,
 )
 from vision_robot_arm.vision.hand_tracker import HandTracker
 from vision_robot_arm.vision.landmarks import build_landmark_indices, build_landmark_names
@@ -79,6 +80,7 @@ def run_app(config: AppConfig) -> int:
 
         tracker = PoseTracker(deps, config)
         wrist_hold = WristAngleHold()
+        gesture_filter = HandGestureFilter()
         if config.hands:
             hand_tracker = HandTracker(deps, config)
         recorder = CsvPoseRecorder(config.recording_dir)
@@ -135,11 +137,32 @@ def run_app(config: AppConfig) -> int:
             hands_by_side: dict[str, list] = {}
             if hand_tracker is not None and detection.landmarks:
                 hands = hand_tracker.detect(rgb_frame, timestamp_ms)
-                hands_by_side = assign_hand_sides(hands, detection.landmarks, indices)
-                hand_gestures = gestures_from_sides(hands_by_side)
                 aspect_ratio = frame.shape[1] / max(1, frame.shape[0])
+                hands_by_side = assign_hand_sides(
+                    hands,
+                    detection.landmarks,
+                    indices,
+                    aspect_ratio=aspect_ratio,
+                    min_visibility=config.visibility_threshold,
+                )
+                hand_gestures = gesture_filter.update(
+                    detect_hand_gestures(
+                        hands,
+                        detection.landmarks,
+                        indices,
+                        aspect_ratio=aspect_ratio,
+                        min_visibility=config.visibility_threshold,
+                    ),
+                    timestamp_ms,
+                )
                 wrist_angles = wrist_hold.update(
-                    wrist_angles_from_sides(hands_by_side, detection.landmarks, indices, aspect_ratio),
+                    hand_wrist_angles(
+                        hands,
+                        detection.landmarks,
+                        indices,
+                        aspect_ratio,
+                        min_visibility=config.visibility_threshold,
+                    ),
                     timestamp_ms,
                 )
             if mirrored:
@@ -215,6 +238,7 @@ def run_app(config: AppConfig) -> int:
                 state_builder.reset_tracking()
                 robot_controller.reset()
                 wrist_hold.reset()
+                gesture_filter.reset()
 
             now = time.monotonic()
             frame_elapsed = now - last_frame_at

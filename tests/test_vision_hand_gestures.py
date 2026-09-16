@@ -20,18 +20,21 @@ class P:
     visibility: float = 1.0
 
 
+EXTENDED_FINGER = ((0.0, 0.07), (0.0, 0.10), (0.0, 0.13), (0.0, 0.16))
+CURLED_FINGER = ((0.0, 0.07), (0.012, 0.088), (0.02, 0.075), (0.015, 0.06))
+
+
 def make_hand(wrist: tuple[float, float], extended: tuple[bool, bool, bool, bool]) -> list[P]:
+    """Synthetic hand: straight fingers point up, curled fingers fold back toward the palm."""
     hand = [P(*wrist) for _ in range(21)]
+    for thumb_index, step in enumerate((1, 2, 3, 4), start=1):
+        hand[thumb_index] = P(wrist[0] - 0.012 * step, wrist[1] - 0.012 * step)
     finger_bases = (5, 9, 13, 17)
     for finger, (base_index, is_extended) in enumerate(zip(finger_bases, extended)):
         dx = (finger - 1.5) * 0.02
-        for offset, step in enumerate((1, 2, 3, 4)):
-            index = base_index + offset
-            if is_extended:
-                distance = 0.04 + 0.03 * step
-            else:
-                distance = 0.07 if step == 2 else 0.05
-            hand[index] = P(wrist[0] + dx, wrist[1] - distance)
+        shape = EXTENDED_FINGER if is_extended else CURLED_FINGER
+        for offset, (x_offset, distance) in enumerate(shape):
+            hand[base_index + offset] = P(wrist[0] + dx + x_offset, wrist[1] - distance)
     return hand
 
 
@@ -77,11 +80,16 @@ class HandSideAssignmentTests(unittest.TestCase):
         self.assertEqual(assign_hand_sides([far_hand], POSE, POSE_INDICES), {})
 
     def test_one_hand_is_not_assigned_to_both_sides(self) -> None:
-        hand = make_hand((0.5, 0.6), (True, True, True, True))
+        hand = make_hand((0.55, 0.6), (True, True, True, True))
 
         sides = assign_hand_sides([hand], POSE, POSE_INDICES, max_distance=0.5)
 
-        self.assertEqual(len(sides), 1)
+        self.assertEqual(list(sides), ["right"])
+
+    def test_hand_equally_close_to_both_wrists_is_ambiguous(self) -> None:
+        hand = make_hand((0.5, 0.6), (True, True, True, True))
+
+        self.assertEqual(assign_hand_sides([hand], POSE, POSE_INDICES, max_distance=0.5), {})
 
 
 class HandWristAngleTests(unittest.TestCase):

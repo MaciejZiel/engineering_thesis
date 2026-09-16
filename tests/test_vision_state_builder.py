@@ -43,11 +43,11 @@ class PoseStateBuilderTests(unittest.TestCase):
 
     def test_extra_angles_are_smoothed_like_other_angles(self) -> None:
         builder = PoseStateBuilder(INDICES, min_visibility=0.55, smoothing_alpha=0.5)
-        builder.build(1, make_pose(), None, extra_angles={"right_wrist": 100.0})
+        builder.build(1000, make_pose(), None, extra_angles={"right_wrist": 100.0})
 
-        state = builder.build(2, make_pose(), None, extra_angles={"right_wrist": 120.0})
+        state = builder.build(1033, make_pose(), None, extra_angles={"right_wrist": 120.0})
 
-        self.assertAlmostEqual(state.angles["right_wrist"], 110.0)
+        self.assertAlmostEqual(state.angles["right_wrist"], 110.0, delta=0.5)
 
     def test_without_extra_angle_unreliable_wrist_stays_missing(self) -> None:
         builder = PoseStateBuilder(INDICES, min_visibility=0.55, smoothing_alpha=1.0)

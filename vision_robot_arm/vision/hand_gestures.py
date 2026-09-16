@@ -12,6 +12,7 @@ FINGER_TIPS = (8, 12, 16, 20)
 EXTENDED_RATIO = 1.1
 OPEN_HAND_MIN_FINGERS = 3
 MAX_WRIST_DISTANCE = 0.15
+WRIST_DISTANCE_PER_HAND_SPAN = 1.2
 
 HAND_OPEN = "open"
 HAND_FIST = "fist"
@@ -70,6 +71,11 @@ def assign_hand_sides(
     for hand_number, hand in enumerate(hands):
         if not hand or not _finite(hand[0]):
             continue
+        allowed = max_distance
+        if len(hand) > HAND_MIDDLE_MCP and _finite(hand[HAND_MIDDLE_MCP]):
+            span = _norm(_vector(hand[HAND_WRIST], hand[HAND_MIDDLE_MCP], aspect_ratio))
+            # A hand close to the camera is large and its two wrist estimates drift apart.
+            allowed = max(max_distance, span * WRIST_DISTANCE_PER_HAND_SPAN)
         for side in SIDES:
             wrist_index = indices.get(f"{side.upper()}_WRIST")
             if wrist_index is None or not 0 <= wrist_index < len(pose_landmarks):
@@ -78,7 +84,7 @@ def assign_hand_sides(
             if not is_reliable(wrist, min_visibility):
                 continue
             distance = math.hypot((hand[0].x-wrist.x)*aspect_ratio, hand[0].y-wrist.y)
-            if distance <= max_distance:
+            if distance <= allowed:
                 costs[side, hand_number] = distance
     candidates = []
     for assignment in product((None, *range(len(hands))), repeat=2):
