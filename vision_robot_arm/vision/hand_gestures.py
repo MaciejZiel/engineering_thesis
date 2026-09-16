@@ -2,6 +2,7 @@ import math
 from itertools import product
 from typing import Any
 
+from vision_robot_arm.core.pose_state import LandmarkPoint
 from vision_robot_arm.vision.landmarks import is_reliable
 from vision_robot_arm.vision.metrics import calculate_angle
 
@@ -139,6 +140,34 @@ MIN_PROJECTION = 0.02
 SIDE_ROTATION = {"left": 1.0, "right": -1.0}
 # A wrist cannot cross its whole range in one frame; anything faster is a measurement jump.
 MAX_WRIST_RATE_DEG_S = 240.0
+
+
+def refine_pose_wrists(
+    pose_landmarks: list[Any],
+    hands_by_side: dict[str, list[Any]],
+    indices: dict[str, int],
+) -> list[Any]:
+    """Move each wrist onto the hand model's wrist, which sits where the hand really starts.
+
+    The pose model places its wrist a little inside the palm, so the forearm was drawn
+    past the joint and every angle hinged on the wrong point. Position comes from the
+    hand model; visibility stays with the pose model, which is what judges reliability.
+    """
+    refined = list(pose_landmarks)
+    for side, hand in hands_by_side.items():
+        index = indices.get(f"{side.upper()}_WRIST")
+        if index is None or not 0 <= index < len(refined) or len(hand) <= HAND_WRIST:
+            continue
+        pose_wrist, hand_wrist = refined[index], hand[HAND_WRIST]
+        if not all(math.isfinite(float(getattr(hand_wrist, axis))) for axis in ("x", "y")):
+            continue
+        refined[index] = LandmarkPoint(
+            x=float(hand_wrist.x),
+            y=float(hand_wrist.y),
+            z=float(getattr(hand_wrist, "z", 0.0) or 0.0),
+            visibility=float(getattr(pose_wrist, "visibility", 1.0) or 1.0),
+        )
+    return refined
 
 
 def hand_wrist_angles(

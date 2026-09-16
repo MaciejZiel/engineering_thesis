@@ -9,6 +9,7 @@ from vision_robot_arm.vision.hand_gestures import (
     HandGestureFilter,
     detect_hand_gestures,
     hand_wrist_angles,
+    refine_pose_wrists,
     signed_wrist_deviation,
     WristAngleHold,
 )
@@ -92,6 +93,46 @@ class HandSideAssignmentTests(unittest.TestCase):
         hand = make_hand((0.5, 0.6), (True, True, True, True))
 
         self.assertEqual(assign_hand_sides([hand], POSE, POSE_INDICES, max_distance=0.5), {})
+
+
+class RefinePoseWristsTests(unittest.TestCase):
+    """The pose model puts its wrist inside the palm; the hand model knows the real joint."""
+
+    INDICES = {"RIGHT_WRIST": 0, "RIGHT_ELBOW": 1}
+
+    def pose(self) -> list[P]:
+        return [P(0.62, 0.30, visibility=0.82), P(0.60, 0.55)]
+
+    def hand(self) -> list[P]:
+        return [P(0.60, 0.38)] + [P(0.65, 0.30) for _ in range(20)]
+
+    def test_the_wrist_moves_onto_the_hand_landmark(self) -> None:
+        refined = refine_pose_wrists(self.pose(), {"right": self.hand()}, self.INDICES)
+
+        self.assertAlmostEqual(refined[0].x, 0.60)
+        self.assertAlmostEqual(refined[0].y, 0.38)
+
+    def test_visibility_stays_with_the_pose_model(self) -> None:
+        refined = refine_pose_wrists(self.pose(), {"right": self.hand()}, self.INDICES)
+
+        self.assertAlmostEqual(refined[0].visibility, 0.82)
+
+    def test_other_landmarks_are_untouched(self) -> None:
+        pose = self.pose()
+
+        refined = refine_pose_wrists(pose, {"right": self.hand()}, self.INDICES)
+
+        self.assertIs(refined[1], pose[1])
+
+    def test_an_unmatched_side_keeps_its_pose_wrist(self) -> None:
+        pose = self.pose()
+
+        self.assertIs(refine_pose_wrists(pose, {}, self.INDICES)[0], pose[0])
+
+    def test_a_short_hand_list_is_ignored(self) -> None:
+        pose = self.pose()
+
+        self.assertIs(refine_pose_wrists(pose, {"right": []}, self.INDICES)[0], pose[0])
 
 
 class HandWristAngleTests(unittest.TestCase):

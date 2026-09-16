@@ -29,6 +29,7 @@ from vision_robot_arm.vision.hand_gestures import (
     assign_hand_sides,
     detect_hand_gestures,
     hand_wrist_angles,
+    refine_pose_wrists,
 )
 from vision_robot_arm.vision.hand_tracker import HandTracker
 from vision_robot_arm.vision.landmarks import build_landmark_indices, build_landmark_names
@@ -144,29 +145,24 @@ def run_app(config: AppConfig) -> int:
             hand_gestures: tuple[str, ...] = ()
             extra_angles: dict[str, float] = {}
             hands_by_side: dict[str, list] = {}
-            if detection.landmarks:
-                extra_angles = arm_elevation_angles(
-                    detection.landmarks,
-                    indices,
-                    config.visibility_threshold,
-                    frame_aspect_ratio,
-                )
-            if hand_tracker is not None and detection.landmarks:
+            pose_landmarks = detection.landmarks
+            if hand_tracker is not None and pose_landmarks:
                 hands = hand_tracker.detect(rgb_frame, timestamp_ms)
-                aspect_ratio = frame_aspect_ratio
                 hands_by_side = assign_hand_sides(
                     hands,
-                    detection.landmarks,
+                    pose_landmarks,
                     indices,
-                    aspect_ratio=aspect_ratio,
+                    aspect_ratio=frame_aspect_ratio,
                     min_visibility=config.visibility_threshold,
                 )
+                # Everything downstream hinges on the wrist, so correct it first.
+                pose_landmarks = refine_pose_wrists(pose_landmarks, hands_by_side, indices)
                 hand_gestures = gesture_filter.update(
                     detect_hand_gestures(
                         hands,
-                        detection.landmarks,
+                        pose_landmarks,
                         indices,
-                        aspect_ratio=aspect_ratio,
+                        aspect_ratio=frame_aspect_ratio,
                         min_visibility=config.visibility_threshold,
                     ),
                     timestamp_ms,
@@ -175,12 +171,21 @@ def run_app(config: AppConfig) -> int:
                     wrist_hold.update(
                         hand_wrist_angles(
                             hands,
-                            detection.landmarks,
+                            pose_landmarks,
                             indices,
-                            aspect_ratio,
+                            frame_aspect_ratio,
                             min_visibility=config.visibility_threshold,
                         ),
                         timestamp_ms,
+                    )
+                )
+            if pose_landmarks:
+                extra_angles.update(
+                    arm_elevation_angles(
+                        pose_landmarks,
+                        indices,
+                        config.visibility_threshold,
+                        frame_aspect_ratio,
                     )
                 )
             if mirrored:
@@ -188,10 +193,10 @@ def run_app(config: AppConfig) -> int:
 
             current_state = None
             tracking_quality = 0.0
-            if detection.landmarks:
+            if pose_landmarks:
                 current_state = state_builder.build(
                     timestamp_ms,
-                    detection.landmarks,
+                    pose_landmarks,
                     detection.world_landmarks,
                     extra_gestures=hand_gestures,
                     extra_angles=extra_angles,
