@@ -21,7 +21,11 @@ from vision_robot_arm.vision.drawing import (
     draw_stick_figure,
     draw_tracking_frame,
 )
-from vision_robot_arm.vision.hand_gestures import detect_hand_gestures, hand_wrist_angles
+from vision_robot_arm.vision.hand_gestures import (
+    WristAngleHold,
+    detect_hand_gestures,
+    hand_wrist_angles,
+)
 from vision_robot_arm.vision.hand_tracker import HandTracker
 from vision_robot_arm.vision.landmarks import build_landmark_indices, build_landmark_names
 from vision_robot_arm.vision.output import emit_console_data
@@ -72,6 +76,7 @@ def run_app(config: AppConfig) -> int:
                 )
 
         tracker = PoseTracker(deps, config)
+        wrist_hold = WristAngleHold()
         if config.hands:
             hand_tracker = HandTracker(deps, config)
         recorder = CsvPoseRecorder(config.recording_dir)
@@ -128,7 +133,11 @@ def run_app(config: AppConfig) -> int:
             if hand_tracker is not None and detection.landmarks:
                 hands = hand_tracker.detect(rgb_frame, timestamp_ms)
                 hand_gestures = detect_hand_gestures(hands, detection.landmarks, indices)
-                hand_angles = hand_wrist_angles(hands, detection.landmarks, indices)
+                aspect_ratio = frame.shape[1] / max(1, frame.shape[0])
+                hand_angles = wrist_hold.update(
+                    hand_wrist_angles(hands, detection.landmarks, indices, aspect_ratio),
+                    timestamp_ms,
+                )
             if mirrored:
                 frame = cv2.flip(frame, 1)
 
@@ -187,6 +196,7 @@ def run_app(config: AppConfig) -> int:
             else:
                 state_builder.reset_tracking()
                 robot_controller.reset()
+                wrist_hold.reset()
 
             now = time.monotonic()
             frame_elapsed = now - last_frame_at

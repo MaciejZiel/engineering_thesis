@@ -369,7 +369,7 @@ Body angle to UR joint mapping (`vision_robot_arm/robot/config.py`,
 | --------------------------------------- | --------- | -------------- | ------------- |
 | shoulder (elbow-shoulder-hip), 0 = down | `shoulder`| body - 180     | -180 .. 0     |
 | elbow (shoulder-elbow-wrist), 180 = straight | `elbow` | 180 - body   | -160 .. 160   |
-| wrist (elbow-wrist-middle knuckle), 180 = straight | `wrist_1` | 180 - body | -180 .. 180 |
+| wrist (3D forearm vs hand, signed), 180 = straight | `wrist_1` | 180 - body | -180 .. 180 |
 
 So an arm held horizontally with a straight elbow gives the UR home pose
 `shoulder=-90, elbow=0`. Offsets and signs are constants in `config.py`;
@@ -409,8 +409,10 @@ Current mapping (`vision_robot_arm/robot/mapping.py`), applied to each arm:
 
 - shoulder angle (elbow-shoulder-hip) -> UR `shoulder`
 - elbow angle (shoulder-elbow-wrist) -> UR `elbow`
-- wrist angle (elbow-wrist-middle knuckle from the hand tracker, falling back
-  to elbow-wrist-index from the pose model) -> UR `wrist_1`
+- wrist angle: signed 3D angle between the forearm (pose elbow to wrist, with
+  depth) and the hand (hand-tracker wrist to middle knuckle, with depth);
+  180 = straight, below 180 = hand bent up, above 180 = bent down; held for
+  0.5 s when the hand tracker drops a frame -> UR `wrist_1`
 - `<side>_fist` -> `gripper=close`
 - `<side>_hand_open` -> `gripper=open`
 - `right_hand_up` -> `lift_mode=on`
