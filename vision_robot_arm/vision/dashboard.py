@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE
+from vision_robot_arm.core.display import preferred_dashboard_size, primary_work_area
 
 
 Color = tuple[int, int, int]
@@ -88,6 +89,7 @@ class DashboardUi:
         self._buttons: tuple[DashboardButton, ...] = ()
         self._pending_action: str | None = None
         self._fullscreen = False
+        self._canvas_size: tuple[int, int] | None = None
 
     @property
     def fullscreen(self) -> bool:
@@ -97,10 +99,25 @@ class DashboardUi:
     def buttons(self) -> tuple[DashboardButton, ...]:
         return self._buttons
 
-    def open(self, width: int, height: int) -> None:
-        self._cv2.namedWindow(self.window_name, self._cv2.WINDOW_NORMAL)
-        self._cv2.resizeWindow(self.window_name, min(width, 1600), min(height, 900))
+    def open(self) -> tuple[int, int]:
+        width, height = preferred_dashboard_size(primary_work_area())
+        flags = self._cv2.WINDOW_NORMAL | getattr(self._cv2, "WINDOW_FREERATIO", 0)
+        self._cv2.namedWindow(self.window_name, flags)
+        self._cv2.resizeWindow(self.window_name, width, height)
         self._cv2.setMouseCallback(self.window_name, self._on_mouse)
+        self._canvas_size = (width, height)
+        return self._canvas_size
+
+    def sync_window_size(self) -> tuple[int, int] | None:
+        """Match rendering pixels to the current OpenCV viewport after resizing."""
+        cv_error = getattr(self._cv2, "error", Exception)
+        try:
+            _x, _y, width, height = self._cv2.getWindowImageRect(self.window_name)
+        except (AttributeError, cv_error):
+            return self._canvas_size
+        if width >= 960 and height >= 540:
+            self._canvas_size = (width, height)
+        return self._canvas_size
 
     def consume_action(self) -> str | None:
         action = self._pending_action
@@ -130,11 +147,10 @@ class DashboardUi:
         source_label: str,
     ) -> Any:
         camera_height, camera_width = camera_frame.shape[:2]
-        width = max(1280, camera_width)
-        height = max(720, round(width * 9 / 16))
-        if height > 1080:
-            height = 1080
-            width = 1920
+        width, height = self._canvas_size or (
+            max(1280, camera_width),
+            max(720, camera_height),
+        )
 
         canvas = self._np.full((height, width, 3), BACKGROUND, dtype=self._np.uint8)
         scale = height / 1080.0
@@ -404,7 +420,17 @@ class DashboardUi:
         fitted = fit_inside((source_width, source_height), target)
         if fitted.width <= 0 or fitted.height <= 0:
             return
-        resized = self._cv2.resize(image, (fitted.width, fitted.height), interpolation=self._cv2.INTER_AREA)
+        shrinking = fitted.width <= source_width and fitted.height <= source_height
+        interpolation = (
+            self._cv2.INTER_AREA
+            if shrinking
+            else getattr(self._cv2, "INTER_LANCZOS4", self._cv2.INTER_CUBIC)
+        )
+        resized = self._cv2.resize(
+            image,
+            (fitted.width, fitted.height),
+            interpolation=interpolation,
+        )
         canvas[fitted.y:fitted.bottom, fitted.x:fitted.right] = resized
 
     def _corner_accents(self, canvas: Any, rect: Rect, scale: float) -> None:

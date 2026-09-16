@@ -130,6 +130,15 @@ twin of both UR7e arms, tracking/calibration/recording state, robot connection
 state and recognized gestures. The bottom bar contains clickable controls, so
 the application can be operated with either the mouse or keyboard.
 
+On Windows the process enables per-monitor DPI awareness and reads the usable
+pixel area of the primary display. The initial dashboard uses 90% of that area
+and its render surface follows the real OpenCV viewport after resizing or
+entering fullscreen. UI text and line work are therefore rendered directly at
+the target resolution instead of being stretched from a fixed 1920x1080
+bitmap. The responsive layout is intended for HD/FHD, QHD, ultrawide and 4K
+displays; low-resolution camera frames are enlarged with Lanczos interpolation
+and never have their aspect ratio changed.
+
 The visual design follows the lab setup described by the PJATK ARM Robotics
 program: two UR7e cobots, an NVIDIA Jetson Orin AGX module and an Orbbec Gemini
 335Lg 3D camera. Orange indicates tracked human arms and the current robot

@@ -1,6 +1,7 @@
 import time
 
 from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE, AppConfig
+from vision_robot_arm.core.display import enable_high_dpi_awareness
 from vision_robot_arm.core.pose_state import mirror_landmarks
 from vision_robot_arm.core.runtime import load_runtime_dependencies
 from vision_robot_arm.robot.controller import RobotController
@@ -43,6 +44,7 @@ def update_mode_from_key(key: int, current_mode: str) -> str:
 
 
 def run_app(config: AppConfig) -> int:
+    enable_high_dpi_awareness()
     deps = load_runtime_dependencies()
     cv2 = deps.cv2
     indices = build_landmark_indices(deps.vision)
@@ -90,10 +92,7 @@ def run_app(config: AppConfig) -> int:
             (SIMULATION_SIZE[1], SIMULATION_SIZE[0], 3), dtype=deps.np.uint8
         )
         dashboard = DashboardUi(cv2, deps.np, WINDOW_NAME)
-        dashboard.open(
-            config.width if config.width > 0 else 1600,
-            config.height if config.height > 0 else 900,
-        )
+        dashboard.open()
         last_frame_at = time.monotonic()
         display_fps = 0.0
 
@@ -214,6 +213,7 @@ def run_app(config: AppConfig) -> int:
             cv2.imshow(WINDOW_NAME, dashboard_frame)
 
             key = cv2.waitKey(wait_delay_ms) & 0xFF
+            dashboard.sync_window_size()
             action = dashboard.consume_action()
             if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
                 return 0

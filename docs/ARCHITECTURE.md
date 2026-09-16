@@ -37,9 +37,10 @@ cli.py  -> core, robot/config.py, app
 ```
 
 - `core` is the shared contract: `AppConfig`, `PoseState`, `LandmarkPoint`,
-  the optional dependency loader and `hud.py` with the translucent panel and
-  text primitives that both the vision overlay and the robot panel use. Text is
-  drawn in a single pass on a translucent background; the two-pass outline
+  the optional dependency loader, DPI/display discovery, and `hud.py` with the
+  translucent panel and text primitives that both the vision overlay and the
+  robot panel use. Text is drawn in a single pass on a translucent background;
+  the two-pass outline
   technique renders misaligned on OpenCV 5. Sizes scale with frame height
   (`ui_scale`, 720 px = 1.0). Changing anything in `core` affects both the
   vision and the robot side, so agree on it first.
