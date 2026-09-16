@@ -3,7 +3,13 @@ import unittest
 
 import numpy as np
 
-from vision_robot_arm.vision.drawing import draw_joint_angle_labels, draw_overlay, joint_label
+from vision_robot_arm.vision.drawing import (
+    draw_joint_angle_labels,
+    draw_overlay,
+    draw_tracking_frame,
+    joint_label,
+    landmark_visibility_ratio,
+)
 
 
 @dataclass
@@ -30,6 +36,9 @@ class FakeCv2:
 
     def putText(self, frame: object, text: str, position: tuple[int, int], *args: object) -> None:
         self.texts.append((text, position))
+
+    def line(self, *args: object) -> None:
+        pass
 
 
 class JointAngleLabelTests(unittest.TestCase):
@@ -96,6 +105,33 @@ class OverlayTests(unittest.TestCase):
         _, hint_position = cv2.texts[-1]
         self.assertGreater(hint_position[1], 330)
         self.assertLess(hint_position[1], 360)
+
+
+class TrackingFrameTests(unittest.TestCase):
+    def test_visibility_ratio_counts_reliable_landmarks(self) -> None:
+        landmarks = [
+            FakeLandmark(0.2, 0.2, visibility=0.9),
+            FakeLandmark(0.4, 0.4, visibility=0.6),
+            FakeLandmark(0.6, 0.6, visibility=0.2),
+            FakeLandmark(0.8, 0.8, visibility=0.1),
+        ]
+
+        self.assertEqual(landmark_visibility_ratio(landmarks, 0.55), 0.5)
+
+    def test_draws_tracking_label_for_reliable_pose(self) -> None:
+        cv2 = FakeCv2()
+        frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        landmarks = [
+            FakeLandmark(0.2, 0.2),
+            FakeLandmark(0.8, 0.2),
+            FakeLandmark(0.2, 0.8),
+            FakeLandmark(0.8, 0.8),
+        ]
+
+        ratio = draw_tracking_frame(cv2, frame, landmarks, 0.55)
+
+        self.assertEqual(ratio, 1.0)
+        self.assertTrue(any(text == "TRACKED 100%" for text, _ in cv2.texts))
 
 
 if __name__ == "__main__":

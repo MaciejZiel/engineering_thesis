@@ -9,6 +9,7 @@ NVIDIA Jetson AGX Orin and an Orbbec Gemini 335Lg 3D camera).
 
 Current version:
 
+- presents the camera, system status, controls and dual-arm digital twin in one dashboard window
 - opens a webcam with OpenCV
 - detects a single human pose with MediaPipe Pose Landmarker
 - draws a custom skeleton with a horizontal hip line
@@ -22,20 +23,25 @@ Current version:
 
 ## Setup
 
-Use Python 3.12 or 3.13. Create a virtual environment and install the runtime
+Use Python 3.12 (the tested Windows version is 3.12.10). Create a virtual environment and install the runtime
 dependencies:
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m pip install -r requirements-lock.txt
 ```
 
-For development (tests) and the optional serial robot backend install the
-project with its extras instead:
+The lock file is the tested, reproducible Windows environment and already
+contains the test runner and optional serial dependency. Install the project
+itself in editable mode without changing those versions:
 
 ```powershell
-.venv\Scripts\python -m pip install -e .[dev,serial]
+.venv\Scripts\python -m pip install --no-deps -e .
 ```
+
+`requirements.txt` and the extras in `pyproject.toml` remain available for
+dependency maintenance, but both collaborators should use the lock file for
+normal development and demonstrations.
 
 ## Run
 
@@ -115,6 +121,23 @@ Hand tracking (open hand / fist for the gripper) uses the MediaPipe Hand
 Landmarker. Point `--hand-model` at another `.task` file or disable it with
 `--no-hands` on slow machines.
 
+## Dashboard UI
+
+The application uses one resizable OpenCV window named **Motion Twin**. The
+camera feed occupies the main area. A sidebar contains the embedded digital
+twin of both UR7e arms, tracking/calibration/recording state, robot connection
+state and recognized gestures. The bottom bar contains clickable controls, so
+the application can be operated with either the mouse or keyboard.
+
+The visual design follows the lab setup described by the PJATK ARM Robotics
+program: two UR7e cobots, an NVIDIA Jetson Orin AGX module and an Orbbec Gemini
+335Lg 3D camera. Orange indicates tracked human arms and the current robot
+position; grey indicates robot targets.
+
+Press `f` or click **FULLSCREEN** for presentation mode. Closing the window,
+pressing `q`/`Esc`, or clicking **QUIT** shuts down the trackers, recorder,
+camera and robot backend cleanly.
+
 ## Project Structure
 
 The package is split into three areas so two people can work in parallel:
@@ -154,7 +177,7 @@ vision_robot_arm/
     simulation.py          # two simulated UR7e arms
     targets.py             # UR joint names, JointTargets, ArmState, RobotState
     ur_backend.py          # URScript servoj over TCP to the UR7e controllers
-    visualization.py       # robot simulation window drawn in test mode
+    visualization.py       # robot digital twin embedded in the dashboard
 models/
   hand_landmarker.task
   pose_landmarker_lite.task
@@ -181,12 +204,12 @@ rules, and `docs/OWNERSHIP.md` for who owns which area and how we commit.
 
 Test mode is the quickest way to see what the robot side receives. It draws
 the current shoulder, elbow and wrist angles next to the joints on the camera
-image, prints the robot state to the console, and opens a second window,
-"Robot Simulation", with two schematic UR7e arms (shoulder, elbow, wrist 1;
-base, wrist 2 and wrist 3 are held at the home pose). The left panel is
-the cobot driven by your left arm, the right panel by your right arm
-(mirrored like the camera view). The grey arm is the mapped target, the green
-arm is where the simulated robot currently is, the blue jaws show the gripper.
+image and prints the robot state to the console. The dashboard's embedded
+digital-twin panel contains two schematic UR7e arms (shoulder, elbow, wrist 1;
+base, wrist 2 and wrist 3 are held at the home pose). The left panel is the
+cobot driven by your left arm and the right panel by your right arm (mirrored
+like the camera view). The grey arm is the mapped target and the orange arm is
+where the simulated robot currently is.
 The top-left panel of the camera window shows detection, robot backend,
 calibration and recording state plus detected gestures; the key hints sit at
 the bottom.
@@ -209,7 +232,11 @@ python main.py --test-mode --robot-backend serial --robot-port COM3
 - `3`: print angles and raw landmarks
 - `c`: calibrate the current pose as neutral
 - `r`: start/stop CSV recording
+- `f`: toggle fullscreen presentation mode
 - `q` or `Esc`: quit
+
+The same output-mode, calibration, recording, fullscreen and quit actions are
+available as buttons in the bottom bar.
 
 ## Tests
 
@@ -292,7 +319,7 @@ python main.py --robot-backend debug
 Each simulated arm starts at the UR home pose and moves toward the mapped
 targets at most `--robot-max-speed` degrees per second (default `60`, UR7e
 hardware limit `180`). With `--test-mode` the current and target angles are
-drawn in the simulation window, so you can test the mapping without hardware:
+the embedded digital-twin panel, so you can test the mapping without hardware:
 
 ```powershell
 python main.py --robot-backend sim --robot-max-speed 60

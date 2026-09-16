@@ -6,10 +6,19 @@ from vision_robot_arm.core.runtime import load_runtime_dependencies
 from vision_robot_arm.robot.controller import RobotController
 from vision_robot_arm.robot.factory import create_robot_controller
 from vision_robot_arm.robot.visualization import draw_simulation
+from vision_robot_arm.vision.dashboard import (
+    ACTION_CALIBRATE,
+    ACTION_FULLSCREEN,
+    ACTION_MODE,
+    ACTION_QUIT,
+    ACTION_RECORD,
+    DashboardUi,
+    cycle_output_mode,
+)
 from vision_robot_arm.vision.drawing import (
     draw_joint_angle_labels,
-    draw_overlay,
     draw_stick_figure,
+    draw_tracking_frame,
 )
 from vision_robot_arm.vision.hand_gestures import detect_hand_gestures
 from vision_robot_arm.vision.hand_tracker import HandTracker
@@ -19,8 +28,8 @@ from vision_robot_arm.vision.pose_tracker import PoseTracker
 from vision_robot_arm.vision.recording import CsvPoseRecorder
 from vision_robot_arm.vision.state_builder import PoseStateBuilder
 
-SIMULATION_WINDOW = "Vision Robot Arm - Robot Simulation"
 SIMULATION_SIZE = (960, 540)
+WINDOW_NAME = "Motion Twin - Dual UR7e Control"
 
 
 def update_mode_from_key(key: int, current_mode: str) -> str:
@@ -77,17 +86,21 @@ def run_app(config: AppConfig) -> int:
         last_timestamp_ms = -1
         wait_delay_ms = _frame_wait_delay_ms(cv2, capture, config)
         mirrored = config.mirror and config.video_path is None
-        window_name = "Vision Robot Arm - Pose Tracker"
-        simulation_canvas = None
-        if config.test_mode:
-            simulation_canvas = deps.np.zeros(
-                (SIMULATION_SIZE[1], SIMULATION_SIZE[0], 3), dtype=deps.np.uint8
-            )
+        simulation_canvas = deps.np.zeros(
+            (SIMULATION_SIZE[1], SIMULATION_SIZE[0], 3), dtype=deps.np.uint8
+        )
+        dashboard = DashboardUi(cv2, deps.np, WINDOW_NAME)
+        dashboard.open(
+            config.width if config.width > 0 else 1600,
+            config.height if config.height > 0 else 900,
+        )
+        last_frame_at = time.monotonic()
+        display_fps = 0.0
 
         print(_source_started_message(config))
-        print("Keys: 1 angles, 2 landmarks, 3 both, c calibrate, r record, q/Esc quit.")
+        print("Keys: 1 angles, 2 landmarks, 3 both, c calibrate, r record, f fullscreen, q/Esc quit.")
         if config.test_mode:
-            print(f"Test mode: joint angle labels and robot simulation window ({config.robot.backend}).")
+            print(f"Test mode: joint angle labels and embedded robot simulation ({config.robot.backend}).")
 
         while True:
             ok, frame = capture.read()
@@ -122,6 +135,7 @@ def run_app(config: AppConfig) -> int:
                 frame = cv2.flip(frame, 1)
 
             current_state = None
+            tracking_quality = 0.0
             if detection.landmarks:
                 current_state = state_builder.build(
                     timestamp_ms,
@@ -139,6 +153,12 @@ def run_app(config: AppConfig) -> int:
                     frame,
                     display_landmarks,
                     indices,
+                    config.visibility_threshold,
+                )
+                tracking_quality = draw_tracking_frame(
+                    cv2,
+                    frame,
+                    display_landmarks,
                     config.visibility_threshold,
                 )
                 if config.test_mode:
@@ -169,35 +189,48 @@ def run_app(config: AppConfig) -> int:
                 state_builder.reset_tracking()
                 robot_controller.reset()
 
-            draw_overlay(
-                cv2,
+            now = time.monotonic()
+            frame_elapsed = now - last_frame_at
+            if frame_elapsed > 0:
+                instant_fps = 1.0 / frame_elapsed
+                display_fps = instant_fps if display_fps == 0.0 else 0.9 * display_fps + 0.1 * instant_fps
+            last_frame_at = now
+
+            draw_simulation(cv2, simulation_canvas, robot_controller.robot_state())
+            dashboard_frame = dashboard.render(
                 frame,
-                mode,
-                detection.has_pose,
+                simulation_canvas,
+                mode=mode,
+                person_detected=detection.has_pose,
                 calibrated=state_builder.calibrated,
                 recording=recorder.is_recording,
                 robot_label=config.robot.backend if config.robot.enabled else "off",
                 gestures=current_state.gestures if current_state else (),
-                status_lines=() if config.test_mode else tuple(robot_controller.status_lines()),
+                status_lines=tuple(robot_controller.status_lines()),
+                tracking_quality=tracking_quality,
+                fps=display_fps,
+                source_label=_source_label(config),
             )
-            cv2.imshow(window_name, frame)
-            if simulation_canvas is not None:
-                draw_simulation(cv2, simulation_canvas, robot_controller.robot_state())
-                cv2.imshow(SIMULATION_WINDOW, simulation_canvas)
+            cv2.imshow(WINDOW_NAME, dashboard_frame)
 
             key = cv2.waitKey(wait_delay_ms) & 0xFF
-            if key in (ord("q"), 27):
+            action = dashboard.consume_action()
+            if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
                 return 0
-            if key == ord("c") and current_state is not None:
+            if key in (ord("q"), 27) or action == ACTION_QUIT:
+                return 0
+            if key == ord("f") or action == ACTION_FULLSCREEN:
+                dashboard.toggle_fullscreen()
+            if (key == ord("c") or action == ACTION_CALIBRATE) and current_state is not None:
                 count = state_builder.capture_calibration(current_state)
                 print(f"Calibration captured from {count} angles.")
-            if key == ord("r"):
+            if key == ord("r") or action == ACTION_RECORD:
                 is_recording, path = recorder.toggle(names)
                 if is_recording:
                     print(f"Recording started: {path}")
                 else:
                     print(f"Recording stopped: {path}")
-            mode = update_mode_from_key(key, mode)
+            mode = cycle_output_mode(mode) if action == ACTION_MODE else update_mode_from_key(key, mode)
     finally:
         if recorder is not None:
             recorder.stop()
@@ -224,6 +257,12 @@ def _source_started_message(config: AppConfig) -> str:
     if config.video_path is not None:
         return f"Video started: {config.video_path}"
     return "Camera started."
+
+
+def _source_label(config: AppConfig) -> str:
+    if config.video_path is not None:
+        return config.video_path.name[:24]
+    return f"CAM {config.camera}"
 
 
 def _frame_wait_delay_ms(cv2: object, capture: object, config: AppConfig) -> int:

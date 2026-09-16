@@ -22,6 +22,7 @@ HINT_SCALE = 0.42
 HINT_LINE_HEIGHT = 16
 HINT_PADDING = 6
 HINT_COLOR: Color = (190, 190, 190)
+TRACKING_COLOR: Color = (0, 145, 255)
 
 
 def pixel_point(landmark: Any, width: int, height: int) -> Point:
@@ -124,7 +125,7 @@ def draw_stick_figure(
     indices: dict[str, int],
     min_visibility: float,
 ) -> None:
-    arm_color = (40, 220, 255)
+    arm_color = (0, 145, 255)
     torso_color = (80, 255, 120)
     hip_color = (255, 210, 60)
     leg_color = (255, 120, 80)
@@ -223,6 +224,61 @@ def draw_stick_figure(
         else:
             radius = 12
         cv2.circle(frame, nose, radius, head_color, 2, cv2.LINE_AA)
+
+
+def landmark_visibility_ratio(landmarks: list[Any], min_visibility: float) -> float:
+    if not landmarks:
+        return 0.0
+    reliable = sum(1 for landmark in landmarks if is_reliable(landmark, min_visibility))
+    return reliable / len(landmarks)
+
+
+def draw_tracking_frame(
+    cv2: Any,
+    frame: Any,
+    landmarks: list[Any],
+    min_visibility: float,
+) -> float:
+    """Draw corner brackets around reliable pose points and return their visible ratio."""
+    height, width = frame.shape[:2]
+    reliable = [
+        pixel_point(landmark, width, height)
+        for landmark in landmarks
+        if is_reliable(landmark, min_visibility)
+    ]
+    ratio = landmark_visibility_ratio(landmarks, min_visibility)
+    if len(reliable) < 4:
+        return ratio
+
+    padding = scaled(24, frame)
+    left = max(0, min(point[0] for point in reliable) - padding)
+    top = max(0, min(point[1] for point in reliable) - padding)
+    right = min(width - 1, max(point[0] for point in reliable) + padding)
+    bottom = min(height - 1, max(point[1] for point in reliable) + padding)
+    corner = max(scaled(18, frame), min(right - left, bottom - top) // 12)
+    thickness = scaled(2, frame)
+
+    segments = (
+        ((left, top), (left + corner, top)),
+        ((left, top), (left, top + corner)),
+        ((right, top), (right - corner, top)),
+        ((right, top), (right, top + corner)),
+        ((left, bottom), (left + corner, bottom)),
+        ((left, bottom), (left, bottom - corner)),
+        ((right, bottom), (right - corner, bottom)),
+        ((right, bottom), (right, bottom - corner)),
+    )
+    for start, end in segments:
+        cv2.line(frame, start, end, TRACKING_COLOR, thickness, cv2.LINE_AA)
+    draw_label(
+        cv2,
+        frame,
+        f"TRACKED {ratio:.0%}",
+        (left + scaled(6, frame), max(scaled(24, frame), top - scaled(8, frame))),
+        TRACKING_COLOR,
+        scale=0.45,
+    )
+    return ratio
 
 
 def draw_overlay(

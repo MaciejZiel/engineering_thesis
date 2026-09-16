@@ -22,9 +22,9 @@ Color = tuple[int, int, int]
 
 BACKGROUND: Color = (24, 24, 24)
 PANEL_BORDER: Color = (90, 90, 90)
-CURRENT_ARM: Color = (80, 220, 80)
-TARGET_ARM: Color = (120, 120, 120)
-GRIPPER_COLOR: Color = (255, 200, 60)
+CURRENT_ARM: Color = (0, 145, 255)
+TARGET_ARM: Color = (82, 94, 108)
+GRIPPER_COLOR: Color = (40, 190, 255)
 TITLE_COLOR: Color = (235, 235, 235)
 VALUE_COLOR: Color = (200, 200, 200)
 MUTED_COLOR: Color = (130, 130, 130)
@@ -85,7 +85,7 @@ def draw_simulation(cv2: Any, canvas: Any, state: RobotState | None) -> None:
     put_text(
         cv2,
         canvas,
-        f"lift mode: {lift}    grey = target, green = current, blue = gripper    angles in UR joint degrees",
+        f"lift mode: {lift}    grey = target, orange = current    angles in UR joint degrees",
         (margin, height - margin - round(6 * footer_scale / TEXT_SCALE)),
         MUTED_COLOR,
         footer_scale,

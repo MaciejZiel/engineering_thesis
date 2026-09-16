@@ -16,6 +16,10 @@ PoseStateBuilder       vision/state_builder.py  smoothing, angles, calibration, 
 console / CSV                 stick figure + overlay          RobotController
 vision/output.py              vision/drawing.py               robot/controller.py
 vision/recording.py
+                                    |
+                                    v
+                              single-window dashboard
+                              vision/dashboard.py
 ```
 
 `app.py` is the composition root. It opens the video source, builds the objects
@@ -101,9 +105,10 @@ PoseState -> RobotMapper -> JointTargets -> RobotBackend
 - Every backend also exposes `robot_state() -> RobotState | None`: per arm
   (`right`, `left`) the current and target shoulder/elbow/wrist angles and
   the gripper, plus the lift-mode flag. `robot/visualization.py` renders it
-  into the separate simulation window (two three-link arms) when
-  `--test-mode` is on; `vision/drawing.py` labels the body joints with their
-  angles in the same mode.
+  into a canvas with two three-link arms. `vision/dashboard.py` embeds that
+  canvas beside the camera feed in the application's only window;
+  `vision/drawing.py` labels the body joints with their angles when
+  `--test-mode` is on.
 - Hand gestures: `vision/hand_tracker.py` wraps the MediaPipe Hand
   Landmarker, `vision/hand_gestures.py` matches each hand to the nearest pose
   wrist and classifies it as open or fist. The names (`right_fist`,
