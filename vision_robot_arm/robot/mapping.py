@@ -1,3 +1,5 @@
+import math
+
 from vision_robot_arm.core.pose_state import PoseState
 from vision_robot_arm.robot.config import RobotConfig
 from vision_robot_arm.robot.targets import (
@@ -37,7 +39,7 @@ class RobotMapper:
             if mapping is None:
                 continue
             body_angle = state.angles.get(f"{arm}_{mapping.source}")
-            if body_angle is None:
+            if body_angle is None or not math.isfinite(body_angle):
                 continue
             joints[joint] = self._apply_deadband(f"{arm}_{joint}", mapping.to_robot(body_angle))
         return ArmTargets(joints=joints, gripper=_gripper_from_gestures(arm, state.gestures))

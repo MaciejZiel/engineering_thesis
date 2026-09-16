@@ -412,6 +412,26 @@ class SafetyTests(unittest.TestCase):
 
         self.assertEqual(len(connector.sockets["192.168.1.10"].commands(b"servoj(")), 1)
 
+    def test_servo_lag_does_not_send_the_arm_back_into_homing(self) -> None:
+        connector = FakeConnector()
+        factory = FakeRtdeFactory()
+        backend, clock = self.make(connector, factory)
+        client = factory.clients["192.168.1.10"]
+
+        def actual(shoulder_deg: float) -> dict:
+            return {"actual_q": (0.0, math.radians(shoulder_deg), 0.0, math.radians(-90.0), 0.0, 0.0)}
+
+        client.sample = actual(-90.0)
+        clock.now = 1.1
+        backend.send(targets(right={"shoulder": 0.0}))
+
+        for step in range(1, 30):
+            clock.now = 1.1 + 0.06 * step
+            client.sample = actual(-90.0 + 0.6 * step)  # the arm trails the setpoint, as servos do
+            backend.send(targets(right={"shoulder": 0.0}, ts=step + 1))
+
+        self.assertEqual(len(connector.sockets["192.168.1.10"].commands(b"servoj(")), 30)
+
     def test_homing_gives_up_after_its_deadline(self) -> None:
         connector = FakeConnector()
         factory = FakeRtdeFactory()

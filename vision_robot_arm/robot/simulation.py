@@ -13,6 +13,10 @@ from vision_robot_arm.robot.targets import (
     RobotState,
 )
 
+# A tracking gap must not buy a huge integration step; the twin would then show
+# motion that the speed limit forbids.
+MAX_STEP_SECONDS = 0.2
+
 JOINT_SHORT_NAMES = {
     "base": "B",
     "shoulder": "S",
@@ -74,7 +78,7 @@ class SimulationBackend:
         self._lift_mode = targets.lift_mode
 
         now = self._clock()
-        dt = 0.0 if self._last_time is None else now - self._last_time
+        dt = 0.0 if self._last_time is None else min(now - self._last_time, MAX_STEP_SECONDS)
         self._last_time = now
         self.step(dt)
 

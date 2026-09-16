@@ -114,6 +114,7 @@ class URArm:
         self._gripper: str | None = None
         self._feedback: dict[str, Any] = {}
         self._rtde: RtdeClient | None = None
+        self._homed = False
         self._ready_at = clock() + config.start_seconds
         self._homing_deadline = self._ready_at + config.start_seconds * HOMING_TIMEOUT_FACTOR
         try:
@@ -129,18 +130,20 @@ class URArm:
 
     @property
     def homing(self) -> bool:
-        now = self._clock()
-        if now >= self._homing_deadline:
+        """True until the arm reaches the home pose; latched, because a servo always lags."""
+        if self._homed:
             return False
+        now = self._clock()
         if now < self._ready_at:
             return True
         actual = self.feedback_joints
-        if actual is None:
-            return False
-        return any(
+        if now < self._homing_deadline and actual is not None and any(
             abs(actual[joint] - target) > HOME_TOLERANCE_DEG
             for joint, target in self._setpoints.joints.items()
-        )
+        ):
+            return True
+        self._homed = True
+        return False
 
     @property
     def feedback_joints(self) -> dict[str, float] | None:

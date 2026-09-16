@@ -33,6 +33,7 @@ LINE_HEIGHT = 18
 PADDING = 10
 HAND_LINK_RATIO = 0.7
 GRIPPER_RATIO = 0.42
+ARM_REACH_RATIO = 2.0 + HAND_LINK_RATIO + GRIPPER_RATIO
 COMPACT_BACKGROUND: Color = (30, 28, 27)
 COMPACT_LINK: Color = (112, 169, 238)
 COMPACT_LINK_EDGE: Color = (52, 86, 134)
@@ -295,7 +296,8 @@ def draw_arm_panel(
     if sketch_height <= 0:
         return
     base = (left + width // 2, text_bottom + round(sketch_height * 0.5))
-    link_length = min(width, sketch_height) * 0.3
+    # The chain reaches ARM_REACH_RATIO links from the base, and this panel has no clipping.
+    link_length = 0.9 * min(width, sketch_height) / (2 * ARM_REACH_RATIO)
 
     targets = state.targets if state is not None else {}
     joints = state.joints if state is not None else {}

@@ -61,10 +61,21 @@ class SimulationBackendTests(unittest.TestCase):
         backend = SimulationBackend(RobotConfig(max_speed_deg_s=10.0), clock=clock)
 
         backend.send(right({"elbow": 90.0}))
-        clock.now = 2.0
+        clock.now = 0.2
         backend.send(right({"elbow": 90.0}, ts=2))
 
-        self.assertAlmostEqual(backend.state.arm("right").joints["elbow"], 20.0)
+        self.assertAlmostEqual(backend.state.arm("right").joints["elbow"], 2.0)
+
+    def test_a_tracking_gap_cannot_buy_a_giant_step(self) -> None:
+        clock = FakeClock()
+        backend = SimulationBackend(RobotConfig(max_speed_deg_s=60.0), clock=clock)
+        backend.send(right({"shoulder": -170.0}))
+
+        clock.now = 5.0  # the operator was out of frame for five seconds
+        backend.send(right({"shoulder": -170.0}, ts=2))
+
+        moved = abs(backend.state.arm("right").joints["shoulder"] - (-90.0))
+        self.assertLessEqual(moved, 60.0 * 0.2 + 0.001)
 
     def test_targets_are_clamped_to_joint_limits(self) -> None:
         config = RobotConfig(elbow=JointMapping("elbow", 180.0, -1.0, JointLimit(-30.0, 30.0)))

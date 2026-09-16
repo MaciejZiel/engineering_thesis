@@ -130,6 +130,42 @@ class SerialBackendTests(unittest.TestCase):
 
         self.assertEqual(module.ports[0].written, [b"RS:90.0;L:0\n", b"RS:90.0;L:0\n"])
 
+    def test_a_gripper_command_between_two_frames_still_reaches_the_device(self) -> None:
+        module = FakeSerialModule()
+        clock = FakeClock()
+        backend = SerialBackend("COM3", 9600, 0.05, serial_module=module, clock=clock)
+
+        for frame in range(6):  # 30 fps into a 20 Hz link: half the frames are skipped
+            clock.now = frame * 0.0333
+            gripper = GRIPPER_CLOSE if frame in (1, 3) else None
+            backend.send(right({"shoulder": -90.0 + frame}, gripper=gripper))
+
+        self.assertTrue(any(b"RG:1" in frame for frame in module.ports[0].written))
+
+    def test_a_cleared_lift_mode_is_transmitted_after_tracking_drops(self) -> None:
+        module = FakeSerialModule()
+        clock = FakeClock()
+        backend = SerialBackend("COM3", 9600, 0.05, serial_module=module, clock=clock)
+        backend.send(JointTargets(1, {"right": ArmTargets(joints={"shoulder": -90.0})}, lift_mode=True))
+
+        clock.now = 0.1
+        backend.send(JointTargets(2, {"right": ArmTargets()}, lift_mode=False))
+
+        self.assertEqual(module.ports[0].written[-1], b"RS:-90.0;L:0
+")
+
+    def test_frames_carry_the_accumulated_state_of_both_arms(self) -> None:
+        module = FakeSerialModule()
+        clock = FakeClock()
+        backend = SerialBackend("COM3", 9600, 0.05, serial_module=module, clock=clock)
+
+        backend.send(JointTargets(1, {"right": ArmTargets(joints={"shoulder": -90.0})}))
+        clock.now = 0.1
+        backend.send(JointTargets(2, {"left": ArmTargets(joints={"elbow": 20.0})}))
+
+        self.assertEqual(module.ports[0].written[-1], b"RS:-90.0;LE:20.0;L:0
+")
+
     def test_empty_targets_are_not_sent(self) -> None:
         module = FakeSerialModule()
         backend = SerialBackend("COM3", 9600, 0.05, serial_module=module, clock=FakeClock())

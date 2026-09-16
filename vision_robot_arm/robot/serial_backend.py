@@ -74,14 +74,19 @@ class SerialBackend:
         self._tracker = TargetTracker()
 
     def send(self, targets: JointTargets) -> None:
-        if not targets.has_data:
+        if not targets.has_data and self._tracker.last_targets is None:
             return
         self._tracker.update(targets)
         now = self._clock()
         if now < self._next_send_at:
             return
 
-        frame = encode_targets(targets)
+        # Send the accumulated state, not this one frame: a command that lands between
+        # two transmissions must not be lost, and a cleared flag must still be sent.
+        accumulated = self._tracker.accumulated_targets()
+        if accumulated is None:
+            return
+        frame = encode_targets(accumulated)
         self._connection.write(frame)
         self._last_frame = frame
         self._next_send_at = now + self._send_interval
