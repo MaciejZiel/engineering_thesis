@@ -1,9 +1,16 @@
+from dataclasses import dataclass
 from typing import Any
 
 from vision_robot_arm.core.config import AppConfig
 from vision_robot_arm.core.runtime import RuntimeDeps
 
 HandLandmarks = list[Any]
+
+
+@dataclass(frozen=True)
+class HandDetection:
+    landmarks: list[HandLandmarks]
+    world_landmarks: list[HandLandmarks]
 
 
 class HandTracker:
@@ -22,12 +29,18 @@ class HandTracker:
         self._landmarker = deps.vision.HandLandmarker.create_from_options(options)
 
     def detect(self, rgb_frame: Any, timestamp_ms: int) -> list[HandLandmarks]:
+        return self.detect_frame(rgb_frame, timestamp_ms).landmarks
+
+    def detect_frame(self, rgb_frame: Any, timestamp_ms: int) -> HandDetection:
         image = self._deps.mp.Image(
             image_format=self._deps.mp.ImageFormat.SRGB,
             data=rgb_frame,
         )
         result = self._landmarker.detect_for_video(image, timestamp_ms)
-        return [list(hand) for hand in result.hand_landmarks]
+        return HandDetection(
+            landmarks=[list(hand) for hand in result.hand_landmarks],
+            world_landmarks=[list(hand) for hand in result.hand_world_landmarks],
+        )
 
     def close(self) -> None:
         self._landmarker.close()

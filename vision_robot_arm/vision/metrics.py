@@ -23,12 +23,23 @@ ANGLE_DEFINITIONS: AngleDefinitions = {
 }
 
 
-def calculate_angle(a: Any, b: Any, c: Any) -> float:
-    radians = math.atan2(c.y - b.y, c.x - b.x) - math.atan2(a.y - b.y, a.x - b.x)
-    angle = abs(math.degrees(radians))
-    if angle > 180.0:
-        angle = 360.0 - angle
-    return angle
+def calculate_angle(
+    a: Any, b: Any, c: Any, *, aspect_ratio: float = 1.0, use_depth: bool = False
+) -> float | None:
+    """Angle in a consistent coordinate space; coincident points are not a joint."""
+    if not math.isfinite(aspect_ratio) or aspect_ratio <= 0:
+        return None
+    def vector(point: Any) -> tuple[float, float, float]:
+        return ((point.x-b.x)*aspect_ratio, point.y-b.y,
+                (point.z-b.z)*aspect_ratio if use_depth else 0.0)
+    first, second = vector(a), vector(c)
+    if not all(math.isfinite(v) for v in (*first, *second)):
+        return None
+    lengths = math.hypot(*first) * math.hypot(*second)
+    if lengths < 1e-10:
+        return None
+    cosine = sum(a*b for a, b in zip(first, second)) / lengths
+    return math.degrees(math.acos(max(-1.0, min(1.0, cosine))))
 
 
 def calculate_angles(
@@ -36,12 +47,17 @@ def calculate_angles(
     indices: dict[str, int],
     min_visibility: float,
     angle_definitions: AngleDefinitions = ANGLE_DEFINITIONS,
+    *,
+    aspect_ratio: float = 1.0,
+    world_landmarks: list[Any] | None = None,
 ) -> dict[str, float | None]:
     angles: dict[str, float | None] = {}
     for name, (first, middle, third) in angle_definitions.items():
-        first_landmark = landmarks[indices[first]]
-        middle_landmark = landmarks[indices[middle]]
-        third_landmark = landmarks[indices[third]]
+        keys = (indices.get(first), indices.get(middle), indices.get(third))
+        if any(index is None or index < 0 or index >= len(landmarks) for index in keys):
+            angles[name] = None
+            continue
+        first_landmark, middle_landmark, third_landmark = (landmarks[index] for index in keys)
         if not (
             is_reliable(first_landmark, min_visibility)
             and is_reliable(middle_landmark, min_visibility)
@@ -49,7 +65,17 @@ def calculate_angles(
         ):
             angles[name] = None
             continue
-        angles[name] = calculate_angle(first_landmark, middle_landmark, third_landmark)
+        if world_landmarks is not None:
+            # World points are metres, not normalized image coordinates. Still
+            # gate them on current IMAGE visibility; an occluded 3D guess is not a measurement.
+            if any(index >= len(world_landmarks) for index in keys):
+                angles[name] = None
+                continue
+            points = [world_landmarks[index] for index in keys]
+            angles[name] = calculate_angle(*points, use_depth=True)
+        else:
+            angles[name] = calculate_angle(first_landmark, middle_landmark, third_landmark,
+                                           aspect_ratio=aspect_ratio)
     return angles
 
 

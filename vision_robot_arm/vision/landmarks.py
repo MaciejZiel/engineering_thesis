@@ -16,7 +16,8 @@ def build_landmark_names(vision: Any) -> dict[int, str]:
 def is_reliable(landmark: Any, min_visibility: float) -> bool:
     visibility = getattr(landmark, "visibility", 1.0)
     return (
-        visibility >= min_visibility
+        math.isfinite(visibility)
+        and visibility >= min_visibility
         and math.isfinite(landmark.x)
         and math.isfinite(landmark.y)
         and math.isfinite(landmark.z)
