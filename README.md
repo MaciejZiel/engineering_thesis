@@ -20,10 +20,19 @@ Current version:
 
 ## Setup
 
-Use Python 3.12 from this project environment.
+Use Python 3.12 or 3.13. Create a virtual environment and install the runtime
+dependencies:
 
 ```powershell
-python -m pip install -r requirements.txt
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+```
+
+For development (tests) and the optional serial robot backend install the
+project with its extras instead:
+
+```powershell
+.venv\Scripts\python -m pip install -e .[dev,serial]
 ```
 
 ## Run
@@ -127,6 +136,12 @@ rules, and `docs/OWNERSHIP.md` for who owns which area and how we commit.
 
 ```powershell
 python -m unittest discover -s tests
+```
+
+With the `dev` extra installed you can also run:
+
+```powershell
+python -m pytest
 ```
 
 ## Printed Data
