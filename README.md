@@ -474,6 +474,11 @@ Current mapping (`vision_robot_arm/robot/mapping.py`), applied to each arm:
 - `<side>_hand_open` -> `gripper=open`
 - `right_hand_up` -> `lift_mode=on`
 
+Lift mode is a flag, not a motion: it is shown on the dashboard and sent in the
+serial frame as `L:`, but the `ur` backend does not act on it. It is the hook for
+whatever the lab decides it should do (a second tool output, a URCap call), and
+nothing moves because of it today.
+
 UR joint angles are clamped to `--robot-shoulder-range` (default `-180 0`),
 `--robot-elbow-range` (default `-160 160`) and `--robot-wrist-range` (default
 `-180 180`) and changes smaller than `--robot-deadband` degrees (default
