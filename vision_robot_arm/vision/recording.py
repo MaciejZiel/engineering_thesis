@@ -3,8 +3,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import TextIO
 
+from vision_robot_arm.vision.arm_pose import ELEVATION_ANGLE_NAMES
 from vision_robot_arm.vision.metrics import ANGLE_DEFINITIONS
 from vision_robot_arm.core.pose_state import PoseState
+
+
+RECORDED_ANGLES = (*ANGLE_DEFINITIONS, *ELEVATION_ANGLE_NAMES)
 
 
 class CsvPoseRecorder:
@@ -61,7 +65,7 @@ class CsvPoseRecorder:
             "gestures": "|".join(state.gestures),
         }
 
-        for name in ANGLE_DEFINITIONS:
+        for name in RECORDED_ANGLES:
             row[f"angle_{name}"] = _value_or_blank(state.angles.get(name))
             row[f"relative_{name}"] = _value_or_blank(state.relative_angles.get(name))
 
@@ -84,7 +88,7 @@ class CsvPoseRecorder:
 
     def _build_fieldnames(self, landmark_names: dict[int, str]) -> list[str]:
         fieldnames = ["timestamp_ms", "calibrated", "gestures"]
-        for name in ANGLE_DEFINITIONS:
+        for name in RECORDED_ANGLES:
             fieldnames.append(f"angle_{name}")
             fieldnames.append(f"relative_{name}")
 

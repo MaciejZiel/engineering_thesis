@@ -109,6 +109,30 @@ class RecordingTests(unittest.TestCase):
         self.assertEqual(rows[0]["nose_x"], "0.1")
         self.assertEqual(rows[0]["nose_world_z"], "3.0")
 
+    def test_csv_records_the_angle_that_drives_the_robot_shoulder(self) -> None:
+        state = PoseState(
+            timestamp_ms=1,
+            landmarks=[LandmarkPoint(0.1, 0.2, 0.3, 0.9)],
+            world_landmarks=None,
+            raw_angles={},
+            angles={"left_shoulder_elevation": 120.5},
+            relative_angles={},
+            gestures=(),
+            calibrated=False,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            recorder = CsvPoseRecorder(Path(temp_dir))
+            path = recorder.start({0: "nose"})
+            recorder.write_state(state, {0: "nose"})
+            recorder.stop()
+
+            with path.open(newline="", encoding="utf-8") as csv_file:
+                rows = list(csv.DictReader(csv_file))
+
+        self.assertEqual(rows[0]["angle_left_shoulder_elevation"], "120.5")
+        self.assertEqual(rows[0]["angle_right_shoulder_elevation"], "")
+
 
 class GestureTests(unittest.TestCase):
     def test_detects_hand_up_and_bent_elbow(self) -> None:

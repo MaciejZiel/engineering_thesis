@@ -13,6 +13,7 @@ from vision_robot_arm.vision.landmarks import is_reliable
 
 SIDES = ("left", "right")
 ELEVATION_SUFFIX = "shoulder_elevation"
+ELEVATION_ANGLE_NAMES = tuple(f"{side}_{ELEVATION_SUFFIX}" for side in SIDES)
 IMAGE_DOWN = (0.0, 1.0)
 # An upper arm pointing at the camera projects to almost nothing, and the angle of a
 # two-pixel vector is landmark noise. Below this length the joint is left unmeasured.
