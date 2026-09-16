@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "vision-robot-arm"
 version = "0.1.0"
 description = "Webcam pose tracking that drives a robot arm"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "mediapipe==1.0.1",
     "numpy==2.5.3",
