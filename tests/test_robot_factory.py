@@ -43,6 +43,13 @@ class FactoryTests(unittest.TestCase):
 
         self.assertIsInstance(controller, MappedRobotController)
 
+    def test_sim_backend_reports_simulated_state_on_overlay(self) -> None:
+        controller = create_robot_controller(RobotConfig(backend="sim"))
+
+        controller.update(make_state({"right_shoulder": 45.0}))
+
+        self.assertTrue(controller.status_lines()[0].startswith("sim shoulder="))
+
     def test_mapped_controller_prints_commands_through_debug_backend(self) -> None:
         controller = create_robot_controller(RobotConfig(backend="debug"))
         output = io.StringIO()

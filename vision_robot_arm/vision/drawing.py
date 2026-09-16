@@ -189,6 +189,7 @@ def draw_overlay(
     recording: bool = False,
     robot_debug: bool = False,
     gestures: tuple[str, ...] = (),
+    status_lines: tuple[str, ...] = (),
 ) -> None:
     status = "detected" if person_detected else "not detected"
     calibration = "on" if calibrated else "off"
@@ -204,6 +205,7 @@ def draw_overlay(
     ]
     if gestures:
         lines.append("Gestures: " + ", ".join(gestures[:3]))
+    lines.extend(status_lines)
     for row, text in enumerate(lines):
         y = 28 + row * 26
         cv2.putText(

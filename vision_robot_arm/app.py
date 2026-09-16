@@ -131,6 +131,7 @@ def run_app(config: AppConfig) -> int:
                 recording=recorder.is_recording,
                 robot_debug=config.robot.enabled,
                 gestures=current_state.gestures if current_state else (),
+                status_lines=tuple(robot_controller.status_lines()),
             )
             cv2.imshow(window_name, frame)
 

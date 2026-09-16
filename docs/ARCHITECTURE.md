@@ -77,7 +77,12 @@ PoseState -> RobotMapper -> JointTargets -> RobotBackend
   the previous state) and a lift-mode flag.
 - `RobotBackend` (`robot/backend.py`) is the transport protocol:
   `send(targets)`, `status_lines()` for the overlay and `close()`. Backends:
-  `DebugBackend` prints, further backends (simulation, serial) plug in here.
+  `DebugBackend` prints, `SimulationBackend` (`robot/simulation.py`) keeps an
+  in-memory arm that moves toward the targets with a speed limit, further
+  backends (serial hardware) plug in here.
+- The overlay hook: `draw_overlay(..., status_lines=...)` in
+  `vision/drawing.py` appends whatever the active backend reports, so the
+  robot side can show state on screen without touching drawing code.
 - `MappedRobotController` (`robot/controller.py`) glues a mapper to a backend
   and is what `app.py` talks to through the `RobotController` protocol.
 - `create_robot_controller(RobotConfig)` (`robot/factory.py`) chooses the

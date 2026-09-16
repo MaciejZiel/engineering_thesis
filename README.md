@@ -115,6 +115,7 @@ vision_robot_arm/
     controller.py          # RobotController glue between mapper and backend
     factory.py             # backend selection from --robot-backend
     mapping.py             # PoseState -> JointTargets
+    simulation.py          # simulated arm backend
     targets.py             # JointTargets value object
 models/
   pose_landmarker_lite.task
@@ -123,6 +124,7 @@ tests/
   test_core_config.py
   test_robot_factory.py
   test_robot_mapping.py
+  test_robot_simulation.py
   test_vision_metrics.py
   test_vision_smoothing.py
 ```
@@ -192,7 +194,7 @@ selected with `--robot-backend`:
 | -------- | --------------------------------------------------------------- |
 | `none`   | default, robot side disabled                                    |
 | `debug`  | prints the mapped targets to the console                        |
-| `sim`    | simulated arm (planned)                                         |
+| `sim`    | simulated arm with speed limit, state shown on the overlay      |
 | `serial` | sends targets to hardware over a serial port (planned)          |
 
 ```powershell
@@ -200,6 +202,15 @@ python main.py --robot-backend debug
 ```
 
 `--robot-debug` still works as a deprecated alias for `--robot-backend debug`.
+
+The simulated arm starts at `--robot-home` degrees (default `90`) and moves
+toward the mapped targets at most `--robot-max-speed` degrees per second
+(default `90`). Its current and target angles are drawn on the camera overlay,
+so you can test the mapping without hardware:
+
+```powershell
+python main.py --robot-backend sim --robot-max-speed 60
+```
 
 Current mapping (`vision_robot_arm/robot/mapping.py`):
 
