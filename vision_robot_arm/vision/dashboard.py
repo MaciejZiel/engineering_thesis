@@ -47,6 +47,17 @@ class Rect:
 
 
 @dataclass(frozen=True)
+class DashboardLayout:
+    scale: float
+    margin: int
+    gap: int
+    header_height: int
+    footer_height: int
+    sidebar_width: int
+    simulation_panel: Rect
+
+
+@dataclass(frozen=True)
 class DashboardButton:
     action: str
     label: str
@@ -151,17 +162,18 @@ class DashboardUi:
             max(1280, camera_width),
             max(720, camera_height),
         )
-
-        canvas = self._np.full((height, width, 3), BACKGROUND, dtype=self._np.uint8)
-        scale = height / 1080.0
-        margin = max(10, round(20 * scale))
-        gap = max(8, round(16 * scale))
-        header_height = max(58, round(84 * scale))
-        footer_height = max(74, round(108 * scale))
+        layout = self._layout(width, height)
+        scale = layout.scale
+        margin = layout.margin
+        gap = layout.gap
+        header_height = layout.header_height
+        footer_height = layout.footer_height
         body_top = header_height
         body_height = height - header_height - footer_height
-        sidebar_width = max(360, round(width * 0.31))
+        sidebar_width = layout.sidebar_width
         camera_width_area = width - sidebar_width - 3 * margin
+
+        canvas = self._np.full((height, width, 3), BACKGROUND, dtype=self._np.uint8)
 
         self._draw_header(
             canvas,
@@ -199,8 +211,8 @@ class DashboardUi:
         self._place_image(canvas, camera_frame, camera_target)
         self._corner_accents(canvas, camera_panel, scale)
 
-        sim_height = max(260, round(sidebar.height * 0.50))
-        simulation_panel = Rect(sidebar.x, sidebar.y, sidebar.width, sim_height)
+        simulation_panel = layout.simulation_panel
+        sim_height = simulation_panel.height
         status_panel = Rect(
             sidebar.x,
             simulation_panel.bottom + gap,
@@ -222,6 +234,45 @@ class DashboardUi:
         )
         self._draw_footer(canvas, mode, recording, height - footer_height, scale)
         return canvas
+
+    def simulation_target_size(self) -> tuple[int, int]:
+        """Pixel size at which the robot simulation should be rendered to avoid rescaling."""
+        width, height = self._canvas_size or (1280, 720)
+        target = self._simulation_target(self._layout(width, height))
+        return max(2, target.width), max(2, target.height)
+
+    def _layout(self, width: int, height: int) -> DashboardLayout:
+        scale = height / 1080.0
+        margin = max(10, round(20 * scale))
+        gap = max(8, round(16 * scale))
+        header_height = max(58, round(84 * scale))
+        footer_height = max(74, round(108 * scale))
+        body_height = height - header_height - footer_height
+        sidebar_width = max(420, round(width * 0.36))
+        camera_width_area = width - sidebar_width - 3 * margin
+        camera_panel = Rect(margin, header_height, camera_width_area, body_height - margin)
+        sidebar = Rect(camera_panel.right + gap, header_height, sidebar_width, body_height - margin)
+        sim_height = max(300, round(sidebar.height * 0.64))
+        simulation_panel = Rect(sidebar.x, sidebar.y, sidebar.width, sim_height)
+        return DashboardLayout(
+            scale=scale,
+            margin=margin,
+            gap=gap,
+            header_height=header_height,
+            footer_height=footer_height,
+            sidebar_width=sidebar_width,
+            simulation_panel=simulation_panel,
+        )
+
+    def _simulation_target(self, layout: DashboardLayout) -> Rect:
+        panel = layout.simulation_panel
+        scale = layout.scale
+        return Rect(
+            panel.x + 2,
+            panel.y + max(35, round(42 * scale)),
+            panel.width - 4,
+            panel.height - max(37, round(44 * scale)),
+        )
 
     def _on_mouse(self, event: int, x: int, y: int, _flags: int, _param: Any) -> None:
         if event != self._cv2.EVENT_LBUTTONUP:
@@ -282,7 +333,11 @@ class DashboardUi:
             panel.width - 4,
             panel.height - max(37, round(44 * scale)),
         )
-        self._place_image(canvas, simulation, target)
+        source_height, source_width = simulation.shape[:2]
+        if (source_width, source_height) == (target.width, target.height):
+            canvas[target.y:target.bottom, target.x:target.right] = simulation
+        else:
+            self._place_image(canvas, simulation, target)
 
     def _draw_status_panel(
         self,

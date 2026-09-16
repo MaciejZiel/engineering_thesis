@@ -29,7 +29,6 @@ from vision_robot_arm.vision.pose_tracker import PoseTracker
 from vision_robot_arm.vision.recording import CsvPoseRecorder
 from vision_robot_arm.vision.state_builder import PoseStateBuilder
 
-SIMULATION_SIZE = (960, 540)
 WINDOW_NAME = "Motion Twin - Dual UR7e Control"
 
 
@@ -88,11 +87,9 @@ def run_app(config: AppConfig) -> int:
         last_timestamp_ms = -1
         wait_delay_ms = _frame_wait_delay_ms(cv2, capture, config)
         mirrored = config.mirror and config.video_path is None
-        simulation_canvas = deps.np.zeros(
-            (SIMULATION_SIZE[1], SIMULATION_SIZE[0], 3), dtype=deps.np.uint8
-        )
         dashboard = DashboardUi(cv2, deps.np, WINDOW_NAME)
         dashboard.open()
+        simulation_canvas = _simulation_canvas(deps.np, dashboard.simulation_target_size())
         last_frame_at = time.monotonic()
         display_fps = 0.0
 
@@ -198,6 +195,9 @@ def run_app(config: AppConfig) -> int:
                 display_fps = instant_fps if display_fps == 0.0 else 0.9 * display_fps + 0.1 * instant_fps
             last_frame_at = now
 
+            simulation_size = dashboard.simulation_target_size()
+            if simulation_canvas.shape[1] != simulation_size[0] or simulation_canvas.shape[0] != simulation_size[1]:
+                simulation_canvas = _simulation_canvas(deps.np, simulation_size)
             draw_simulation(cv2, simulation_canvas, robot_controller.robot_state())
             dashboard_frame = dashboard.render(
                 frame,
@@ -245,6 +245,10 @@ def run_app(config: AppConfig) -> int:
             tracker.close()
         capture.release()
         cv2.destroyAllWindows()
+
+
+def _simulation_canvas(np: object, size: tuple[int, int]) -> object:
+    return np.zeros((size[1], size[0], 3), dtype=np.uint8)
 
 
 def _fit_frame(cv2: object, frame: object, config: AppConfig) -> object:
