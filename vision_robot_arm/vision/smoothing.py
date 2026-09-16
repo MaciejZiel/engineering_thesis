@@ -50,6 +50,7 @@ class LandmarkSmoother:
 
 class AngleSmoother:
     def __init__(self, alpha: float) -> None:
+        self._alpha = alpha
         self._filters: dict[str, LowPassValueFilter] = {}
 
     def update(self, angles: dict[str, float | None]) -> dict[str, float | None]:
@@ -66,13 +67,3 @@ class AngleSmoother:
     def reset(self) -> None:
         for value_filter in self._filters.values():
             value_filter.reset()
-
-    @property
-    def _alpha(self) -> float:
-        if not hasattr(self, "__alpha"):
-            self.__alpha = 0.35
-        return self.__alpha
-
-    @_alpha.setter
-    def _alpha(self, value: float) -> None:
-        self.__alpha = value
