@@ -3,10 +3,11 @@ import unittest
 import cv2
 import numpy as np
 
-from vision_robot_arm.vision.dashboard import DashboardUi
-
+from vision_robot_arm.vision.dashboard import DashboardUi, dashboard_layout
 
 COMMON_DASHBOARD_SIZES = (
+    (640, 480),
+    (960, 540),
     (1280, 720),
     (1728, 936),
     (2304, 1260),
@@ -43,6 +44,34 @@ class DashboardResolutionTests(unittest.TestCase):
                 self.assertEqual(result.shape, (height, width, 3))
                 self.assertEqual(result.dtype, np.uint8)
                 self.assertGreater(int(result.max()), 0)
+
+                layout = dashboard_layout(width, height)
+                for rect in (
+                    layout.camera,
+                    layout.preview,
+                    layout.status,
+                    layout.footer,
+                ):
+                    self.assertGreater(rect.width, 0)
+                    self.assertGreater(rect.height, 0)
+                    self.assertGreaterEqual(rect.x, 0)
+                    self.assertGreaterEqual(rect.y, 0)
+                    self.assertLessEqual(rect.right, width)
+                    self.assertLessEqual(rect.bottom, height)
+                self.assertLess(layout.camera.right, layout.preview.x)
+                self.assertLess(layout.preview.bottom, layout.status.y)
+                self.assertLess(layout.status.bottom, layout.footer.y)
+                for i, button in enumerate(ui.buttons):
+                    self.assertLessEqual(button.rect.right, width)
+                    self.assertLessEqual(button.rect.bottom, height)
+                    for other in ui.buttons[i + 1 :]:
+                        a, b = button.rect, other.rect
+                        self.assertFalse(
+                            a.x < b.right
+                            and a.right > b.x
+                            and a.y < b.bottom
+                            and a.bottom > b.y
+                        )
 
 
 if __name__ == "__main__":

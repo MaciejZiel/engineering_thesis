@@ -11,6 +11,7 @@ dependencies = [
     "mediapipe==1.0.1",
     "numpy==2.5.3",
     "opencv-contrib-python==5.0.0.93",
+    "pillow>=12.2,<13",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +20,9 @@ dev = ["pytest==9.1.1"]
 
 [tool.setuptools.packages.find]
 include = ["vision_robot_arm*"]
+
+[tool.setuptools.package-data]
+"vision_robot_arm.vision" = ["assets/fonts/*.ttf", "assets/fonts/OFL.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

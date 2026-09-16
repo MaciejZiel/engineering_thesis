@@ -125,10 +125,22 @@ Landmarker. Point `--hand-model` at another `.task` file or disable it with
 ## Dashboard UI
 
 The application uses one resizable OpenCV window named **Motion Twin**. The
-camera feed occupies the main area. A sidebar contains the embedded digital
-twin of both UR7e arms, tracking/calibration/recording state, robot connection
-state and recognized gestures. The bottom bar contains clickable controls, so
-the application can be operated with either the mouse or keyboard.
+camera feed occupies the main area. A graphite sidebar contains a compact
+schematic of both UR7e arms and the session's tracking, calibration, recording
+and gesture state. Backend selection is labelled explicitly: **Simulation**,
+**Preview only**, or the configured output transport. These labels do not
+claim a verified hardware connection or measured robot feedback.
+
+The bottom bar prioritizes calibration and recording. Controls respond to hover,
+press and keyboard focus; use **Tab** and **Enter** or **Space** to activate
+them. Calibration is disabled until a pose supplies at least one usable angle.
+Click **Details** in the session panel (or press **d**) for backend diagnostics.
+The **Console** control changes terminal output, not the camera display.
+
+Lato fonts are bundled under the SIL Open Font License and rendered with Pillow,
+which is already included in `requirements-lock.txt` and is now an explicit
+runtime dependency. No system font installation is needed. Pillow caches text
+masks and blends only their bounds so the video frame is not converted per label.
 
 On Windows the process enables per-monitor DPI awareness and reads the usable
 pixel area of the primary display. The initial dashboard uses 90% of that area
@@ -136,17 +148,28 @@ and its render surface follows the real OpenCV viewport after resizing or
 entering fullscreen. UI text and line work are therefore rendered directly at
 the target resolution instead of being stretched from a fixed 1920x1080
 bitmap. The responsive layout is intended for HD/FHD, QHD, ultrawide and 4K
-displays; low-resolution camera frames are enlarged with Lanczos interpolation
+displays; low-resolution camera frames are enlarged with bilinear interpolation
 and never have their aspect ratio changed.
 
 The visual design follows the lab setup described by the PJATK ARM Robotics
 program: two UR7e cobots, an NVIDIA Jetson Orin AGX module and an Orbbec Gemini
-335Lg 3D camera. Orange indicates tracked human arms and the current robot
-position; grey indicates robot targets.
+335Lg 3D camera. A muted orange highlights the human arms and simulated or
+commanded robot pose; grey indicates targets. The preview is a schematic,
+not a physical robot feedback display.
 
 Press `f` or click **FULLSCREEN** for presentation mode. Closing the window,
 pressing `q`/`Esc`, or clicking **QUIT** shuts down the trackers, recorder,
 camera and robot backend cleanly.
+
+Generate camera-free previews for visual review (sample data, no robot connection):
+
+```bash
+python scripts/preview_dashboard.py
+python scripts/preview_dashboard.py --size 1440 900
+```
+
+The script saves tracking, waiting, recording and diagnostics states under
+`artifacts/ui-review/` (git-ignored).
 
 ## Project Structure
 

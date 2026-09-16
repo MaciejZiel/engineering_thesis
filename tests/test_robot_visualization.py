@@ -1,6 +1,7 @@
 import unittest
 
 import numpy as np
+import cv2
 
 from vision_robot_arm.robot.backend import DebugBackend, TargetTracker
 from vision_robot_arm.robot.targets import (
@@ -24,6 +25,9 @@ class FakeCv2:
     def getTextSize(self, text: str, font: int, scale: float, thickness: int) -> tuple[tuple[int, int], int]:
         return (int(len(text) * 10 * scale), int(20 * scale)), 2
 
+    def addWeighted(self, *args: object) -> None:
+        self.calls.append(("addWeighted", args))
+
     def rectangle(self, *args: object) -> None:
         self.calls.append(("rectangle", args))
 
@@ -39,9 +43,6 @@ class FakeCv2:
     def texts(self) -> list[str]:
         return [args[1] for kind, args in self.calls if kind == "putText"]
 
-    def count(self, kind: str) -> int:
-        return sum(1 for call_kind, _ in self.calls if call_kind == kind)
-
 
 def arm_state(shoulder: float, elbow: float, wrist: float, gripper: str = GRIPPER_OPEN) -> ArmState:
     joints = {"shoulder": shoulder, "elbow": elbow, "wrist_1": wrist}
@@ -55,7 +56,7 @@ class ArmPointsTests(unittest.TestCase):
         self.assertEqual(base, (100, 100))
         self.assertEqual(elbow, (100, 150))
         self.assertEqual(wrist, (100, 200))
-        self.assertEqual(tip, (100, 230))
+        self.assertEqual(tip, (100, 228))
 
     def test_arm_horizontal_at_minus_ninety_degrees(self) -> None:
         _, elbow, wrist, _ = arm_points(-90.0, 0.0, 0.0, (100, 100), 50.0)
@@ -68,7 +69,7 @@ class ArmPointsTests(unittest.TestCase):
 
         self.assertEqual(elbow, (150, 100))
         self.assertEqual(wrist, (150, 50))
-        self.assertEqual(tip, (120, 50))
+        self.assertEqual(tip, (122, 50))
 
     def test_mirrored_arm_points_the_other_way(self) -> None:
         _, elbow, wrist, _ = arm_points(-90.0, 0.0, 0.0, (100, 100), 50.0, mirror=True)
@@ -78,7 +79,7 @@ class ArmPointsTests(unittest.TestCase):
 
 
 class DrawArmPanelTests(unittest.TestCase):
-    def test_draws_title_badge_sketch_and_readout(self) -> None:
+    def test_draws_panel_arm_gripper_and_text(self) -> None:
         cv2 = FakeCv2()
         state = ArmState(
             joints={"shoulder": -90.0, "elbow": 30.0, "wrist_1": 10.0},
@@ -87,42 +88,32 @@ class DrawArmPanelTests(unittest.TestCase):
         )
         frame = np.zeros((540, 960, 3), dtype=np.uint8)
 
-        draw_arm_panel(cv2, frame, state, (10, 20), (300, 460), title="RIGHT UR7e")
+        draw_arm_panel(cv2, frame, state, (10, 20), (400, 480), title="right UR7e")
 
-        texts = cv2.texts()
-        self.assertIn("RIGHT UR7e", texts)
-        self.assertIn("GRIP CLOSED", texts)
-        self.assertEqual(texts.count("S") + texts.count("E") + texts.count("W1"), 3)
-        self.assertIn("shoulder", texts)
-        self.assertIn("wrist 1", texts)
-        self.assertIn(" -90.0", texts)
-        self.assertIn(" -60.0", texts)
-        self.assertGreaterEqual(cv2.count("circle"), 3)
-        self.assertGreater(cv2.count("line"), 10)
+        kinds = [kind for kind, _ in cv2.calls]
+        self.assertEqual(kinds.count("addWeighted"), 1)
+        self.assertEqual(kinds.count("rectangle"), 1)
+        self.assertEqual(kinds.count("line"), 8)
+        self.assertIn("right UR7e", cv2.texts())
+        self.assertIn("shoulder  -90.0 ->  -60.0", cv2.texts())
+        self.assertIn("wrist_1   10.0 ->   10.0", cv2.texts())
+        self.assertIn("gripper close", cv2.texts())
+        self.assertIn("held: base 0  wrist_2 0  wrist_3 0", cv2.texts())
 
-    def test_missing_state_shows_placeholders(self) -> None:
+    def test_missing_state_is_reported_as_not_available(self) -> None:
         cv2 = FakeCv2()
-        frame = np.zeros((540, 960, 3), dtype=np.uint8)
+        frame = np.zeros((360, 640, 3), dtype=np.uint8)
 
-        draw_arm_panel(cv2, frame, None, (0, 0), (300, 400))
+        draw_arm_panel(cv2, frame, None, (0, 0), (300, 300))
 
-        texts = cv2.texts()
-        self.assertIn("NO DATA", texts)
-        self.assertEqual(texts.count("n/a"), 6)
-
-    def test_open_gripper_badge(self) -> None:
-        cv2 = FakeCv2()
-        frame = np.zeros((540, 960, 3), dtype=np.uint8)
-
-        draw_arm_panel(cv2, frame, arm_state(-90.0, 0.0, 0.0), (0, 0), (300, 400))
-
-        self.assertIn("GRIP OPEN", cv2.texts())
+        self.assertIn("shoulder n/a", cv2.texts())
+        self.assertIn("gripper n/a", cv2.texts())
 
 
 class DrawSimulationTests(unittest.TestCase):
     def test_draws_left_and_right_panels_and_footer(self) -> None:
         cv2 = FakeCv2()
-        canvas = np.full((460, 618, 3), 255, dtype=np.uint8)
+        canvas = np.full((540, 960, 3), 255, dtype=np.uint8)
         state = RobotState(
             arms={"right": arm_state(-90.0, 0.0, 0.0), "left": arm_state(-135.0, 90.0, 60.0)},
             lift_mode=True,
@@ -131,28 +122,43 @@ class DrawSimulationTests(unittest.TestCase):
         draw_simulation(cv2, canvas, state)
 
         texts = cv2.texts()
-        self.assertIn("LEFT UR7e", texts)
-        self.assertIn("RIGHT UR7e", texts)
-        self.assertIn("LIFT ON", texts)
-        self.assertLess(texts.index("LEFT UR7e"), texts.index("RIGHT UR7e"))
-        self.assertEqual(int(canvas[0, 0, 0]), 23)
+        self.assertIn("left UR7e", texts)
+        self.assertIn("right UR7e", texts)
+        self.assertTrue(any(text.startswith("lift mode: on") for text in texts))
+        self.assertEqual(int(canvas[0, 0, 0]), 24)
+        self.assertLess(texts.index("left UR7e"), texts.index("right UR7e"))
 
     def test_draws_placeholders_without_state(self) -> None:
         cv2 = FakeCv2()
-        canvas = np.zeros((300, 480, 3), dtype=np.uint8)
+        canvas = np.zeros((270, 480, 3), dtype=np.uint8)
 
         draw_simulation(cv2, canvas, None)
 
-        texts = cv2.texts()
-        self.assertEqual(texts.count("n/a"), 12)
-        self.assertEqual(texts.count("NO DATA"), 2)
-        self.assertIn("LIFT OFF", texts)
+        self.assertEqual(cv2.texts().count("shoulder n/a"), 2)
 
-    def test_tiny_canvas_does_not_crash(self) -> None:
-        cv2 = FakeCv2()
-        canvas = np.zeros((20, 30, 3), dtype=np.uint8)
 
-        draw_simulation(cv2, canvas, None)
+class CompactSimulationTests(unittest.TestCase):
+    def test_missing_arm_does_not_draw_an_active_home_pose(self) -> None:
+        canvas = np.zeros((240, 480, 3), dtype=np.uint8)
+        state = RobotState({"left": arm_state(-90, 0, -90)}, False)
+        draw_simulation(cv2, canvas, state, compact=True)
+        background = np.array((30, 28, 27), dtype=np.uint8)
+        self.assertTrue(np.any(canvas[:, :240] != background))
+        self.assertTrue(np.all(canvas[:, 240:] == background))
+
+    def test_full_reach_stays_inside_each_viewport(self) -> None:
+        for shoulder in (-180, -135, -90, -45, 0):
+            for elbow in (-160, 0, 160):
+                with self.subTest(shoulder=shoulder, elbow=elbow):
+                    canvas = np.zeros((240, 480, 3), dtype=np.uint8)
+                    arm = arm_state(shoulder, elbow, 0)
+                    draw_simulation(cv2, canvas, RobotState({"left": arm, "right": arm}, False), compact=True)
+                    background = np.array((30, 28, 27), dtype=np.uint8)
+                    self.assertTrue(np.all(canvas[:5] == background))
+                    self.assertTrue(np.all(canvas[-5:] == background))
+                    self.assertTrue(np.all(canvas[:, 235:245] == background))
+                    self.assertTrue(np.all(canvas[:, :5] == background))
+                    self.assertTrue(np.all(canvas[:, -5:] == background))
 
 
 class TargetTrackerTests(unittest.TestCase):
@@ -171,14 +177,14 @@ class TargetTrackerTests(unittest.TestCase):
         tracker.update(
             JointTargets(
                 timestamp_ms=2,
-                arms={"right": ArmTargets(joints={"wrist_1": 100.0}), "left": ArmTargets(joints={"elbow": 60.0})},
+                arms={"right": ArmTargets(joints={"wrist": 100.0}), "left": ArmTargets(joints={"elbow": 60.0})},
                 lift_mode=True,
             )
         )
 
         state = tracker.robot_state()
 
-        self.assertEqual(state.arm("right").joints, {"shoulder": 30.0, "wrist_1": 100.0})
+        self.assertEqual(state.arm("right").joints, {"shoulder": 30.0, "wrist": 100.0})
         self.assertEqual(state.arm("right").targets, state.arm("right").joints)
         self.assertEqual(state.arm("right").gripper, GRIPPER_CLOSE)
         self.assertEqual(state.arm("left").joints, {"elbow": 60.0})
