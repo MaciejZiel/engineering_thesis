@@ -120,9 +120,11 @@ class URArm:
     def update(self, targets: ArmTargets, elapsed_s: float) -> None:
         """Move the setpoint toward the mapped pose, then command that setpoint."""
         self._setpoints.set_targets(targets.joints, targets.gripper)
-        self._setpoints.step(self._config.max_speed_deg_s * max(elapsed_s, 0.0))
         if self.homing:
+            # The arm is still driving to the home pose; leave the setpoint there so
+            # the first servoj continues from where the robot actually is.
             return
+        self._setpoints.step(self._config.max_speed_deg_s * max(elapsed_s, 0.0))
         self._send(
             encode_servoj(
                 self._setpoints.joints,
@@ -227,10 +229,13 @@ class URBackend:
         if config.preflight:
             _preflight(config, status_query)
         factory = rtde_factory if config.feedback else None
-        self._arms = {
-            name: URArm(name, host, config, connector, factory, clock)
-            for name, host in config.hosts.items()
-        }
+        self._arms: dict[str, URArm] = {}
+        try:
+            for name, host in config.hosts.items():
+                self._arms[name] = URArm(name, host, config, connector, factory, clock)
+        except SystemExit:
+            self.close()
+            raise
         self._tracker = TargetTracker()
         self._next_send_at = 0.0
         self._last_send_at: float | None = None

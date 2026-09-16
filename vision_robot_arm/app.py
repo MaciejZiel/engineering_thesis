@@ -188,6 +188,8 @@ def run_app(config: AppConfig) -> int:
                     detection.world_landmarks,
                     extra_gestures=hand_gestures,
                     extra_angles=extra_angles,
+                    aspect_ratio=frame_aspect_ratio,
+                    hand_tracking_enabled=hand_tracker is not None,
                 )
                 display_landmarks = (
                     mirror_landmarks(current_state.landmarks)

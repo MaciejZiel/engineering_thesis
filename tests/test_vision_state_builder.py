@@ -41,6 +41,29 @@ class PoseStateBuilderTests(unittest.TestCase):
         self.assertEqual(state.raw_angles["right_wrist"], 150.0)
         self.assertAlmostEqual(state.angles["right_elbow"], 180.0)
 
+    def test_angles_measured_outside_the_pose_model_reach_the_state(self) -> None:
+        builder = PoseStateBuilder(INDICES, min_visibility=0.55, smoothing_alpha=1.0)
+
+        state = builder.build(
+            1, make_pose(), None, extra_angles={"right_shoulder_elevation": 169.2}
+        )
+
+        self.assertAlmostEqual(state.angles["right_shoulder_elevation"], 169.2)
+
+    def test_non_finite_extra_angles_are_ignored(self) -> None:
+        builder = PoseStateBuilder(INDICES, min_visibility=0.55, smoothing_alpha=1.0)
+
+        state = builder.build(1, make_pose(), None, extra_angles={"right_wrist": float("nan")})
+
+        self.assertIsNone(state.angles["right_wrist"])
+
+    def test_hand_tracking_clears_the_pose_model_wrist_angle(self) -> None:
+        builder = PoseStateBuilder(INDICES, min_visibility=0.55, smoothing_alpha=1.0)
+
+        state = builder.build(1, make_pose(), None, hand_tracking_enabled=True)
+
+        self.assertIsNone(state.angles["right_wrist"])
+
     def test_extra_angles_are_smoothed_like_other_angles(self) -> None:
         builder = PoseStateBuilder(INDICES, min_visibility=0.55, smoothing_alpha=0.5)
         builder.build(1000, make_pose(), None, extra_angles={"right_wrist": 100.0})

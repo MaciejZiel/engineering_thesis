@@ -182,6 +182,45 @@ class URBackendTests(unittest.TestCase):
 
         self.assertEqual(connector.sockets["192.168.1.10"].commands(b"servoj("), [])
 
+    def test_setpoint_waits_at_home_while_the_arm_is_homing(self) -> None:
+        connector = FakeConnector()
+        backend, clock = self.make_backend(connector, send_interval=0.1, max_speed_deg_s=60.0)
+
+        for step in range(1, 21):
+            clock.now = 0.1 * step
+            backend.send(targets(right={"shoulder": 0.0}))
+        clock.now = 2.1
+        backend.send(targets(right={"shoulder": 0.0}, ts=2))
+
+        first = connector.sockets["192.168.1.10"].commands(b"servoj(")[0]
+        shoulder = math.degrees(float(first.split(b"[")[1].split(b",")[1]))
+        self.assertAlmostEqual(shoulder, -90.0 + 60.0 * 0.1, delta=0.5)
+
+    def test_second_arm_failure_closes_the_first_connection(self) -> None:
+        opened: list[FakeSocket] = []
+
+        def connector(host: str, port: int) -> FakeSocket:
+            if host.endswith(".11"):
+                raise OSError("timed out")
+            sock = FakeSocket(host, port)
+            opened.append(sock)
+            return sock
+
+        with self.assertRaises(SystemExit):
+            URBackend(
+                RobotConfig(
+                    backend="ur",
+                    right_host="192.168.1.10",
+                    left_host="192.168.1.11",
+                    preflight=False,
+                ),
+                connector=connector,
+                rtde_factory=None,
+                status_query=no_status,
+            )
+
+        self.assertTrue(opened[0].closed)
+
     def test_setpoints_ramp_at_the_configured_speed_instead_of_jumping(self) -> None:
         connector = FakeConnector()
         backend, clock = self.make_backend(connector, max_speed_deg_s=30.0)

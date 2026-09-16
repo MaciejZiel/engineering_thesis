@@ -63,7 +63,7 @@ class PoseStateBuilder:
             raw_angles.update(left_wrist=None, right_wrist=None)
         if extra_angles:
             raw_angles.update({name: value for name, value in extra_angles.items()
-                               if name in raw_angles and math.isfinite(value)})
+                               if value is not None and math.isfinite(value)})
         smoothed_angles = self._angle_smoother.update(raw_angles, timestamp_ms)
         relative_angles = self._calibration.relative_angles(smoothed_angles)
         gestures = detect_gestures(
