@@ -466,10 +466,14 @@ Current mapping (`vision_robot_arm/robot/mapping.py`), applied to each arm:
   vertical when the hips are out of frame): 0 = arm down, 90 = horizontal,
   180 = raised -> UR `shoulder`
 - elbow angle (shoulder-elbow-wrist) -> UR `elbow`
-- wrist angle: signed 3D angle between the forearm (pose elbow to wrist, with
-  depth) and the hand (hand-tracker wrist to middle knuckle, with depth);
-  180 = straight, below 180 = hand bent up, above 180 = bent down; held for
-  0.5 s when the hand tracker drops a frame -> UR `wrist_1`
+- wrist angle: signed angle in the image plane between the forearm (pose elbow to
+  wrist) and the hand (hand-tracker wrist to middle knuckle); 180 = straight,
+  below 180 = bent one way, above 180 = the other; held for 0.5 s when the hand
+  tracker drops a frame -> UR `wrist_1`. A hand pointing straight at the camera
+  is left unmeasured, because its projection is too short to have a direction.
+  MediaPipe depth is deliberately not used here: the pose model and the hand
+  model measure z from different origins, so mixing them moved the reported
+  angle by tens of degrees with no real motion.
 - `<side>_fist` -> `gripper=close`
 - `<side>_hand_open` -> `gripper=open`
 - `right_hand_up` -> `lift_mode=on`

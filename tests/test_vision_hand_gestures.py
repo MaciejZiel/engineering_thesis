@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 import unittest
 
 from vision_robot_arm.vision.hand_gestures import (
@@ -108,24 +109,60 @@ class HandWristAngleTests(unittest.TestCase):
 
         angles = hand_wrist_angles([hand], POSE, POSE_INDICES, aspect_ratio=1.0)
 
-        self.assertAlmostEqual(angles["left_wrist"], 90.0)
+        self.assertAlmostEqual(abs(angles["left_wrist"] - 180.0), 90.0)
 
-    def test_hand_toward_camera_uses_depth(self) -> None:
+    def test_both_bend_directions_are_distinguished_for_a_vertical_forearm(self) -> None:
+        """The arm hanging down or raised is the common case; the sign used to vanish there."""
+        vertical = [P(0.3, 0.6), P(0.7, 0.6), P(0.3, 0.3), P(0.7, 0.3)]
+        toward_the_body = make_hand((0.3, 0.6), (True, True, True, True))
+        toward_the_body[9] = P(0.4, 0.75)
+        away_from_the_body = make_hand((0.3, 0.6), (True, True, True, True))
+        away_from_the_body[9] = P(0.2, 0.75)
+
+        one = hand_wrist_angles([toward_the_body], vertical, POSE_INDICES, aspect_ratio=1.0)["left_wrist"]
+        other = hand_wrist_angles([away_from_the_body], vertical, POSE_INDICES, aspect_ratio=1.0)["left_wrist"]
+
+        self.assertNotAlmostEqual(one, other)
+        self.assertAlmostEqual(one + other, 360.0, places=3)
+
+    def test_a_hand_pointing_at_the_camera_is_left_unmeasured(self) -> None:
+        """Its projection is a few pixels long, so its direction would be pure noise."""
         hand = make_hand((0.7, 0.6), (True, True, True, True))
         hand[9] = P(0.7, 0.6, -0.2)
 
-        angles = hand_wrist_angles([hand], POSE, POSE_INDICES, aspect_ratio=1.0)
+        self.assertEqual(hand_wrist_angles([hand], POSE, POSE_INDICES, aspect_ratio=1.0), {})
 
-        self.assertAlmostEqual(angles["right_wrist"], 90.0)
+    def test_pose_depth_no_longer_moves_the_reported_angle(self) -> None:
+        """Pose z and hand z use different origins; mixing them swung the joint by tens of degrees."""
+        flat = [P(0.3, 0.6), P(0.7, 0.6), P(0.3, 0.35), P(0.7, 0.35)]
+        deep = [P(0.3, 0.6), P(0.7, 0.6), P(0.3, 0.35, 0.2), P(0.7, 0.35)]
+        hand = make_hand((0.3, 0.6), (True, True, True, True))
+        hand[9] = P(0.4, 0.7)
 
-    def test_bend_direction_is_signed(self) -> None:
+        without_depth = hand_wrist_angles([hand], flat, POSE_INDICES, aspect_ratio=1.0)["left_wrist"]
+        with_depth = hand_wrist_angles([hand], deep, POSE_INDICES, aspect_ratio=1.0)["left_wrist"]
+
+        self.assertAlmostEqual(without_depth, with_depth)
+
+    def test_bend_direction_is_signed_whatever_the_forearm_direction(self) -> None:
+        for forearm in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, -1.0, 0.0), (0.7, -0.7, 0.0)):
+            with self.subTest(forearm=forearm):
+                angle = math.atan2(forearm[1], forearm[0])
+                one = (math.cos(angle - math.radians(30)), math.sin(angle - math.radians(30)), 0.0)
+                other = (math.cos(angle + math.radians(30)), math.sin(angle + math.radians(30)), 0.0)
+
+                self.assertAlmostEqual(signed_wrist_deviation(forearm, one), 30.0)
+                self.assertAlmostEqual(signed_wrist_deviation(forearm, other), -30.0)
+
+    def test_degenerate_vectors_give_no_angle(self) -> None:
         forearm = (1.0, 0.0, 0.0)
 
-        self.assertAlmostEqual(signed_wrist_deviation(forearm, (1.0, -1.0, 0.0)), 45.0)
-        self.assertAlmostEqual(signed_wrist_deviation(forearm, (1.0, 1.0, 0.0)), -45.0)
         self.assertAlmostEqual(signed_wrist_deviation(forearm, (1.0, 0.0, 0.0)), 0.0)
-        self.assertEqual(signed_wrist_deviation(forearm, (-1.0, 0.0, 0.0)), 90.0)
+        # A fully folded hand sits exactly on the boundary between the two directions.
+        self.assertEqual(abs(signed_wrist_deviation(forearm, (-1.0, 0.0, 0.0))), 90.0)
         self.assertIsNone(signed_wrist_deviation(forearm, (0.0, 0.0, 0.0)))
+        self.assertIsNone(signed_wrist_deviation((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)))
+        self.assertIsNone(signed_wrist_deviation(forearm, (float("nan"), 0.0, 0.0)))
 
     def test_bending_down_gives_more_than_180(self) -> None:
         horizontal_forearm_pose = [P(0.3, 0.6), P(0.7, 0.6), P(0.3, 0.9), P(0.4, 0.6)]

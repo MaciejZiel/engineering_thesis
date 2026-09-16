@@ -133,6 +133,8 @@ Vector = tuple[float, float, float]
 DEFAULT_ASPECT_RATIO = 16.0 / 9.0
 MAX_WRIST_DEVIATION_DEG = 90.0
 STRAIGHT_WRIST_DEG = 180.0
+# Shorter than this on screen and the direction of a vector is noise, not a measurement.
+MIN_PROJECTION = 0.02
 
 
 def hand_wrist_angles(
@@ -142,10 +144,13 @@ def hand_wrist_angles(
     aspect_ratio: float = DEFAULT_ASPECT_RATIO,
     *,
     min_visibility: float = 0.55,
-    pose_world_landmarks: list[Any] | None = None,
-    hand_world_landmarks: list[list[Any]] | None = None,
 ) -> dict[str, float]:
-    """Signed wrist angle per side: 180 = straight, below 180 = bent up, above = bent down."""
+    """Signed wrist angle per side, 180 = straight, measured in the image plane.
+
+    Both vectors come from image coordinates only. MediaPipe's normalized z is relative
+    to a different origin for the pose model than for the hand model, so mixing them
+    moved the reported angle by tens of degrees for no real motion.
+    """
     angles: dict[str, float] = {}
     for side, hand in assign_hand_sides(hands, pose_landmarks, indices,
                                        aspect_ratio=aspect_ratio, min_visibility=min_visibility).items():
@@ -159,18 +164,8 @@ def hand_wrist_angles(
             continue
         if not all(is_reliable(pose_landmarks[i], min_visibility) for i in (elbow_index, wrist_index)):
             continue
-        hand_number = next(i for i, item in enumerate(hands) if item is hand)
-        if pose_world_landmarks is not None and hand_world_landmarks is not None:
-            if max(elbow_index, wrist_index) >= len(pose_world_landmarks) or hand_number >= len(hand_world_landmarks):
-                continue
-            geometry = hand_world_landmarks[hand_number]
-            if len(geometry) <= HAND_MIDDLE_MCP:
-                continue
-            forearm = _vector(pose_world_landmarks[elbow_index], pose_world_landmarks[wrist_index], 1.0)
-            hand_direction = _vector(geometry[HAND_WRIST], geometry[HAND_MIDDLE_MCP], 1.0)
-        else:
-            forearm = _vector(pose_landmarks[elbow_index], pose_landmarks[wrist_index], aspect_ratio)
-            hand_direction = _vector(hand[HAND_WRIST], hand[HAND_MIDDLE_MCP], aspect_ratio)
+        forearm = _image_vector(pose_landmarks[elbow_index], pose_landmarks[wrist_index], aspect_ratio)
+        hand_direction = _image_vector(hand[HAND_WRIST], hand[HAND_MIDDLE_MCP], aspect_ratio)
         deviation = signed_wrist_deviation(forearm, hand_direction)
         if deviation is None:
             continue
@@ -179,21 +174,25 @@ def hand_wrist_angles(
 
 
 def signed_wrist_deviation(forearm: Vector, hand_direction: Vector) -> float | None:
-    """Angle between forearm and hand in degrees, positive when the hand bends up on screen."""
-    forearm_length = _norm(forearm)
-    hand_length = _norm(hand_direction)
-    if not all(math.isfinite(value) for value in (*forearm, *hand_direction)):
+    """Rotation from the forearm to the hand in the image plane, positive when bent up.
+
+    The sign comes from the 2D cross product, which stays well conditioned whatever the
+    forearm orientation. Taking it from a single vector component collapsed to zero for a
+    vertical forearm, so both bend directions reported the same joint angle.
+    """
+    forearm_x, forearm_y = forearm[0], forearm[1]
+    hand_x, hand_y = hand_direction[0], hand_direction[1]
+    if not all(math.isfinite(value) for value in (forearm_x, forearm_y, hand_x, hand_y)):
         return None
-    if forearm_length < 1e-6 or hand_length < 1e-6:
+    if math.hypot(forearm_x, forearm_y) < MIN_PROJECTION:
         return None
-    unit_forearm = tuple(component / forearm_length for component in forearm)
-    unit_hand = tuple(component / hand_length for component in hand_direction)
-    cosine = max(-1.0, min(1.0, sum(a * b for a, b in zip(unit_forearm, unit_hand))))
-    magnitude = math.degrees(math.acos(cosine))
-    projection = sum(a * b for a, b in zip(unit_hand, unit_forearm))
-    perpendicular_y = unit_hand[1] - projection * unit_forearm[1]
-    sign = -1.0 if perpendicular_y > 1e-6 else 1.0
-    return max(-MAX_WRIST_DEVIATION_DEG, min(MAX_WRIST_DEVIATION_DEG, sign * magnitude))
+    if math.hypot(hand_x, hand_y) < MIN_PROJECTION:
+        # The hand points at the camera; its projected direction is landmark noise.
+        return None
+    cross = forearm_x * hand_y - forearm_y * hand_x
+    dot = forearm_x * hand_x + forearm_y * hand_y
+    deviation = math.degrees(math.atan2(-cross, dot))
+    return max(-MAX_WRIST_DEVIATION_DEG, min(MAX_WRIST_DEVIATION_DEG, deviation))
 
 
 class WristAngleHold:
@@ -268,6 +267,15 @@ class HandGestureFilter:
 
 def _finite(point: Any) -> bool:
     return all(math.isfinite(float(getattr(point, axis, 0.0))) for axis in ("x", "y", "z"))
+
+
+def _image_vector(start: Any, end: Any, aspect_ratio: float) -> Vector:
+    """Image-plane vector with x scaled so a pixel means the same in both directions."""
+    return (
+        (float(end.x) - float(start.x)) * aspect_ratio,
+        float(end.y) - float(start.y),
+        0.0,
+    )
 
 
 def _vector(start: Any, end: Any, aspect_ratio: float) -> Vector:
