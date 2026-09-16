@@ -5,6 +5,18 @@ from vision_robot_arm.core.config import DEFAULT_MODEL_PATH, AppConfig
 from vision_robot_arm.core.pose_state import LandmarkPoint, mirror_landmarks
 
 
+class LandmarkPointTests(unittest.TestCase):
+    def test_missing_or_none_visibility_defaults_to_one(self) -> None:
+        class HandLandmark:
+            x, y, z, visibility = 0.1, 0.2, 0.3, None
+
+        class BareLandmark:
+            x, y, z = 0.4, 0.5, 0.6
+
+        self.assertEqual(LandmarkPoint.from_landmark(HandLandmark()).visibility, 1.0)
+        self.assertEqual(LandmarkPoint.from_landmark(BareLandmark()).visibility, 1.0)
+
+
 class MirrorLandmarksTests(unittest.TestCase):
     def test_mirrors_x_and_keeps_other_fields(self) -> None:
         mirrored = mirror_landmarks([LandmarkPoint(0.25, 0.4, -0.1, visibility=0.8)])
