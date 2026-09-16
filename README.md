@@ -115,6 +115,7 @@ vision_robot_arm/
     controller.py          # RobotController glue between mapper and backend
     factory.py             # backend selection from --robot-backend
     mapping.py             # PoseState -> JointTargets
+    serial_backend.py      # serial line protocol and pyserial backend
     simulation.py          # simulated arm backend
     targets.py             # JointTargets value object
 models/
@@ -124,6 +125,7 @@ tests/
   test_core_config.py
   test_robot_factory.py
   test_robot_mapping.py
+  test_robot_serial.py
   test_robot_simulation.py
   test_vision_metrics.py
   test_vision_smoothing.py
@@ -195,7 +197,7 @@ selected with `--robot-backend`:
 | `none`   | default, robot side disabled                                    |
 | `debug`  | prints the mapped targets to the console                        |
 | `sim`    | simulated arm with speed limit, state shown on the overlay      |
-| `serial` | sends targets to hardware over a serial port (planned)          |
+| `serial` | sends targets to hardware over a serial port (pyserial)         |
 
 ```powershell
 python main.py --robot-backend debug
@@ -211,6 +213,33 @@ so you can test the mapping without hardware:
 ```powershell
 python main.py --robot-backend sim --robot-max-speed 60
 ```
+
+### Serial protocol
+
+The serial backend needs the `serial` extra (`pip install -e .[serial]`) and a
+port:
+
+```powershell
+python main.py --robot-backend serial --robot-port COM3 --robot-baud 115200
+```
+
+Each frame is one ASCII line, at most every `--robot-send-interval` seconds
+(default `0.05`):
+
+```text
+S:90.0;E:45.0;G:1;L:0
+```
+
+| Field | Meaning                                       |
+| ----- | --------------------------------------------- |
+| `S`   | shoulder angle in degrees                     |
+| `E`   | elbow angle in degrees                        |
+| `G`   | gripper, `1` close / `0` open, omitted = hold  |
+| `L`   | lift mode, `1` on / `0` off                    |
+
+Joints without a reliable angle in the current frame are omitted. The wire
+format lives in `encode_targets` in `vision_robot_arm/robot/serial_backend.py`
+and is expected to change once the hardware is chosen.
 
 Current mapping (`vision_robot_arm/robot/mapping.py`):
 

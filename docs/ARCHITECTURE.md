@@ -78,8 +78,11 @@ PoseState -> RobotMapper -> JointTargets -> RobotBackend
 - `RobotBackend` (`robot/backend.py`) is the transport protocol:
   `send(targets)`, `status_lines()` for the overlay and `close()`. Backends:
   `DebugBackend` prints, `SimulationBackend` (`robot/simulation.py`) keeps an
-  in-memory arm that moves toward the targets with a speed limit, further
-  backends (serial hardware) plug in here.
+  in-memory arm that moves toward the targets with a speed limit,
+  `SerialBackend` (`robot/serial_backend.py`) writes one ASCII line per frame
+  over pyserial. pyserial is an optional dependency loaded the same way as
+  OpenCV and MediaPipe: missing module means a `SystemExit` with an install
+  hint, never an import error at startup.
 - The overlay hook: `draw_overlay(..., status_lines=...)` in
   `vision/drawing.py` appends whatever the active backend reports, so the
   robot side can show state on screen without touching drawing code.
