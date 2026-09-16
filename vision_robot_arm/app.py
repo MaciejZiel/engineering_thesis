@@ -21,7 +21,7 @@ from vision_robot_arm.vision.drawing import (
     draw_stick_figure,
     landmark_visibility_ratio,
 )
-from vision_robot_arm.vision.hand_gestures import detect_hand_gestures
+from vision_robot_arm.vision.hand_gestures import detect_hand_gestures, hand_wrist_angles
 from vision_robot_arm.vision.hand_tracker import HandTracker
 from vision_robot_arm.vision.landmarks import build_landmark_indices, build_landmark_names
 from vision_robot_arm.vision.output import emit_console_data
@@ -127,9 +127,11 @@ def run_app(config: AppConfig) -> int:
             last_timestamp_ms = timestamp_ms
             detection = tracker.detect(rgb_frame, timestamp_ms)
             hand_gestures: tuple[str, ...] = ()
+            wrist_angles: dict[str, float] = {}
             if hand_tracker is not None and detection.landmarks:
                 hands = hand_tracker.detect(rgb_frame, timestamp_ms)
                 hand_gestures = detect_hand_gestures(hands, detection.landmarks, indices)
+                wrist_angles = hand_wrist_angles(hands, detection.landmarks, indices)
             if mirrored:
                 frame = cv2.flip(frame, 1)
 
@@ -141,6 +143,7 @@ def run_app(config: AppConfig) -> int:
                     detection.landmarks,
                     detection.world_landmarks,
                     extra_gestures=hand_gestures,
+                    extra_angles=wrist_angles,
                 )
                 display_landmarks = (
                     mirror_landmarks(current_state.landmarks)

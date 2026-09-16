@@ -6,6 +6,7 @@ from vision_robot_arm.vision.hand_gestures import (
     classify_hand,
     count_extended_fingers,
     detect_hand_gestures,
+    hand_wrist_angles,
 )
 
 
@@ -32,8 +33,8 @@ def make_hand(wrist: tuple[float, float], extended: tuple[bool, bool, bool, bool
     return hand
 
 
-POSE_INDICES = {"LEFT_WRIST": 0, "RIGHT_WRIST": 1}
-POSE = [P(0.3, 0.6), P(0.7, 0.6)]
+POSE_INDICES = {"LEFT_WRIST": 0, "RIGHT_WRIST": 1, "LEFT_ELBOW": 2, "RIGHT_ELBOW": 3}
+POSE = [P(0.3, 0.6), P(0.7, 0.6), P(0.3, 0.9), P(0.7, 0.9)]
 
 
 class FingerCountTests(unittest.TestCase):
@@ -79,6 +80,32 @@ class HandSideAssignmentTests(unittest.TestCase):
         sides = assign_hand_sides([hand], POSE, POSE_INDICES, max_distance=0.5)
 
         self.assertEqual(len(sides), 1)
+
+
+class HandWristAngleTests(unittest.TestCase):
+    def test_straight_hand_gives_180_degrees(self) -> None:
+        hand = make_hand((0.7, 0.6), (True, True, True, True))
+        hand[9] = P(0.7, 0.4)
+
+        angles = hand_wrist_angles([hand], POSE, POSE_INDICES)
+
+        self.assertAlmostEqual(angles["right_wrist"], 180.0)
+        self.assertNotIn("left_wrist", angles)
+
+    def test_bent_wrist_gives_ninety_degrees(self) -> None:
+        hand = make_hand((0.3, 0.6), (False, False, False, False))
+        hand[9] = P(0.5, 0.6)
+
+        angles = hand_wrist_angles([hand], POSE, POSE_INDICES)
+
+        self.assertAlmostEqual(angles["left_wrist"], 90.0)
+
+    def test_missing_elbow_index_is_skipped(self) -> None:
+        hand = make_hand((0.7, 0.6), (True, True, True, True))
+
+        angles = hand_wrist_angles([hand], POSE[:2], {"LEFT_WRIST": 0, "RIGHT_WRIST": 1})
+
+        self.assertEqual(angles, {})
 
 
 class HandGestureTests(unittest.TestCase):
