@@ -2,7 +2,9 @@ import unittest
 
 import numpy as np
 
-from vision_robot_arm.app import _fit_frame
+from pathlib import Path
+
+from vision_robot_arm.app import _fit_frame, _frame_timestamp_ms
 from vision_robot_arm.core.config import AppConfig
 
 
@@ -48,3 +50,53 @@ class FitFrameTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FakeCapture:
+    """Stands in for cv2.VideoCapture; POS_MSEC restarts at zero after a rewind."""
+
+    POS_MSEC = 0
+
+    def __init__(self, position_ms: float) -> None:
+        self.position_ms = position_ms
+
+    def get(self, prop: int) -> float:
+        return self.position_ms
+
+
+class TimestampTests(unittest.TestCase):
+    video = AppConfig(video_path=Path("clip.mp4"), loop_video=True)
+
+    def cv2(self) -> object:
+        class Cv2:
+            CAP_PROP_POS_MSEC = FakeCapture.POS_MSEC
+
+        return Cv2()
+
+    def test_video_time_comes_from_the_clip_position(self) -> None:
+        stamp = _frame_timestamp_ms(self.cv2(), FakeCapture(900.0), self.video, 0.0, 867)
+
+        self.assertEqual(stamp, 900)
+
+    def test_a_repeated_position_still_moves_forward(self) -> None:
+        stamp = _frame_timestamp_ms(self.cv2(), FakeCapture(900.0), self.video, 0.0, 900)
+
+        self.assertEqual(stamp, 901)
+
+    def test_the_offset_keeps_frame_spacing_across_a_rewind(self) -> None:
+        offset = 900 + 33
+
+        first = _frame_timestamp_ms(self.cv2(), FakeCapture(0.0), self.video, 0.0, 900, offset)
+        second = _frame_timestamp_ms(self.cv2(), FakeCapture(33.0), self.video, 0.0, first, offset)
+
+        self.assertEqual(first, 933)
+        self.assertEqual(second - first, 33)
+
+    def test_camera_time_runs_on_the_wall_clock(self) -> None:
+        import time
+
+        started = time.monotonic() - 2.0
+
+        stamp = _frame_timestamp_ms(self.cv2(), FakeCapture(0.0), AppConfig(), started, -1)
+
+        self.assertGreaterEqual(stamp, 2000)

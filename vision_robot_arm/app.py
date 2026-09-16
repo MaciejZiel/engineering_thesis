@@ -97,6 +97,7 @@ def run_app(config: AppConfig) -> int:
         last_timestamp_ms = -1
         wait_delay_ms = _frame_wait_delay_ms(cv2, capture, config)
         mirrored = config.mirror and config.video_path is None
+        timestamp_offset_ms = 0
         dashboard = DashboardUi(cv2, deps.np, WINDOW_NAME)
         dashboard.open()
         simulation_canvas = _simulation_canvas(deps.np, dashboard.simulation_target_size())
@@ -114,8 +115,13 @@ def run_app(config: AppConfig) -> int:
                 if config.video_path is not None:
                     if config.loop_video:
                         capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        # Keep video time running across the rewind; the filters downstream
+                        # derive their time constants from these stamps.
+                        timestamp_offset_ms = last_timestamp_ms + wait_delay_ms
                         state_builder.reset_tracking()
                         robot_controller.reset()
+                        wrist_hold.reset()
+                        gesture_filter.reset()
                         continue
                     print("Video ended.")
                     return 0
@@ -130,6 +136,7 @@ def run_app(config: AppConfig) -> int:
                 config,
                 started_at,
                 last_timestamp_ms,
+                timestamp_offset_ms,
             )
             last_timestamp_ms = timestamp_ms
             detection = tracker.detect(rgb_frame, timestamp_ms)
@@ -361,11 +368,13 @@ def _frame_timestamp_ms(
     config: AppConfig,
     started_at: float,
     last_timestamp_ms: int,
+    offset_ms: int = 0,
 ) -> int:
+    """Strictly increasing stamps that keep real spacing, which MediaPipe and the filters need."""
     if config.video_path is None:
         return int((time.monotonic() - started_at) * 1000)
 
-    timestamp_ms = int(capture.get(cv2.CAP_PROP_POS_MSEC))
+    timestamp_ms = int(capture.get(cv2.CAP_PROP_POS_MSEC)) + offset_ms
     if timestamp_ms <= last_timestamp_ms:
         timestamp_ms = last_timestamp_ms + 1
     return timestamp_ms
