@@ -121,6 +121,14 @@ PoseState -> RobotMapper -> JointTargets -> RobotBackend
   canvas beside the camera feed in the application's only window;
   `vision/drawing.py` labels the body joints with their angles when
   `--test-mode` is on.
+- Angles measured outside the pose model reach the robot through
+  `PoseStateBuilder.build(extra_angles=...)`, which merges them into
+  `PoseState.angles` and smooths them like any other angle. Two use it:
+  `vision/arm_pose.py` measures arm elevation from the shoulder-to-elbow vector
+  against the torso (or image vertical when the hips are out of frame), because
+  the pose model's elbow-shoulder-hip angle is unavailable for a seated person;
+  `vision/hand_gestures.py` measures the wrist from the hand tracker. Only the
+  elevation drives the UR shoulder.
 - Hand gestures: `vision/hand_tracker.py` wraps the MediaPipe Hand
   Landmarker, `vision/hand_gestures.py` matches each hand to the nearest pose
   wrist and classifies it as open or fist. The names (`right_fist`,
