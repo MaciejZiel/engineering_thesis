@@ -12,6 +12,34 @@ DASHBOARD_PORT = 29999
 DASHBOARD_TIMEOUT_S = 2.0
 READY_ROBOT_MODE = "RUNNING"
 READY_SAFETY_STATUS = ("NORMAL", "REDUCED")
+ROBOT_MODE_NAMES = frozenset(
+    {
+        "NO_CONTROLLER",
+        "DISCONNECTED",
+        "CONFIRM_SAFETY",
+        "BOOTING",
+        "POWER_OFF",
+        "POWER_ON",
+        "IDLE",
+        "BACKDRIVE",
+        "RUNNING",
+    }
+)
+SAFETY_STATUS_NAMES = frozenset(
+    {
+        "NORMAL",
+        "REDUCED",
+        "PROTECTIVE_STOP",
+        "RECOVERY",
+        "SAFEGUARD_STOP",
+        "SYSTEM_EMERGENCY_STOP",
+        "ROBOT_EMERGENCY_STOP",
+        "VIOLATION",
+        "FAULT",
+        "AUTOMATIC_MODE_SAFEGUARD_STOP",
+        "SYSTEM_THREE_POSITION_ENABLING_STOP",
+    }
+)
 
 Connector = Callable[[str, int], Any]
 
@@ -58,8 +86,8 @@ def query_status(
         return None
     try:
         _read_line(connection)
-        mode = _value_of(_ask(connection, "robotmode"))
-        safety = _value_of(_ask(connection, "safetystatus"))
+        mode = _value_of(_ask(connection, "robotmode"), ROBOT_MODE_NAMES)
+        safety = _value_of(_ask(connection, "safetystatus"), SAFETY_STATUS_NAMES)
         remote = _ask(connection, "is in remote control").strip().lower()
     except OSError:
         return None
@@ -87,7 +115,7 @@ def _read_line(connection: Any) -> str:
     return data.decode("utf-8", "replace").strip()
 
 
-def _value_of(reply: str) -> str | None:
+def _value_of(reply: str, known: frozenset[str]) -> str | None:
     _, separator, value = reply.partition(":")
-    text = (value if separator else reply).strip()
-    return text.upper() or None
+    text = (value if separator else reply).strip().upper().replace(" ", "_")
+    return text if text in known else None

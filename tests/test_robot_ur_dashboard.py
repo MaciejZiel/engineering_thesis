@@ -61,6 +61,23 @@ class QueryTests(unittest.TestCase):
         self.assertIsNone(status.remote_control)
         self.assertEqual(status.robot_mode, "IDLE")
 
+    def test_an_unsupported_command_is_not_mistaken_for_a_status(self) -> None:
+        _, connector = dashboard(
+            ["Connected", "Robotmode: RUNNING", "Unknown command", "true"]
+        )
+
+        status = query_status("10.0.0.2", connector=connector)
+
+        self.assertIsNone(status.safety_status)
+        self.assertIsNone(status.blocking_problem())
+
+    def test_multi_word_statuses_are_normalised(self) -> None:
+        _, connector = dashboard(
+            ["Connected", "Robotmode: RUNNING", "Safetystatus: PROTECTIVE STOP", "true"]
+        )
+
+        self.assertEqual(query_status("10.0.0.2", connector=connector).safety_status, "PROTECTIVE_STOP")
+
     def test_unreachable_dashboard_returns_none(self) -> None:
         def refuse(host: str, port: int) -> None:
             raise OSError("refused")

@@ -56,7 +56,12 @@ class FakeRtde:
         self.host = host
         self.port = port
         self.sample: dict | None = None
+        self.connected = True
         self.closed = False
+
+    def drop(self) -> None:
+        self.sample = None
+        self.connected = False
 
     def read(self) -> dict | None:
         return self.sample
@@ -335,6 +340,138 @@ class URBackendTests(unittest.TestCase):
             backend.send(targets(right={"shoulder": -45.0}))
 
         self.assertIn("Lost the connection", str(context.exception))
+
+
+class SafetyTests(unittest.TestCase):
+    """Failure modes that would put a real arm at risk."""
+
+    def make(self, connector: FakeConnector, factory: FakeRtdeFactory | None = None,
+             **overrides: object) -> tuple[URBackend, FakeClock]:
+        clock = FakeClock()
+        settings = {
+            "backend": "ur",
+            "right_host": "192.168.1.10",
+            "left_host": "192.168.1.11",
+            "send_interval": 0.05,
+            "max_speed_deg_s": 60.0,
+            "start_seconds": 1.0,
+            "preflight": False,
+        }
+        settings.update(overrides)
+        backend = URBackend(
+            RobotConfig(**settings),
+            connector=connector,
+            clock=clock,
+            rtde_factory=factory,
+            status_query=no_status,
+        )
+        return backend, clock
+
+    def test_a_pose_gap_does_not_buy_one_giant_catch_up_step(self) -> None:
+        connector = FakeConnector()
+        backend, clock = self.make(connector)
+
+        clock.now = 2.0
+        backend.send(targets(right={"elbow": 0.0}))
+        clock.now = 12.0  # the person was out of frame for ten seconds
+        backend.send(targets(right={"elbow": 150.0}, ts=2))
+
+        elbow = backend.robot_state().arm("right").joints["elbow"]
+        self.assertLessEqual(elbow, 60.0 * 0.05 * 3 + 0.001)
+
+    def test_close_stops_every_arm_even_when_one_socket_is_dead(self) -> None:
+        connector = FakeConnector()
+        factory = FakeRtdeFactory()
+        backend, _ = self.make(connector, factory)
+        connector.sockets["192.168.1.10"].fail_on_send = True
+
+        backend.close()
+
+        self.assertEqual(len(connector.sockets["192.168.1.11"].commands(b"stopj(")), 1)
+        for sock in connector.sockets.values():
+            self.assertTrue(sock.closed)
+        for client in factory.clients.values():
+            self.assertTrue(client.closed)
+
+    def test_homing_waits_until_feedback_says_the_arm_arrived(self) -> None:
+        connector = FakeConnector()
+        factory = FakeRtdeFactory()
+        backend, clock = self.make(connector, factory)
+        far = (0.0, math.radians(-20.0), 0.0, math.radians(-90.0), 0.0, 0.0)
+        factory.clients["192.168.1.10"].sample = {"actual_q": far}
+
+        clock.now = 1.5  # past start_seconds, but the movej is still running
+        backend.send(targets(right={"shoulder": 0.0}))
+
+        self.assertEqual(connector.sockets["192.168.1.10"].commands(b"servoj("), [])
+
+        home = (0.0, math.radians(-90.0), 0.0, math.radians(-90.0), 0.0, 0.0)
+        factory.clients["192.168.1.10"].sample = {"actual_q": home}
+        clock.now = 2.0
+        backend.send(targets(right={"shoulder": 0.0}, ts=2))
+
+        self.assertEqual(len(connector.sockets["192.168.1.10"].commands(b"servoj(")), 1)
+
+    def test_homing_gives_up_after_its_deadline(self) -> None:
+        connector = FakeConnector()
+        factory = FakeRtdeFactory()
+        backend, clock = self.make(connector, factory)
+        factory.clients["192.168.1.10"].sample = {
+            "actual_q": (0.0, math.radians(-20.0), 0.0, math.radians(-90.0), 0.0, 0.0)
+        }
+
+        clock.now = 99.0
+        backend.send(targets(right={"shoulder": -90.0}))
+
+        self.assertEqual(len(connector.sockets["192.168.1.10"].commands(b"servoj(")), 1)
+
+    def test_lost_feedback_stops_presenting_a_stale_pose(self) -> None:
+        connector = FakeConnector()
+        factory = FakeRtdeFactory()
+        backend, clock = self.make(connector, factory)
+        client = factory.clients["192.168.1.10"]
+        client.sample = {
+            "actual_q": (0.0, math.radians(-30.0), 0.0, math.radians(-90.0), 0.0, 0.0),
+            "robot_mode": 7,
+            "safety_status": 1,
+        }
+        clock.now = 2.0
+        backend.send(targets(right={"shoulder": -80.0}))
+        self.assertAlmostEqual(backend.robot_state().arm("right").joints["shoulder"], -30.0, places=3)
+
+        client.drop()
+        clock.now = 2.5
+        backend.send(targets(right={"shoulder": -80.0}, ts=2))
+
+        state = backend.robot_state()
+        self.assertNotAlmostEqual(state.arm("right").joints["shoulder"], -30.0, places=3)
+        self.assertIn("feedback-lost", backend.status_lines()[0])
+
+    def test_a_failed_first_command_releases_the_socket(self) -> None:
+        opened: list[FakeSocket] = []
+        clients: list[FakeRtde] = []
+
+        def connector(host: str, port: int) -> FakeSocket:
+            sock = FakeSocket(host, port)
+            sock.fail_on_send = True
+            opened.append(sock)
+            return sock
+
+        def factory(host: str, port: int) -> FakeRtde:
+            client = FakeRtde(host, port)
+            clients.append(client)
+            return client
+
+        with self.assertRaises(SystemExit):
+            URBackend(
+                RobotConfig(backend="ur", right_host="10.0.0.2", preflight=False),
+                connector=connector,
+                rtde_factory=factory,
+                status_query=no_status,
+            )
+
+        self.assertTrue(opened[0].closed)
+        self.assertTrue(clients[0].closed)
 
 
 class PreflightTests(unittest.TestCase):

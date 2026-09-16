@@ -89,6 +89,20 @@ class DecodeValuesTests(unittest.TestCase):
         self.assertEqual(values["robot_mode"], 7)
         self.assertEqual(values["safety_status"], 1)
 
+    def test_unsigned_vectors_decode_as_unsigned(self) -> None:
+        payload = struct.pack(">6I", 4_000_000_000, 0, 0, 0, 0, 0)
+
+        values = decode_values(payload, (("digital_inputs", "VECTOR6UINT32"),))
+
+        self.assertEqual(values["digital_inputs"][0], 4_000_000_000)
+
+    def test_signed_vectors_decode_as_signed(self) -> None:
+        payload = struct.pack(">6i", -5, 0, 0, 0, 0, 0)
+
+        values = decode_values(payload, (("joint_modes", "VECTOR6INT32"),))
+
+        self.assertEqual(values["joint_modes"][0], -5)
+
     def test_truncated_payload_stops_without_raising(self) -> None:
         values = decode_values(b"\x00\x00", (("robot_mode", "INT32"),))
 
@@ -109,6 +123,13 @@ class HandshakeTests(unittest.TestCase):
 
         self.assertFalse(client.connect())
         self.assertIn("safety_status", client.last_error)
+        self.assertFalse(client.connected)
+
+    def test_variable_held_by_another_client_is_refused(self) -> None:
+        client, _ = client_with(handshake_replies(b"VECTOR6D,INT32,IN_USE"))
+
+        self.assertFalse(client.connect())
+        self.assertIn("IN_USE", client.last_error)
         self.assertFalse(client.connected)
 
     def test_rejected_protocol_version_is_reported(self) -> None:

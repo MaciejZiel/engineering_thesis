@@ -30,6 +30,11 @@ from vision_robot_arm.robot.ur_rtde import RtdeClient
 
 CONNECT_TIMEOUT_S = 2.0
 STOP_DECELERATION_DEG_S2 = 120.0
+# A pose gap must not turn into one giant catch-up step when the person returns.
+MAX_CATCHUP_INTERVALS = 3.0
+# With feedback the homing window ends when the arm has arrived, not when a timer says so.
+HOME_TOLERANCE_DEG = 3.0
+HOMING_TIMEOUT_FACTOR = 5.0
 JOINT_SHORT_NAMES = {"shoulder": "S", "elbow": "E", "wrist_1": "W1"}
 
 Connector = Callable[[str, int], Any]
@@ -73,7 +78,13 @@ def default_connector(host: str, port: int) -> Any:
 
 def default_rtde_factory(host: str, port: int) -> RtdeClient | None:
     client = RtdeClient(host, port)
-    return client if client.connect() else None
+    if client.connect():
+        return client
+    print(
+        f"robot: no RTDE feedback from {host}:{port} ({client.last_error}); "
+        "running open-loop"
+    )
+    return None
 
 
 class URArm:
@@ -102,13 +113,34 @@ class URArm:
         self._setpoints = SimulatedArm(config)
         self._gripper: str | None = None
         self._feedback: dict[str, Any] = {}
-        self._rtde = rtde_factory(host, config.rtde_port) if rtde_factory is not None else None
+        self._rtde: RtdeClient | None = None
         self._ready_at = clock() + config.start_seconds
-        self._send(encode_movej(self._setpoints.joints, config.start_speed_deg_s, config.start_accel_deg_s2))
+        self._homing_deadline = self._ready_at + config.start_seconds * HOMING_TIMEOUT_FACTOR
+        try:
+            self._rtde = rtde_factory(host, config.rtde_port) if rtde_factory is not None else None
+            self._send(
+                encode_movej(
+                    self._setpoints.joints, config.start_speed_deg_s, config.start_accel_deg_s2
+                )
+            )
+        except BaseException:
+            self._release()
+            raise
 
     @property
     def homing(self) -> bool:
-        return self._clock() < self._ready_at
+        now = self._clock()
+        if now >= self._homing_deadline:
+            return False
+        if now < self._ready_at:
+            return True
+        actual = self.feedback_joints
+        if actual is None:
+            return False
+        return any(
+            abs(actual[joint] - target) > HOME_TOLERANCE_DEG
+            for joint, target in self._setpoints.joints.items()
+        )
 
     @property
     def feedback_joints(self) -> dict[str, float] | None:
@@ -143,6 +175,9 @@ class URArm:
         sample = self._rtde.read()
         if sample:
             self._feedback = sample
+        elif not self._rtde.connected:
+            # Never present a stale pose as the live one.
+            self._feedback = {}
 
     def state(self) -> ArmState:
         return ArmState(
@@ -165,19 +200,27 @@ class URArm:
         return f"ur {self.name[0].upper()} {self.host} {health} {detail} grip {self._gripper or 'n/a'}"
 
     def close(self) -> None:
+        """Shutdown must always finish: a dead socket cannot stop the other arm."""
         try:
-            self._send(encode_stopj())
+            self._socket.sendall(encode_stopj())
+        except OSError:
+            pass
         finally:
-            if self._rtde is not None:
-                self._rtde.close()
-            try:
-                self._socket.close()
-            except OSError:
-                pass
+            self._release()
+
+    def _release(self) -> None:
+        if self._rtde is not None:
+            self._rtde.close()
+        try:
+            self._socket.close()
+        except OSError:
+            pass
 
     def _health(self) -> str:
         if self._rtde is None:
             return "open-loop"
+        if not self._rtde.connected:
+            return "feedback-lost"
         mode = ROBOT_MODES.get(self._feedback.get("robot_mode"), "?")
         safety = SAFETY_STATUSES.get(self._feedback.get("safety_status"), "?")
         return f"{mode}/{safety}"
@@ -247,13 +290,19 @@ class URBackend:
         now = self._clock()
         if now < self._next_send_at:
             return
-        elapsed = self._config.send_interval if self._last_send_at is None else now - self._last_send_at
+        elapsed = self._catch_up_interval(now)
         self._next_send_at = now + self._config.send_interval
         self._last_send_at = now
 
         for name, arm in self._arms.items():
             arm.poll_feedback()
             arm.update(targets.arm(name), elapsed)
+
+    def _catch_up_interval(self, now: float) -> float:
+        """Time credited to the ramp. A long pose gap must not buy one huge step."""
+        if self._last_send_at is None:
+            return self._config.send_interval
+        return min(now - self._last_send_at, self._config.send_interval * MAX_CATCHUP_INTERVALS)
 
     def robot_state(self) -> RobotState | None:
         if not self._arms:

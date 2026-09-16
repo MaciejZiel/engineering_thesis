@@ -72,7 +72,7 @@ def decode_values(payload: bytes, recipe: tuple[tuple[str, str], ...]) -> dict[s
         elif type_name == "VECTOR3D":
             values[name] = struct.unpack(">3d", chunk)
         elif type_name in ("VECTOR6INT32", "VECTOR6UINT32"):
-            values[name] = struct.unpack(">6i" if type_name.endswith("INT32") else ">6I", chunk)
+            values[name] = struct.unpack(">6i" if type_name == "VECTOR6INT32" else ">6I", chunk)
         elif type_name == "DOUBLE":
             values[name] = struct.unpack(">d", chunk)[0]
         elif type_name == "INT32":
@@ -174,9 +174,16 @@ class RtdeClient:
         types = reply[1:].decode("utf-8", "replace").split(",") if reply else []
         if not types or len(types) != len(self._variables):
             raise RtdeError("controller did not describe the requested outputs")
-        missing = [name for name, kind in zip(self._variables, types) if kind == "NOT_FOUND"]
-        if missing:
-            raise RtdeError(f"controller does not provide: {', '.join(missing)}")
+        unusable = [
+            f"{name} ({kind})"
+            for name, kind in zip(self._variables, types)
+            if kind not in TYPE_SIZES
+        ]
+        if unusable:
+            raise RtdeError(
+                "controller will not stream: " + ", ".join(unusable)
+                + " (IN_USE means another RTDE client already reads it)"
+            )
         self._recipe = tuple(zip(self._variables, types))
 
         started = self._exchange(CONTROL_PACKAGE_START, b"", CONTROL_PACKAGE_START)
