@@ -6,10 +6,9 @@ ANGLE_MODE = "angles"
 LANDMARK_MODE = "landmarks"
 BOTH_MODE = "both"
 
-DEFAULT_MODEL_PATH = (
-    Path(__file__).resolve().parent.parent / "models" / "pose_landmarker_lite.task"
-)
-DEFAULT_RECORDING_DIR = Path(__file__).resolve().parent.parent / "recordings"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+DEFAULT_MODEL_PATH = PROJECT_ROOT / "models" / "pose_landmarker_lite.task"
+DEFAULT_RECORDING_DIR = PROJECT_ROOT / "recordings"
 
 
 @dataclass(frozen=True)

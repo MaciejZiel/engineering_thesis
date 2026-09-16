@@ -1,4 +1,4 @@
-from vision_robot_arm.pose_state import LandmarkPoint
+from vision_robot_arm.core.pose_state import LandmarkPoint
 
 
 class LowPassValueFilter:

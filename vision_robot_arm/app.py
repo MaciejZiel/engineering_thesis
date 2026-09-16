@@ -1,14 +1,14 @@
 import time
 
-from vision_robot_arm.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE, AppConfig
-from vision_robot_arm.drawing import draw_overlay, draw_stick_figure
-from vision_robot_arm.landmarks import build_landmark_indices, build_landmark_names
-from vision_robot_arm.output import emit_console_data
-from vision_robot_arm.pose_tracker import PoseTracker
-from vision_robot_arm.recording import CsvPoseRecorder
-from vision_robot_arm.robot import create_robot_controller
-from vision_robot_arm.runtime import load_runtime_dependencies
-from vision_robot_arm.state_builder import PoseStateBuilder
+from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE, AppConfig
+from vision_robot_arm.vision.drawing import draw_overlay, draw_stick_figure
+from vision_robot_arm.vision.landmarks import build_landmark_indices, build_landmark_names
+from vision_robot_arm.vision.output import emit_console_data
+from vision_robot_arm.vision.pose_tracker import PoseTracker
+from vision_robot_arm.vision.recording import CsvPoseRecorder
+from vision_robot_arm.robot.controller import create_robot_controller
+from vision_robot_arm.core.runtime import load_runtime_dependencies
+from vision_robot_arm.vision.state_builder import PoseStateBuilder
 
 
 def update_mode_from_key(key: int, current_mode: str) -> str:

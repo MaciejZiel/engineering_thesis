@@ -2,9 +2,9 @@ import sys
 import time
 from typing import Any
 
-from vision_robot_arm.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE
-from vision_robot_arm.metrics import format_angles
-from vision_robot_arm.pose_state import PoseState
+from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE
+from vision_robot_arm.vision.metrics import format_angles
+from vision_robot_arm.core.pose_state import PoseState
 
 
 def print_landmarks(

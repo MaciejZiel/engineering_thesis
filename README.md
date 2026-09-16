@@ -76,29 +76,42 @@ python main.py --model path\to\pose_landmarker.task
 
 ## Project Structure
 
+The package is split into three areas so two people can work in parallel:
+`core` is the shared contract, `vision` turns camera frames into a pose state,
+and `robot` turns the pose state into robot commands.
+
 ```text
-main.py                  # thin entrypoint
+main.py                    # thin entrypoint
 vision_robot_arm/
-  app.py                 # camera loop and module wiring
-  cli.py                 # command-line arguments
-  config.py              # runtime settings and defaults
-  drawing.py             # custom stick figure and overlay
-  gestures.py            # simple rule-based gesture detection
-  landmarks.py           # landmark lookup and visibility checks
-  metrics.py             # joint angle calculations
-  output.py              # console printing modes
-  pose_state.py          # shared pose data object
-  pose_tracker.py        # MediaPipe Pose Landmarker wrapper
-  recording.py           # CSV pose recordings
-  robot.py               # robot command abstraction/debug controller
-  runtime.py             # optional dependency loading
-  smoothing.py           # low-pass filters
-  state_builder.py       # raw detections -> smoothed pose state
+  app.py                   # camera loop and module wiring (shared)
+  cli.py                   # command-line arguments (shared)
+  core/                    # shared contract between vision and robot
+    config.py              # runtime settings and defaults
+    pose_state.py          # shared pose data object
+    runtime.py             # optional dependency loading
+  vision/                  # camera, pose detection, gestures, drawing
+    calibration.py         # neutral pose calibration
+    drawing.py             # custom stick figure and overlay
+    gestures.py            # simple rule-based gesture detection
+    landmarks.py           # landmark lookup and visibility checks
+    metrics.py             # joint angle calculations
+    output.py              # console printing modes
+    pose_tracker.py        # MediaPipe Pose Landmarker wrapper
+    recording.py           # CSV pose recordings
+    smoothing.py           # low-pass filters
+    state_builder.py       # raw detections -> smoothed pose state
+  robot/                   # robot arm control
+    controller.py          # robot command abstraction/debug controller
 models/
   pose_landmarker_lite.task
 tests/
-  test_metrics.py
+  test_core_config.py
+  test_robot_mapping.py
+  test_vision_metrics.py
 ```
+
+Test files follow the `test_<area>_<topic>.py` convention so that each area
+owns its own tests.
 
 ## Controls
 

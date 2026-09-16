@@ -4,14 +4,12 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from vision_robot_arm.config import AppConfig
-from vision_robot_arm.metrics import calculate_angle, calculate_angles
-from vision_robot_arm.smoothing import LowPassValueFilter
-from vision_robot_arm.calibration import PoseCalibration
-from vision_robot_arm.pose_state import LandmarkPoint, PoseState
-from vision_robot_arm.recording import CsvPoseRecorder
-from vision_robot_arm.gestures import detect_gestures
-from vision_robot_arm.robot import map_pose_to_robot_commands
+from vision_robot_arm.core.pose_state import LandmarkPoint, PoseState
+from vision_robot_arm.vision.calibration import PoseCalibration
+from vision_robot_arm.vision.gestures import detect_gestures
+from vision_robot_arm.vision.metrics import calculate_angle, calculate_angles
+from vision_robot_arm.vision.recording import CsvPoseRecorder
+from vision_robot_arm.vision.smoothing import LowPassValueFilter
 
 
 @dataclass
@@ -106,14 +104,6 @@ class RecordingTests(unittest.TestCase):
         self.assertEqual(rows[0]["nose_world_z"], "3.0")
 
 
-class ConfigTests(unittest.TestCase):
-    def test_config_rejects_missing_video_file(self) -> None:
-        config = AppConfig(video_path=Path("does_not_exist.mp4"))
-
-        with self.assertRaises(SystemExit):
-            config.validate()
-
-
 class GestureTests(unittest.TestCase):
     def test_detects_hand_up_and_bent_elbow(self) -> None:
         indices = {
@@ -143,27 +133,6 @@ class GestureTests(unittest.TestCase):
         self.assertIn("left_hand_up", gestures)
         self.assertIn("left_elbow_bent", gestures)
         self.assertNotIn("right_elbow_bent", gestures)
-
-
-class RobotMappingTests(unittest.TestCase):
-    def test_maps_pose_state_to_debug_robot_commands(self) -> None:
-        state = PoseState(
-            timestamp_ms=1,
-            landmarks=[],
-            world_landmarks=None,
-            raw_angles={},
-            angles={"right_shoulder": 45.0, "right_elbow": 210.0},
-            relative_angles={},
-            gestures=("right_elbow_bent",),
-            calibrated=False,
-        )
-
-        commands = map_pose_to_robot_commands(state)
-        formatted = [command.format() for command in commands]
-
-        self.assertIn("shoulder= 45.0 (right_shoulder)", formatted)
-        self.assertIn("elbow=180.0 (right_elbow)", formatted)
-        self.assertIn("gripper=close (right_elbow_bent)", formatted)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 
 from vision_robot_arm.app import run_app
-from vision_robot_arm.config import DEFAULT_MODEL_PATH, DEFAULT_RECORDING_DIR, AppConfig
+from vision_robot_arm.core.config import DEFAULT_MODEL_PATH, DEFAULT_RECORDING_DIR, AppConfig
 
 
 def parse_args() -> AppConfig:

@@ -1,10 +1,10 @@
 from typing import Any
 
-from vision_robot_arm.calibration import PoseCalibration
-from vision_robot_arm.gestures import detect_gestures
-from vision_robot_arm.metrics import calculate_angles
-from vision_robot_arm.pose_state import LandmarkPoint, PoseState
-from vision_robot_arm.smoothing import AngleSmoother, LandmarkSmoother
+from vision_robot_arm.vision.calibration import PoseCalibration
+from vision_robot_arm.vision.gestures import detect_gestures
+from vision_robot_arm.vision.metrics import calculate_angles
+from vision_robot_arm.core.pose_state import LandmarkPoint, PoseState
+from vision_robot_arm.vision.smoothing import AngleSmoother, LandmarkSmoother
 
 
 class PoseStateBuilder:

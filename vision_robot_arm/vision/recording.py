@@ -3,8 +3,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TextIO
 
-from vision_robot_arm.metrics import ANGLE_DEFINITIONS
-from vision_robot_arm.pose_state import PoseState
+from vision_robot_arm.vision.metrics import ANGLE_DEFINITIONS
+from vision_robot_arm.core.pose_state import PoseState
 
 
 class CsvPoseRecorder:

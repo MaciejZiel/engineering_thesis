@@ -1,7 +1,7 @@
 import math
 from typing import Any
 
-from vision_robot_arm.landmarks import is_reliable
+from vision_robot_arm.vision.landmarks import is_reliable
 
 
 AngleDefinitions = dict[str, tuple[str, str, str]]

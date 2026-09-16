@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from typing import Any
 
-from vision_robot_arm.config import AppConfig
-from vision_robot_arm.runtime import RuntimeDeps
+from vision_robot_arm.core.config import AppConfig
+from vision_robot_arm.core.runtime import RuntimeDeps
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass
 from typing import Protocol
 
-from vision_robot_arm.pose_state import PoseState
+from vision_robot_arm.core.pose_state import PoseState
 
 
 @dataclass(frozen=True)
