@@ -379,6 +379,20 @@ class SafetyTests(unittest.TestCase):
         elbow = backend.robot_state().arm("right").joints["elbow"]
         self.assertLessEqual(elbow, 60.0 * 0.05 * 3 + 0.001)
 
+    def test_a_gripper_command_between_two_frames_still_reaches_the_arm(self) -> None:
+        connector = FakeConnector()
+        backend, clock = self.make(connector, start_seconds=0.0)
+
+        for frame in range(6):  # 30 fps into a 20 Hz link: half the frames are skipped
+            clock.now = 0.001 + frame * 0.0333
+            gripper = GRIPPER_CLOSE if frame in (1, 3) else None
+            backend.send(targets(right={"shoulder": -90.0 + frame}, right_gripper=gripper))
+
+        self.assertEqual(
+            connector.sockets["192.168.1.10"].commands(b"set_tool_digital_out"),
+            [b"set_tool_digital_out(0, True)\n"],
+        )
+
     def test_close_stops_every_arm_even_when_one_socket_is_dead(self) -> None:
         connector = FakeConnector()
         factory = FakeRtdeFactory()

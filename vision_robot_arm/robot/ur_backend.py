@@ -297,9 +297,14 @@ class URBackend:
         self._next_send_at = now + self._config.send_interval
         self._last_send_at = now
 
+        # Use everything seen since the last transmission: a gripper command that arrived
+        # on a frame the rate limiter skipped must not be thrown away.
+        accumulated = self._tracker.accumulated_targets()
+        if accumulated is None:
+            return
         for name, arm in self._arms.items():
             arm.poll_feedback()
-            arm.update(targets.arm(name), elapsed)
+            arm.update(accumulated.arm(name), elapsed)
 
     def _catch_up_interval(self, now: float) -> float:
         """Time credited to the ramp. A long pose gap must not buy one huge step."""
