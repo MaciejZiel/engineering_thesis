@@ -87,6 +87,12 @@ class SimulationBackendTests(unittest.TestCase):
         self.assertEqual(lines[1], "sim elbow= 90.0 ->  90.0")
         self.assertEqual(lines[2], "sim gripper=open | lift_mode=off")
 
+    def test_arm_state_matches_state_property(self) -> None:
+        backend = SimulationBackend(RobotConfig(), clock=FakeClock())
+        backend.send(JointTargets(timestamp_ms=1, joints={"shoulder": 120.0}))
+
+        self.assertEqual(backend.arm_state(), backend.state)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,15 +1,23 @@
 import time
 
 from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE, AppConfig
-from vision_robot_arm.vision.drawing import draw_overlay, draw_stick_figure
+from vision_robot_arm.core.runtime import load_runtime_dependencies
+from vision_robot_arm.robot.controller import RobotController
+from vision_robot_arm.robot.factory import create_robot_controller
+from vision_robot_arm.robot.visualization import draw_arm_panel
+from vision_robot_arm.vision.drawing import (
+    draw_joint_angle_labels,
+    draw_overlay,
+    draw_stick_figure,
+)
 from vision_robot_arm.vision.landmarks import build_landmark_indices, build_landmark_names
 from vision_robot_arm.vision.output import emit_console_data
 from vision_robot_arm.vision.pose_tracker import PoseTracker
 from vision_robot_arm.vision.recording import CsvPoseRecorder
-from vision_robot_arm.core.runtime import load_runtime_dependencies
-from vision_robot_arm.robot.controller import RobotController
-from vision_robot_arm.robot.factory import create_robot_controller
 from vision_robot_arm.vision.state_builder import PoseStateBuilder
+
+ARM_PANEL_SIZE = 240
+ARM_PANEL_MARGIN = 12
 
 
 def update_mode_from_key(key: int, current_mode: str) -> str:
@@ -65,7 +73,9 @@ def run_app(config: AppConfig) -> int:
         window_name = "Vision Robot Arm - Pose Tracker"
 
         print(_source_started_message(config))
-        print("Keys: 1 angles, 2 landmarks, 3 both, q/Esc quit.")
+        print("Keys: 1 angles, 2 landmarks, 3 both, c calibrate, r record, q/Esc quit.")
+        if config.test_mode:
+            print(f"Test mode: joint angle labels and robot arm panel ({config.robot.backend}).")
 
         while True:
             ok, frame = capture.read()
@@ -106,6 +116,18 @@ def run_app(config: AppConfig) -> int:
                     indices,
                     config.visibility_threshold,
                 )
+                if config.test_mode:
+                    draw_joint_angle_labels(
+                        cv2,
+                        frame,
+                        current_state.landmarks,
+                        indices,
+                        current_state.angles,
+                        config.visibility_threshold,
+                    )
+
+                recorder.write_state(current_state, names)
+                robot_controller.update(current_state)
 
                 now = time.monotonic()
                 if now >= next_print_at:
@@ -114,10 +136,10 @@ def run_app(config: AppConfig) -> int:
                         current_state,
                         names,
                     )
+                    if config.test_mode:
+                        for line in robot_controller.status_lines():
+                            print(line)
                     next_print_at = now + config.print_interval
-
-                recorder.write_state(current_state, names)
-                robot_controller.update(current_state)
             else:
                 state_builder.reset_tracking()
                 robot_controller.reset()
@@ -133,6 +155,20 @@ def run_app(config: AppConfig) -> int:
                 gestures=current_state.gestures if current_state else (),
                 status_lines=tuple(robot_controller.status_lines()),
             )
+            if config.test_mode:
+                arm_state = robot_controller.arm_state()
+                if arm_state is not None:
+                    height, width = frame.shape[:2]
+                    draw_arm_panel(
+                        cv2,
+                        frame,
+                        arm_state,
+                        origin=(
+                            width - ARM_PANEL_SIZE - ARM_PANEL_MARGIN,
+                            height - ARM_PANEL_SIZE - ARM_PANEL_MARGIN,
+                        ),
+                        size=ARM_PANEL_SIZE,
+                    )
             cv2.imshow(window_name, frame)
 
             key = cv2.waitKey(wait_delay_ms) & 0xFF

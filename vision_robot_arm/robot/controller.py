@@ -3,6 +3,7 @@ from typing import Protocol
 from vision_robot_arm.core.pose_state import PoseState
 from vision_robot_arm.robot.backend import RobotBackend
 from vision_robot_arm.robot.mapping import RobotMapper
+from vision_robot_arm.robot.targets import ArmState
 
 
 class RobotController(Protocol):
@@ -10,6 +11,9 @@ class RobotController(Protocol):
         ...
 
     def reset(self) -> None:
+        ...
+
+    def arm_state(self) -> ArmState | None:
         ...
 
     def status_lines(self) -> list[str]:
@@ -25,6 +29,9 @@ class NullRobotController:
 
     def reset(self) -> None:
         return
+
+    def arm_state(self) -> ArmState | None:
+        return None
 
     def status_lines(self) -> list[str]:
         return []
@@ -43,6 +50,9 @@ class MappedRobotController:
 
     def reset(self) -> None:
         self._mapper.reset()
+
+    def arm_state(self) -> ArmState | None:
+        return self._backend.arm_state()
 
     def status_lines(self) -> list[str]:
         return self._backend.status_lines()

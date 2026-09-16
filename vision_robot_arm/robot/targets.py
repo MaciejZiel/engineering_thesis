@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass, field
 
 JOINT_SHOULDER = "shoulder"
@@ -25,3 +26,18 @@ class JointTargets:
             parts.append(f"gripper={self.gripper}")
         parts.append(f"lift_mode={'on' if self.lift_mode else 'off'}")
         return " | ".join(parts)
+
+
+@dataclass(frozen=True)
+class ArmState:
+    joints: dict[str, float]
+    targets: dict[str, float]
+    gripper: str
+    lift_mode: bool
+
+    @property
+    def settled(self) -> bool:
+        return all(
+            math.isclose(self.joints[name], self.targets[name], abs_tol=1e-6)
+            for name in self.joints
+        )

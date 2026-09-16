@@ -1,25 +1,9 @@
 import math
 import time
-from dataclasses import dataclass
 
 from vision_robot_arm.robot.backend import Clock
 from vision_robot_arm.robot.config import RobotConfig
-from vision_robot_arm.robot.targets import GRIPPER_OPEN, JOINT_NAMES, JointTargets
-
-
-@dataclass(frozen=True)
-class SimulatedArmState:
-    joints: dict[str, float]
-    targets: dict[str, float]
-    gripper: str
-    lift_mode: bool
-
-    @property
-    def settled(self) -> bool:
-        return all(
-            math.isclose(self.joints[name], self.targets[name], abs_tol=1e-6)
-            for name in self.joints
-        )
+from vision_robot_arm.robot.targets import GRIPPER_OPEN, JOINT_NAMES, ArmState, JointTargets
 
 
 class SimulationBackend:
@@ -35,8 +19,8 @@ class SimulationBackend:
         self._last_time: float | None = None
 
     @property
-    def state(self) -> SimulatedArmState:
-        return SimulatedArmState(
+    def state(self) -> ArmState:
+        return ArmState(
             joints=dict(self._joints),
             targets=dict(self._targets),
             gripper=self._gripper,
@@ -56,7 +40,7 @@ class SimulationBackend:
         self._last_time = now
         self.step(dt)
 
-    def step(self, dt: float) -> SimulatedArmState:
+    def step(self, dt: float) -> ArmState:
         max_delta = self._config.max_speed_deg_s * max(dt, 0.0)
         for joint, target in self._targets.items():
             current = self._joints[joint]
@@ -65,6 +49,9 @@ class SimulationBackend:
                 self._joints[joint] = target
             else:
                 self._joints[joint] = current + math.copysign(max_delta, delta)
+        return self.state
+
+    def arm_state(self) -> ArmState:
         return self.state
 
     def status_lines(self) -> list[str]:

@@ -1,10 +1,13 @@
 from typing import Any
 
 from vision_robot_arm.vision.landmarks import is_reliable
+from vision_robot_arm.vision.metrics import ANGLE_DEFINITIONS
 
 
 Point = tuple[int, int]
 Color = tuple[int, int, int]
+
+ARM_JOINT_LABELS = ("left_shoulder", "right_shoulder", "left_elbow", "right_elbow")
 
 
 def pixel_point(landmark: Any, width: int, height: int) -> Point:
@@ -70,6 +73,53 @@ def reliable_point(
     if not is_reliable(landmark, min_visibility):
         return None
     return pixel_point(landmark, width, height)
+
+
+def draw_joint_angle_labels(
+    cv2: Any,
+    frame: Any,
+    landmarks: list[Any],
+    indices: dict[str, int],
+    angles: dict[str, float | None],
+    min_visibility: float,
+    joints: tuple[str, ...] = ARM_JOINT_LABELS,
+) -> None:
+    height, width = frame.shape[:2]
+    for name in joints:
+        value = angles.get(name)
+        definition = ANGLE_DEFINITIONS.get(name)
+        if value is None or definition is None:
+            continue
+        point = reliable_point(landmarks, indices, definition[1], min_visibility, width, height)
+        if point is None:
+            continue
+        label = f"{joint_label(name)} {value:.0f}"
+        position = (point[0] + 10, point[1] - 10)
+        cv2.putText(
+            frame,
+            label,
+            position,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (0, 0, 0),
+            3,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            frame,
+            label,
+            position,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (0, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+
+
+def joint_label(name: str) -> str:
+    side, _, joint = name.partition("_")
+    return f"{side[:1].upper()} {joint}"
 
 
 def draw_stick_figure(

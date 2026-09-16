@@ -38,6 +38,12 @@ project with its extras instead:
 ## Run
 
 ```powershell
+.venv\Scripts\python main.py
+```
+
+Or, with the virtual environment activated (`.venv\Scripts\Activate.ps1`):
+
+```powershell
 python main.py
 ```
 
@@ -117,7 +123,8 @@ vision_robot_arm/
     mapping.py             # PoseState -> JointTargets
     serial_backend.py      # serial line protocol and pyserial backend
     simulation.py          # simulated arm backend
-    targets.py             # JointTargets value object
+    targets.py             # JointTargets and ArmState value objects
+    visualization.py       # robot arm panel drawn in test mode
 models/
   pose_landmarker_lite.task
 tests/
@@ -127,6 +134,8 @@ tests/
   test_robot_mapping.py
   test_robot_serial.py
   test_robot_simulation.py
+  test_robot_visualization.py
+  test_vision_drawing.py
   test_vision_metrics.py
   test_vision_smoothing.py
 ```
@@ -134,6 +143,26 @@ tests/
 Test files follow the `test_<area>_<topic>.py` convention so that each area
 owns its own tests. See `docs/ARCHITECTURE.md` for the data flow and import
 rules, and `docs/OWNERSHIP.md` for who owns which area and how we commit.
+
+## Test Mode
+
+Test mode is the quickest way to see what the robot side receives. It draws
+the current shoulder and elbow angles next to the joints on the camera image,
+prints the robot state to the console, and shows a panel in the bottom-right
+corner with a schematic two-link arm: the grey arm is the mapped target, the
+green arm is where the (simulated) robot currently is, the blue jaws show the
+gripper.
+
+```powershell
+python main.py --test-mode
+```
+
+Without an explicit `--robot-backend` the simulated robot is used. Combine it
+with any other backend to inspect what is being sent:
+
+```powershell
+python main.py --test-mode --robot-backend serial --robot-port COM3
+```
 
 ## Controls
 

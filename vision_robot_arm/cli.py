@@ -7,6 +7,7 @@ from vision_robot_arm.robot.config import (
     BACKEND_CHOICES,
     BACKEND_DEBUG,
     BACKEND_NONE,
+    BACKEND_SIM,
     JointLimit,
     RobotConfig,
 )
@@ -100,6 +101,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum pose tracking confidence. Default: 0.5.",
     )
 
+    parser.add_argument(
+        "--test-mode",
+        action="store_true",
+        help=(
+            "Show joint angles next to the arm joints and draw the robot arm panel on the "
+            "camera image. Uses the simulated robot when no --robot-backend is given."
+        ),
+    )
+
     robot = parser.add_argument_group("robot")
     robot.add_argument(
         "--robot-backend",
@@ -181,6 +191,8 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
     backend = args.robot_backend
     if args.robot_debug and backend == BACKEND_NONE:
         backend = BACKEND_DEBUG
+    if args.test_mode and backend == BACKEND_NONE:
+        backend = BACKEND_SIM
 
     robot = RobotConfig(
         backend=backend,
@@ -199,6 +211,7 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         video_path=args.video,
         loop_video=args.loop_video,
         robot=robot,
+        test_mode=args.test_mode,
         width=args.width,
         height=args.height,
         print_interval=args.print_interval,

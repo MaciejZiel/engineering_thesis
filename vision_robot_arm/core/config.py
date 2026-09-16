@@ -26,6 +26,7 @@ class AppConfig:
     video_path: Path | None = None
     loop_video: bool = False
     robot: RobotConfig = RobotConfig()
+    test_mode: bool = False
     num_poses: int = 1
     min_detection_confidence: float = 0.5
     min_pose_presence_confidence: float = 0.5

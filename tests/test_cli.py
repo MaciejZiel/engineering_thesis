@@ -54,6 +54,17 @@ class CliRobotOptionsTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             config.validate()
 
+    def test_test_mode_defaults_to_simulated_robot(self) -> None:
+        config = parse_args(["--test-mode"])
+
+        self.assertTrue(config.test_mode)
+        self.assertEqual(config.robot.backend, "sim")
+
+    def test_test_mode_keeps_explicit_backend(self) -> None:
+        config = parse_args(["--test-mode", "--robot-backend", "debug"])
+
+        self.assertEqual(config.robot.backend, "debug")
+
     def test_existing_flags_still_parse(self) -> None:
         config = parse_args(["--camera", "1", "--smoothing-alpha", "0.2", "--loop-video"])
 

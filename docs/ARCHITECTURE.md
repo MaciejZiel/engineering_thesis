@@ -86,6 +86,10 @@ PoseState -> RobotMapper -> JointTargets -> RobotBackend
 - The overlay hook: `draw_overlay(..., status_lines=...)` in
   `vision/drawing.py` appends whatever the active backend reports, so the
   robot side can show state on screen without touching drawing code.
+- Every backend also exposes `arm_state() -> ArmState | None` (current and
+  target joint angles, gripper, lift mode). `robot/visualization.py` draws it
+  as a two-link arm panel when `--test-mode` is on; `vision/drawing.py`
+  labels the body joints with their angles in the same mode.
 - `MappedRobotController` (`robot/controller.py`) glues a mapper to a backend
   and is what `app.py` talks to through the `RobotController` protocol.
 - `create_robot_controller(RobotConfig)` (`robot/factory.py`) chooses the

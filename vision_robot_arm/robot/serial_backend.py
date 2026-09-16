@@ -2,11 +2,12 @@ import importlib
 import time
 from typing import Any, Callable
 
-from vision_robot_arm.robot.backend import Clock
+from vision_robot_arm.robot.backend import Clock, TargetTracker
 from vision_robot_arm.robot.targets import (
     GRIPPER_CLOSE,
     JOINT_ELBOW,
     JOINT_SHOULDER,
+    ArmState,
     JointTargets,
 )
 
@@ -64,10 +65,12 @@ class SerialBackend:
         self._clock = clock
         self._next_send_at = 0.0
         self._last_frame: bytes | None = None
+        self._tracker = TargetTracker()
 
     def send(self, targets: JointTargets) -> None:
         if not targets.has_data:
             return
+        self._tracker.update(targets)
         now = self._clock()
         if now < self._next_send_at:
             return
@@ -76,6 +79,9 @@ class SerialBackend:
         self._connection.write(frame)
         self._last_frame = frame
         self._next_send_at = now + self._send_interval
+
+    def arm_state(self) -> ArmState | None:
+        return self._tracker.arm_state()
 
     def status_lines(self) -> list[str]:
         last = self._last_frame.decode("ascii").strip() if self._last_frame else "idle"
