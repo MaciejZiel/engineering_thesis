@@ -46,6 +46,13 @@ cli.py  -> core, robot/config.py, app
   vision and the robot side, so agree on it first.
 - `vision` never imports from `robot` and `robot` never imports from `vision`.
   The only thing they share is `PoseState`.
+- Dashboard typography and drawing primitives live in `vision/ui_style.py`.
+  Bundled Lato fonts are packaged with the application; Pillow rasterizes
+  cached glyph masks, and only text bounds are blended into the OpenCV canvas.
+  The robot renderer supplies a compact, text-free schematic in dashboard mode;
+  its detailed rendering API remains available. The dashboard owns panel labels,
+  backend selection labels, keyboard focus and on-demand diagnostics. It does
+  not infer hardware connectivity from a selected backend.
 - Third-party libraries (OpenCV, MediaPipe) are loaded once in
   `core/runtime.py` and passed into functions as arguments. Pure-logic modules
   therefore import and test without the heavy dependencies installed.

@@ -16,13 +16,13 @@ ARM_JOINT_LABELS = (
     "left_wrist",
     "right_wrist",
 )
-JOINT_LABEL_COLOR: Color = (0, 230, 255)
+JOINT_LABEL_COLOR: Color = (112, 169, 238)
 HUD_MARGIN = 12
 HINT_SCALE = 0.42
 HINT_LINE_HEIGHT = 16
 HINT_PADDING = 6
 HINT_COLOR: Color = (190, 190, 190)
-TRACKING_COLOR: Color = (0, 145, 255)
+TRACKING_COLOR: Color = (112, 169, 238)
 
 
 def pixel_point(landmark: Any, width: int, height: int) -> Point:
@@ -125,11 +125,11 @@ def draw_stick_figure(
     indices: dict[str, int],
     min_visibility: float,
 ) -> None:
-    arm_color = (0, 145, 255)
-    torso_color = (80, 255, 120)
-    hip_color = (255, 210, 60)
-    leg_color = (255, 120, 80)
-    head_color = (210, 210, 255)
+    arm_color = (112, 169, 238)
+    torso_color = (188, 183, 174)
+    hip_color = torso_color
+    leg_color = (155, 151, 144)
+    head_color = (207, 203, 196)
 
     height, width = frame.shape[:2]
 

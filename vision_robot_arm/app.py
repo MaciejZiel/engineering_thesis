@@ -19,7 +19,7 @@ from vision_robot_arm.vision.dashboard import (
 from vision_robot_arm.vision.drawing import (
     draw_joint_angle_labels,
     draw_stick_figure,
-    draw_tracking_frame,
+    landmark_visibility_ratio,
 )
 from vision_robot_arm.vision.hand_gestures import detect_hand_gestures
 from vision_robot_arm.vision.hand_tracker import HandTracker
@@ -97,7 +97,7 @@ def run_app(config: AppConfig) -> int:
         display_fps = 0.0
 
         print(_source_started_message(config))
-        print("Keys: 1 angles, 2 landmarks, 3 both, c calibrate, r record, f fullscreen, q/Esc quit.")
+        print("Keys: 1/2/3 console, c calibrate, r record, f fullscreen, d details, Tab/Enter navigate, q/Esc quit.")
         if config.test_mode:
             print(f"Test mode: joint angle labels and embedded robot simulation ({config.robot.backend}).")
 
@@ -154,9 +154,7 @@ def run_app(config: AppConfig) -> int:
                     indices,
                     config.visibility_threshold,
                 )
-                tracking_quality = draw_tracking_frame(
-                    cv2,
-                    frame,
+                tracking_quality = landmark_visibility_ratio(
                     display_landmarks,
                     config.visibility_threshold,
                 )
@@ -195,7 +193,11 @@ def run_app(config: AppConfig) -> int:
                 display_fps = instant_fps if display_fps == 0.0 else 0.9 * display_fps + 0.1 * instant_fps
             last_frame_at = now
 
-            draw_simulation(cv2, simulation_canvas, robot_controller.robot_state())
+            robot_state = robot_controller.robot_state()
+            draw_simulation(cv2, simulation_canvas, robot_state, compact=True)
+            can_calibrate = current_state is not None and any(
+                value is not None for value in current_state.angles.values()
+            )
             dashboard_frame = dashboard.render(
                 frame,
                 simulation_canvas,
@@ -209,11 +211,14 @@ def run_app(config: AppConfig) -> int:
                 tracking_quality=tracking_quality,
                 fps=display_fps,
                 source_label=_source_label(config),
+                robot_state_available=robot_state is not None,
+                can_calibrate=can_calibrate,
             )
             cv2.imshow(WINDOW_NAME, dashboard_frame)
 
             key = cv2.waitKey(wait_delay_ms) & 0xFF
             dashboard.sync_window_size()
+            dashboard.handle_key(key)
             action = dashboard.consume_action()
             if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
                 return 0
@@ -221,7 +226,7 @@ def run_app(config: AppConfig) -> int:
                 return 0
             if key == ord("f") or action == ACTION_FULLSCREEN:
                 dashboard.toggle_fullscreen()
-            if (key == ord("c") or action == ACTION_CALIBRATE) and current_state is not None:
+            if (key == ord("c") or action == ACTION_CALIBRATE) and can_calibrate:
                 count = state_builder.capture_calibration(current_state)
                 print(f"Calibration captured from {count} angles.")
             if key == ord("r") or action == ACTION_RECORD:

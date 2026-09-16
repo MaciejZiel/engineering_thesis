@@ -5,26 +5,28 @@ from typing import Any
 
 from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE
 from vision_robot_arm.core.display import preferred_dashboard_size, primary_work_area
-
-
-Color = tuple[int, int, int]
+from vision_robot_arm.vision.ui_style import (
+    ACCENT,
+    ACCENT_INK,
+    BACKGROUND,
+    BORDER,
+    DISABLED,
+    GREEN,
+    HOVER,
+    MUTED,
+    RED,
+    SURFACE,
+    SURFACE_RAISED,
+    TEXT,
+    Painter,
+)
 
 ACTION_CALIBRATE = "calibrate"
 ACTION_FULLSCREEN = "fullscreen"
 ACTION_MODE = "mode"
 ACTION_QUIT = "quit"
 ACTION_RECORD = "record"
-
-BACKGROUND: Color = (14, 18, 24)
-PANEL: Color = (23, 29, 37)
-PANEL_ALT: Color = (29, 37, 47)
-BORDER: Color = (55, 66, 78)
-ORANGE: Color = (0, 142, 255)
-ORANGE_SOFT: Color = (30, 178, 255)
-GREEN: Color = (80, 210, 130)
-RED: Color = (80, 90, 235)
-TEXT: Color = (238, 242, 247)
-MUTED: Color = (148, 160, 174)
+ACTION_DETAILS = "details"
 
 
 @dataclass(frozen=True)
@@ -54,15 +56,65 @@ class DashboardButton:
     rect: Rect
     active: bool = False
     danger: bool = False
+    enabled: bool = True
+    primary: bool = False
+
+
+@dataclass(frozen=True)
+class DashboardLayout:
+    scale: float
+    margin: int
+    header: int
+    camera: Rect
+    preview: Rect
+    status: Rect
+    footer: Rect
+
+
+def dashboard_layout(width: int, height: int) -> DashboardLayout:
+    """Allocate panels from one scale; width as well as height limits density."""
+    scale = max(0.65, min(width / 1440, height / 900, 2.0))
+    px = lambda value: round(value * scale)
+    margin, gap = px(24), px(20)
+    header, body_top, footer_height = px(64), px(152), px(100)
+    body_height = height - body_top - footer_height - margin
+    sidebar_width = min(px(400), max(px(340), round(width * 0.28)))
+    camera = Rect(
+        margin, body_top, width - margin * 2 - gap - sidebar_width, body_height
+    )
+    preview_height = max(px(190), round(body_height * 0.44))
+    preview = Rect(camera.right + gap, body_top, sidebar_width, preview_height)
+    status = Rect(
+        preview.x,
+        preview.bottom + gap,
+        sidebar_width,
+        body_height - preview_height - gap,
+    )
+    return DashboardLayout(
+        scale,
+        margin,
+        header,
+        camera,
+        preview,
+        status,
+        Rect(0, height - footer_height, width, footer_height),
+    )
 
 
 def fit_inside(source_size: tuple[int, int], target: Rect) -> Rect:
     source_width, source_height = source_size
-    if source_width <= 0 or source_height <= 0 or target.width <= 0 or target.height <= 0:
+    if (
+        source_width <= 0
+        or source_height <= 0
+        or target.width <= 0
+        or target.height <= 0
+    ):
         return Rect(target.x, target.y, 0, 0)
     scale = min(target.width / source_width, target.height / source_height)
-    width = max(1, round(source_width * scale))
-    height = max(1, round(source_height * scale))
+    width, height = (
+        max(1, round(source_width * scale)),
+        max(1, round(source_height * scale)),
+    )
     return Rect(
         target.x + (target.width - width) // 2,
         target.y + (target.height - height) // 2,
@@ -79,17 +131,31 @@ def cycle_output_mode(mode: str) -> str:
         return ANGLE_MODE
 
 
+def backend_label(backend: str) -> str:
+    # Backend selection does not prove a robot connection or hardware feedback.
+    return {
+        "sim": "Simulation",
+        "off": "Preview only",
+        "none": "Preview only",
+        "debug": "Debug output",
+        "ur": "URScript output",
+        "serial": "Serial output",
+    }.get(backend, backend.replace("_", " ").capitalize())
+
+
 class DashboardUi:
-    """Single-window OpenCV dashboard with a camera view and embedded robot preview."""
+    """A quiet camera-first workspace; diagnostics are available on demand."""
 
     def __init__(self, cv2: Any, np: Any, window_name: str) -> None:
-        self._cv2 = cv2
-        self._np = np
-        self.window_name = window_name
+        self._cv2, self._np, self.window_name = cv2, np, window_name
         self._buttons: tuple[DashboardButton, ...] = ()
         self._pending_action: str | None = None
         self._fullscreen = False
         self._canvas_size: tuple[int, int] | None = None
+        self._pointer = (-1, -1)
+        self._pressed: str | None = None
+        self._focus: str | None = None
+        self._details = False
 
     @property
     def fullscreen(self) -> bool:
@@ -100,35 +166,66 @@ class DashboardUi:
         return self._buttons
 
     def open(self) -> tuple[int, int]:
-        width, height = preferred_dashboard_size(primary_work_area())
+        size = preferred_dashboard_size(primary_work_area())
         flags = self._cv2.WINDOW_NORMAL | getattr(self._cv2, "WINDOW_FREERATIO", 0)
         self._cv2.namedWindow(self.window_name, flags)
-        self._cv2.resizeWindow(self.window_name, width, height)
+        self._cv2.resizeWindow(self.window_name, *size)
         self._cv2.setMouseCallback(self.window_name, self._on_mouse)
-        self._canvas_size = (width, height)
-        return self._canvas_size
+        self._canvas_size = size
+        return size
 
     def sync_window_size(self) -> tuple[int, int] | None:
-        """Match rendering pixels to the current OpenCV viewport after resizing."""
         cv_error = getattr(self._cv2, "error", Exception)
         try:
             _x, _y, width, height = self._cv2.getWindowImageRect(self.window_name)
         except (AttributeError, cv_error):
             return self._canvas_size
-        if width >= 960 and height >= 540:
+        if width >= 640 and height >= 480:
             self._canvas_size = (width, height)
         return self._canvas_size
 
     def consume_action(self) -> str | None:
-        action = self._pending_action
-        self._pending_action = None
+        action, self._pending_action = self._pending_action, None
         return action
 
     def toggle_fullscreen(self) -> bool:
         self._fullscreen = not self._fullscreen
-        value = self._cv2.WINDOW_FULLSCREEN if self._fullscreen else self._cv2.WINDOW_NORMAL
-        self._cv2.setWindowProperty(self.window_name, self._cv2.WND_PROP_FULLSCREEN, value)
+        value = (
+            self._cv2.WINDOW_FULLSCREEN if self._fullscreen else self._cv2.WINDOW_NORMAL
+        )
+        self._cv2.setWindowProperty(
+            self.window_name, self._cv2.WND_PROP_FULLSCREEN, value
+        )
         return self._fullscreen
+
+    def handle_key(self, key: int) -> None:
+        enabled = [button.action for button in self._buttons if button.enabled]
+        if key == 9 and enabled:
+            current = enabled.index(self._focus) if self._focus in enabled else -1
+            self._focus = enabled[(current + 1) % len(enabled)]
+        elif key in (10, 13, 32) and self._focus in enabled:
+            self._activate(self._focus)
+        elif key == ord("d"):
+            self._activate(ACTION_DETAILS)
+
+    def _activate(self, action: str) -> None:
+        if action == ACTION_DETAILS:
+            self._details = not self._details
+        else:
+            self._pending_action = action
+
+    def _on_mouse(self, event: int, x: int, y: int, _flags: int, _param: Any) -> None:
+        self._pointer = (x, y)
+        hit = next(
+            (b for b in self._buttons if b.enabled and b.rect.contains(x, y)), None
+        )
+        if event == self._cv2.EVENT_LBUTTONDOWN:
+            self._pressed = hit.action if hit else None
+            self._focus = self._pressed
+        elif event == self._cv2.EVENT_LBUTTONUP:
+            if hit and hit.action == self._pressed:
+                self._activate(hit.action)
+            self._pressed = None
 
     def render(
         self,
@@ -145,328 +242,448 @@ class DashboardUi:
         tracking_quality: float,
         fps: float,
         source_label: str,
+        robot_state_available: bool = True,
+        can_calibrate: bool | None = None,
     ) -> Any:
         camera_height, camera_width = camera_frame.shape[:2]
         width, height = self._canvas_size or (
             max(1280, camera_width),
             max(720, camera_height),
         )
-
+        layout = dashboard_layout(width, height)
         canvas = self._np.full((height, width, 3), BACKGROUND, dtype=self._np.uint8)
-        scale = height / 1080.0
-        margin = max(10, round(20 * scale))
-        gap = max(8, round(16 * scale))
-        header_height = max(58, round(84 * scale))
-        footer_height = max(74, round(108 * scale))
-        body_top = header_height
-        body_height = height - header_height - footer_height
-        sidebar_width = max(360, round(width * 0.31))
-        camera_width_area = width - sidebar_width - 3 * margin
-
-        self._draw_header(
-            canvas,
-            source_label=source_label,
-            fps=fps,
-            person_detected=person_detected,
-            robot_label=robot_label,
-            scale=scale,
+        p = Painter(self._cv2, self._np, canvas, layout.scale)
+        self._buttons = ()
+        self._header(p, layout, robot_label)
+        x, top = layout.margin, layout.header + p.px(22)
+        p.text("Motion workspace", x, top, size=28, strong=True)
+        subtitle = (
+            "Live movement, one workspace."
+            if person_detected
+            else "Step into view with your shoulders and hands visible."
         )
-
-        camera_panel = Rect(margin, body_top, camera_width_area, body_height - margin)
-        sidebar = Rect(camera_panel.right + gap, body_top, sidebar_width, body_height - margin)
-        self._panel(canvas, camera_panel)
-        self._text(
-            canvas,
-            "LIVE CAMERA",
-            (camera_panel.x + margin, camera_panel.y + round(31 * scale)),
-            ORANGE_SOFT,
-            0.54,
-            2,
+        p.text(subtitle, x, top + p.px(36), color=MUTED, size=14, width=width - 2 * x)
+        if recording:
+            p.dot(width - x - p.px(125), top + p.px(12), RED)
+            p.text(
+                "Recording session",
+                width - x,
+                top + p.px(6),
+                color=RED,
+                align="right",
+                size=13,
+            )
+        self._camera(p, layout.camera, camera_frame, source_label, fps, person_detected)
+        self._preview(
+            p, layout.preview, simulation_frame, robot_label, robot_state_available
         )
-        self._text(
-            canvas,
-            "MediaPipe pose + hand tracking",
-            (camera_panel.right - round(292 * scale), camera_panel.y + round(31 * scale)),
-            MUTED,
-            0.42,
+        self._status(
+            p,
+            layout.status,
+            person_detected,
+            calibrated,
+            gestures,
+            tracking_quality,
+            status_lines,
+            recording,
         )
-        camera_target = Rect(
-            camera_panel.x + 2,
-            camera_panel.y + max(38, round(48 * scale)),
-            camera_panel.width - 4,
-            camera_panel.height - max(40, round(50 * scale)),
+        calibration_ready = (
+            person_detected
+            if can_calibrate is None
+            else person_detected and can_calibrate
         )
-        self._place_image(canvas, camera_frame, camera_target)
-        self._corner_accents(canvas, camera_panel, scale)
-
-        sim_height = max(260, round(sidebar.height * 0.50))
-        simulation_panel = Rect(sidebar.x, sidebar.y, sidebar.width, sim_height)
-        status_panel = Rect(
-            sidebar.x,
-            simulation_panel.bottom + gap,
-            sidebar.width,
-            sidebar.height - sim_height - gap,
-        )
-        self._draw_simulation_panel(canvas, simulation_frame, simulation_panel, scale)
-        self._draw_status_panel(
-            canvas,
-            status_panel,
-            person_detected=person_detected,
-            calibrated=calibrated,
-            recording=recording,
-            robot_label=robot_label,
-            gestures=gestures,
-            status_lines=status_lines,
-            tracking_quality=tracking_quality,
-            scale=scale,
-        )
-        self._draw_footer(canvas, mode, recording, height - footer_height, scale)
+        self._footer(p, layout, mode, recording, calibration_ready, calibrated)
         return canvas
 
-    def _on_mouse(self, event: int, x: int, y: int, _flags: int, _param: Any) -> None:
-        if event != self._cv2.EVENT_LBUTTONUP:
-            return
-        for button in self._buttons:
-            if button.rect.contains(x, y):
-                self._pending_action = button.action
-                return
+    def _header(self, p: Painter, layout: DashboardLayout, robot: str) -> None:
+        x, y = layout.margin, p.px(20)
+        p.box(Rect(x, y - p.px(3), p.px(30), p.px(30)), ACCENT, radius=8, border=None)
+        p.line((x + p.px(7), y + p.px(17)), (x + p.px(13), y + p.px(6)), ACCENT_INK, 2)
+        p.line((x + p.px(13), y + p.px(6)), (x + p.px(22), y + p.px(14)), ACCENT_INK, 2)
+        p.dot(x + p.px(22), y + p.px(14), ACCENT_INK, 2)
+        p.text("Motion Twin", x + p.px(42), y + p.px(3), size=20, strong=True)
+        p.line((x + p.px(180), y), (x + p.px(180), y + p.px(22)))
+        p.text("Dual UR7e workspace", x + p.px(198), y + p.px(6), size=13, color=MUTED)
+        label = backend_label(robot)
+        badge_width = p.measure(label, 13) + p.px(38)
+        right = p.canvas.shape[1] - layout.margin
+        badge = Rect(right - badge_width, y - p.px(1), badge_width, p.px(27))
+        p.box(badge, SURFACE_RAISED, radius=7)
+        p.dot(
+            badge.x + p.px(13),
+            badge.y + badge.height // 2,
+            ACCENT if robot == "sim" else MUTED,
+            3,
+        )
+        p.text(label, badge.x + p.px(25), badge.y + p.px(7), size=13)
+        p.line((layout.margin, layout.header), (right, layout.header))
 
-    def _draw_header(
+    def _camera(
         self,
-        canvas: Any,
-        *,
-        source_label: str,
+        p: Painter,
+        rect: Rect,
+        camera: Any,
+        source: str,
         fps: float,
-        person_detected: bool,
-        robot_label: str,
-        scale: float,
+        detected: bool,
     ) -> None:
-        _, width = canvas.shape[:2]
-        title_y = max(34, round(48 * scale))
-        self._text(canvas, "MOTION TWIN", (round(22 * scale), title_y), TEXT, 0.86, 2)
-        self._text(
-            canvas,
-            "DUAL UR7e  /  ORBBEC GEMINI 335Lg  /  JETSON ORIN AGX",
-            (round(235 * scale), title_y),
-            MUTED,
-            0.45,
+        p.box(rect)
+        pad = p.px(20)
+        p.text("Camera", rect.x + pad, rect.y + p.px(19), size=16, strong=True)
+        state = "Pose detected" if detected else "Waiting for pose"
+        label_width = p.measure(state, 12)
+        p.dot(
+            rect.right - pad - label_width - p.px(10),
+            rect.y + p.px(27),
+            GREEN if detected else MUTED,
         )
-        badges = (
-            (f"CAMERA  {source_label}", True),
-            ("PERSON  TRACKED" if person_detected else "PERSON  SEARCHING", person_detected),
-            (f"ROBOT  {robot_label.upper()}", robot_label != "off"),
-            (f"{fps:4.1f} FPS", fps >= 15.0),
-        )
-        x = width - round(18 * scale)
-        for label, active in reversed(badges):
-            badge_width = max(round(102 * scale), round((len(label) * 8 + 24) * scale))
-            x -= badge_width
-            self._badge(canvas, label, Rect(x, round(17 * scale), badge_width, round(40 * scale)), active)
-            x -= round(8 * scale)
-        divider_y = round(72 * scale)
-        self._cv2.line(canvas, (0, divider_y), (width, divider_y), BORDER, 1, self._cv2.LINE_AA)
-
-    def _draw_simulation_panel(self, canvas: Any, simulation: Any, panel: Rect, scale: float) -> None:
-        self._panel(canvas, panel)
-        self._text(
-            canvas,
-            "ROBOT DIGITAL TWIN",
-            (panel.x + round(14 * scale), panel.y + round(28 * scale)),
-            ORANGE_SOFT,
-            0.5,
-            2,
+        p.text(
+            state,
+            rect.right - pad,
+            rect.y + p.px(21),
+            size=12,
+            color=GREEN if detected else MUTED,
+            align="right",
         )
         target = Rect(
-            panel.x + 2,
-            panel.y + max(35, round(42 * scale)),
-            panel.width - 4,
-            panel.height - max(37, round(44 * scale)),
+            rect.x + 1, rect.y + p.px(55), rect.width - 2, rect.height - p.px(94)
         )
-        self._place_image(canvas, simulation, target)
-
-    def _draw_status_panel(
-        self,
-        canvas: Any,
-        panel: Rect,
-        *,
-        person_detected: bool,
-        calibrated: bool,
-        recording: bool,
-        robot_label: str,
-        gestures: tuple[str, ...],
-        status_lines: tuple[str, ...],
-        tracking_quality: float,
-        scale: float,
-    ) -> None:
-        self._panel(canvas, panel, PANEL_ALT)
-        x = panel.x + round(16 * scale)
-        y = panel.y + round(29 * scale)
-        line = max(25, round(31 * scale))
-        self._text(canvas, "SYSTEM STATUS", (x, y), TEXT, 0.52, 2)
-        y += line
-        rows = (
-            (
-                "VISION",
-                f"TRACKING {tracking_quality:.0%}" if person_detected else "NO PERSON",
-                person_detected,
-            ),
-            ("CALIBRATION", "READY" if calibrated else "PENDING", calibrated),
-            ("RECORDING", "ACTIVE" if recording else "IDLE", recording),
-            ("ROBOT LINK", robot_label.upper(), robot_label != "off"),
-        )
-        for name, value, active in rows:
-            self._status_row(canvas, name, value, (x, y), active, scale)
-            y += line
-
-        if gestures and y < panel.bottom - line:
-            self._text(canvas, "GESTURES", (x, y), MUTED, 0.4)
-            y += line
-            gesture_text = "  /  ".join(gesture.replace("_", " ").upper() for gesture in gestures[:3])
-            self._text(canvas, gesture_text, (x, y), ORANGE_SOFT, 0.4, 1)
-            y += line
-
-        for status in status_lines[:2]:
-            if y >= panel.bottom - round(12 * scale):
-                break
-            self._text(canvas, status[:58], (x, y), MUTED, 0.36)
-            y += line
-
-    def _draw_footer(self, canvas: Any, mode: str, recording: bool, top: int, scale: float) -> None:
-        height, width = canvas.shape[:2]
-        self._cv2.rectangle(canvas, (0, top), (width, height), PANEL, -1)
-        self._cv2.line(canvas, (0, top), (width, top), BORDER, 1, self._cv2.LINE_AA)
-        margin = max(10, round(20 * scale))
-        gap = max(7, round(10 * scale))
-        button_height = max(48, round(62 * scale))
-        button_top = top + (height - top - button_height) // 2
-        labels = (
-            (ACTION_MODE, f"OUTPUT: {mode.upper()}", "1/2/3", False, False),
-            (ACTION_CALIBRATE, "CALIBRATE", "C", False, False),
-            (ACTION_RECORD, "STOP RECORDING" if recording else "START RECORDING", "R", recording, False),
-            (ACTION_FULLSCREEN, "FULLSCREEN", "F", self._fullscreen, False),
-            (ACTION_QUIT, "QUIT", "Q / ESC", False, True),
-        )
-        available = width - 2 * margin - gap * (len(labels) - 1)
-        button_width = available // len(labels)
-        buttons: list[DashboardButton] = []
-        for index, (action, label, shortcut, active, danger) in enumerate(labels):
-            rect = Rect(margin + index * (button_width + gap), button_top, button_width, button_height)
-            button = DashboardButton(action, label, shortcut, rect, active, danger)
-            buttons.append(button)
-            self._button(canvas, button, scale)
-        self._buttons = tuple(buttons)
-
-    def _panel(self, canvas: Any, rect: Rect, color: Color = PANEL) -> None:
-        self._cv2.rectangle(canvas, (rect.x, rect.y), (rect.right, rect.bottom), color, -1)
-        self._cv2.rectangle(canvas, (rect.x, rect.y), (rect.right, rect.bottom), BORDER, 1, self._cv2.LINE_AA)
-
-    def _badge(self, canvas: Any, label: str, rect: Rect, active: bool) -> None:
-        color = GREEN if active else MUTED
-        self._cv2.rectangle(canvas, (rect.x, rect.y), (rect.right, rect.bottom), PANEL_ALT, -1)
-        self._cv2.rectangle(canvas, (rect.x, rect.y), (rect.right, rect.bottom), BORDER, 1, self._cv2.LINE_AA)
-        center_y = rect.y + rect.height // 2
-        self._cv2.circle(canvas, (rect.x + 13, center_y), 4, color, -1, self._cv2.LINE_AA)
-        self._text(canvas, label, (rect.x + 24, center_y + 5), TEXT, 0.38)
-
-    def _status_row(
-        self,
-        canvas: Any,
-        name: str,
-        value: str,
-        origin: tuple[int, int],
-        active: bool,
-        scale: float,
-    ) -> None:
-        x, y = origin
-        self._cv2.circle(
-            canvas,
-            (x + round(4 * scale), y - round(4 * scale)),
-            max(2, round(4 * scale)),
-            GREEN if active else MUTED,
+        self._cv2.rectangle(
+            p.canvas,
+            (target.x, target.y),
+            (target.right - 1, target.bottom - 1),
+            (16, 15, 14),
             -1,
-            self._cv2.LINE_AA,
         )
-        self._text(canvas, name, (x + round(16 * scale), y), MUTED, 0.39)
-        self._text(canvas, value, (x + round(150 * scale), y), TEXT if active else MUTED, 0.39, 1)
+        self._place_image(p.canvas, camera, target)
+        if not detected:
+            label = "Waiting for a person"
+            w = p.measure(label, 13) + p.px(28)
+            notice = Rect(
+                target.x + (target.width - w) // 2, target.y + p.px(16), w, p.px(32)
+            )
+            p.box(notice, SURFACE, radius=8)
+            p.text(label, notice.x + p.px(14), notice.y + p.px(9), size=13, color=MUTED)
+        bottom = rect.bottom - p.px(25)
+        h, w = camera.shape[:2]
+        metrics = f"{w} × {h}   ·   {max(0, fps):.0f} fps"
+        p.text(
+            source,
+            rect.x + pad,
+            bottom,
+            size=12,
+            color=MUTED,
+            width=max(0, rect.width - 2 * pad - p.measure(metrics, 12) - p.px(16)),
+        )
+        p.text(metrics, rect.right - pad, bottom, size=12, color=MUTED, align="right")
 
-    def _button(self, canvas: Any, button: DashboardButton, scale: float) -> None:
-        fill = (49, 57, 67)
-        border = BORDER
-        if button.active:
-            fill, border = (0, 88, 155), ORANGE
-        if button.danger:
-            fill, border = (52, 38, 43), RED
+    def _preview(
+        self, p: Painter, rect: Rect, simulation: Any, robot: str, available: bool
+    ) -> None:
+        p.box(rect)
+        pad = p.px(20)
+        p.text("Arm preview", rect.x + pad, rect.y + p.px(19), size=16, strong=True)
+        p.text(
+            "2 × UR7e",
+            rect.right - pad,
+            rect.y + p.px(22),
+            size=12,
+            color=MUTED,
+            align="right",
+        )
+        p.text(
+            "Left arm",
+            rect.x + rect.width // 4,
+            rect.y + p.px(58),
+            size=12,
+            color=MUTED,
+            align="center",
+        )
+        p.text(
+            "Right arm",
+            rect.x + 3 * rect.width // 4,
+            rect.y + p.px(58),
+            size=12,
+            color=MUTED,
+            align="center",
+        )
+        target = Rect(
+            rect.x + pad,
+            rect.y + p.px(82),
+            rect.width - 2 * pad,
+            rect.height - p.px(127),
+        )
+        if available and robot not in ("off", "none"):
+            self._place_image(p.canvas, simulation, target)
+        else:
+            p.text(
+                "No arm data",
+                rect.x + rect.width // 2,
+                target.y + target.height // 2 - p.px(6),
+                color=DISABLED,
+                size=13,
+                align="center",
+            )
+        y = rect.bottom - p.px(25)
+        label = "Simulated" if robot == "sim" else "Commanded"
+        p.line(
+            (rect.x + pad, y + p.px(5)),
+            (rect.x + pad + p.px(14), y + p.px(5)),
+            ACCENT,
+            2,
+        )
+        p.text(label, rect.x + pad + p.px(22), y, size=11, color=MUTED)
+        x = rect.x + pad + p.px(22) + p.measure(label, 11) + p.px(20)
+        p.line((x, y + p.px(5)), (x + p.px(14), y + p.px(5)), DISABLED, 2)
+        p.text("Target", x + p.px(22), y, size=11, color=MUTED)
+
+    def _status(
+        self,
+        p: Painter,
+        rect: Rect,
+        detected: bool,
+        calibrated: bool,
+        gestures: tuple,
+        quality: float,
+        lines: tuple,
+        recording: bool,
+    ) -> None:
+        p.box(rect)
+        pad = p.px(20)
+        x, right, y = rect.x + pad, rect.right - pad, rect.y + p.px(20)
+        p.text("Session", x, y, size=16, strong=True)
+        button = DashboardButton(
+            ACTION_DETAILS,
+            "Back" if self._details else "Details",
+            "D",
+            Rect(right - p.px(77), y - p.px(7), p.px(82), p.px(28)),
+            active=self._details,
+        )
+        self._buttons += (button,)
+        self._button(p, button, compact=True)
+        y += p.px(43)
+        if self._details:
+            p.text("Backend diagnostics", x, y, size=12, color=MUTED)
+            y += p.px(26)
+            for message in lines or ("No backend messages.",):
+                for line in p.wrap(message, right - x):
+                    if y + p.px(14) > rect.bottom - pad:
+                        return
+                    p.text(line, x, y, size=12, color=TEXT, width=right - x)
+                    y += p.px(21)
+                y += p.px(8)
+            return
+        p.text("Landmarks visible", x, y, size=13, color=MUTED)
+        value = f"{max(0, min(1, quality)):.0%}" if detected else "—"
+        p.text(
+            value, right, y, size=13, align="right", color=TEXT if detected else MUTED
+        )
+        y += p.px(25)
+        bar = Rect(x, y, right - x, p.px(4))
+        p.box(bar, SURFACE_RAISED, radius=2, border=None)
+        if detected and quality > 0:
+            p.box(
+                Rect(x, y, max(1, round(bar.width * min(1, quality))), bar.height),
+                GREEN,
+                radius=2,
+                border=None,
+            )
+        y += p.px(25)
+        p.text("Calibration", x, y, size=13, color=MUTED)
+        p.text(
+            "Calibrated" if calibrated else "Not set",
+            right,
+            y,
+            size=13,
+            color=GREEN if calibrated else MUTED,
+            align="right",
+        )
+        y += p.px(30)
+        p.text("Recording", x, y, size=13, color=MUTED)
+        p.text(
+            "In progress" if recording else "Idle",
+            right,
+            y,
+            size=13,
+            color=RED if recording else MUTED,
+            align="right",
+        )
+        y += p.px(32)
+        if y + p.px(40) <= rect.bottom - pad:
+            p.line((x, y), (right, y))
+            y += p.px(19)
+            p.text("Gestures", x, y, size=12, color=MUTED)
+            y += p.px(25)
+            labels = tuple(g.replace("_", " ").capitalize() for g in gestures) or (
+                "No gesture detected",
+            )
+            for label in labels:
+                if y + p.px(14) > rect.bottom - pad:
+                    break
+                p.text(
+                    label,
+                    x,
+                    y,
+                    size=13,
+                    color=TEXT if gestures else DISABLED,
+                    width=right - x,
+                )
+                y += p.px(23)
+
+    def _footer(
+        self,
+        p: Painter,
+        layout: DashboardLayout,
+        mode: str,
+        recording: bool,
+        detected: bool,
+        calibrated: bool,
+    ) -> None:
+        rect, pad = layout.footer, layout.margin
+        p.line((pad, rect.y), (rect.right - pad, rect.y))
+        hint = (
+            "Ready to calibrate your neutral pose."
+            if detected and not calibrated
+            else "Session controls"
+        )
+        if not detected:
+            hint = "Show your shoulders and arms to enable calibration."
+        nav_hint = "Tab to navigate · Enter to select"
+        hint_width = rect.width - 2 * pad - p.measure(nav_hint, 11) - p.px(24)
+        p.text(hint, pad, rect.y + p.px(14), size=12, color=MUTED, width=hint_width)
+        p.text(
+            nav_hint,
+            rect.right - pad,
+            rect.y + p.px(14),
+            size=11,
+            color=DISABLED,
+            align="right",
+        )
+        top, height, gap = rect.y + p.px(39), p.px(43), p.px(10)
+        definitions = (
+            (
+                ACTION_CALIBRATE,
+                "Recalibrate" if calibrated else "Calibrate",
+                "C",
+                162,
+                False,
+                detected,
+                True,
+            ),
+            (
+                ACTION_RECORD,
+                "Stop recording" if recording else "Record session",
+                "R",
+                180,
+                recording,
+                True,
+                False,
+            ),
+            (ACTION_MODE, f"Console: {mode}", "1–3", 178, False, True, False),
+            (
+                ACTION_FULLSCREEN,
+                "Exit full screen" if self._fullscreen else "Full screen",
+                "F",
+                160,
+                self._fullscreen,
+                True,
+                False,
+            ),
+            (ACTION_QUIT, "Quit", "Esc", 90, False, True, False),
+        )
+        widths = [p.px(d[3]) for d in definitions]
+        x = pad
+        for i, (action, label, shortcut, _, active, enabled, primary) in enumerate(
+            definitions
+        ):
+            if i == 2:
+                x = max(x, rect.right - pad - sum(widths[2:]) - gap * 2)
+            button = DashboardButton(
+                action,
+                label,
+                shortcut,
+                Rect(x, top, widths[i], height),
+                active=active,
+                enabled=enabled,
+                primary=primary,
+            )
+            self._buttons += (button,)
+            self._button(p, button)
+            x += widths[i] + gap
+
+    def _button(
+        self, p: Painter, button: DashboardButton, compact: bool = False
+    ) -> None:
         rect = button.rect
-        self._cv2.rectangle(canvas, (rect.x, rect.y), (rect.right, rect.bottom), fill, -1)
-        self._cv2.rectangle(canvas, (rect.x, rect.y), (rect.right, rect.bottom), border, 1, self._cv2.LINE_AA)
-        self._text(
-            canvas,
+        hover = button.enabled and rect.contains(*self._pointer)
+        pressed = hover and self._pressed == button.action
+        fill, ink, border = SURFACE, TEXT, BORDER
+        if button.action in (
+            ACTION_MODE,
+            ACTION_FULLSCREEN,
+            ACTION_QUIT,
+            ACTION_DETAILS,
+        ):
+            fill, border = BACKGROUND if not compact else SURFACE, None
+        if hover:
+            fill = HOVER
+        if button.primary and button.enabled:
+            fill, ink, border = ACCENT, ACCENT_INK, None
+            if hover:
+                fill = (130, 186, 251)
+        if button.active:
+            fill, ink = (
+                SURFACE_RAISED,
+                RED if button.action == ACTION_RECORD else ACCENT,
+            )
+        if not button.enabled:
+            ink, fill = DISABLED, SURFACE
+        if pressed or (self._focus == button.action and button.enabled):
+            border = ACCENT
+        p.box(rect, fill, radius=8, border=border)
+        size = 12 if compact else 14
+        padding = p.px(10 if compact else 14)
+        shortcut_width = p.measure(button.shortcut, 10) + p.px(10)
+        show_shortcut = (
+            not compact
+            and rect.width
+            > p.measure(button.label, size) + shortcut_width + 3 * padding
+        )
+        room = (
+            rect.width
+            - 2 * padding
+            - (shortcut_width + p.px(6) if show_shortcut else 0)
+        )
+        p.text(
             button.label,
-            (rect.x + round(14 * scale), rect.y + round(27 * scale)),
-            TEXT,
-            0.43,
-            1,
+            rect.x + padding,
+            rect.y + (rect.height - p.px(size)) // 2,
+            size=size,
+            color=ink,
+            strong=button.primary,
+            width=room,
         )
-        self._text(
-            canvas,
-            button.shortcut,
-            (rect.x + round(14 * scale), rect.bottom - round(9 * scale)),
-            MUTED,
-            0.31,
-        )
+        if show_shortcut:
+            p.text(
+                button.shortcut,
+                rect.right - padding,
+                rect.y + (rect.height - p.px(10)) // 2,
+                size=10,
+                color=ink if button.primary else MUTED,
+                align="right",
+            )
 
     def _place_image(self, canvas: Any, image: Any, target: Rect) -> None:
         source_height, source_width = image.shape[:2]
         fitted = fit_inside((source_width, source_height), target)
         if fitted.width <= 0 or fitted.height <= 0:
             return
-        shrinking = fitted.width <= source_width and fitted.height <= source_height
         interpolation = (
             self._cv2.INTER_AREA
-            if shrinking
-            else getattr(self._cv2, "INTER_LANCZOS4", self._cv2.INTER_CUBIC)
+            if fitted.width <= source_width
+            else self._cv2.INTER_LINEAR
         )
         resized = self._cv2.resize(
-            image,
-            (fitted.width, fitted.height),
-            interpolation=interpolation,
+            image, (fitted.width, fitted.height), interpolation=interpolation
         )
-        canvas[fitted.y:fitted.bottom, fitted.x:fitted.right] = resized
-
-    def _corner_accents(self, canvas: Any, rect: Rect, scale: float) -> None:
-        length = max(12, round(25 * scale))
-        thick = max(1, round(3 * scale))
-        corners = (
-            ((rect.x, rect.y), (rect.x + length, rect.y), (rect.x, rect.y + length)),
-            ((rect.right, rect.y), (rect.right - length, rect.y), (rect.right, rect.y + length)),
-            ((rect.x, rect.bottom), (rect.x + length, rect.bottom), (rect.x, rect.bottom - length)),
-            (
-                (rect.right, rect.bottom),
-                (rect.right - length, rect.bottom),
-                (rect.right, rect.bottom - length),
-            ),
-        )
-        for corner, horizontal, vertical in corners:
-            self._cv2.line(canvas, corner, horizontal, ORANGE, thick, self._cv2.LINE_AA)
-            self._cv2.line(canvas, corner, vertical, ORANGE, thick, self._cv2.LINE_AA)
-
-    def _text(
-        self,
-        canvas: Any,
-        text: str,
-        origin: tuple[int, int],
-        color: Color,
-        scale: float,
-        thickness: int = 1,
-    ) -> None:
-        factor = canvas.shape[0] / 1080.0
-        self._cv2.putText(
-            canvas,
-            text,
-            origin,
-            self._cv2.FONT_HERSHEY_SIMPLEX,
-            max(0.28, scale * factor),
-            color,
-            thickness,
-            self._cv2.LINE_AA,
-        )
+        canvas[fitted.y : fitted.bottom, fitted.x : fitted.right] = resized
