@@ -92,7 +92,7 @@ def dashboard_layout(width: int, height: int) -> DashboardLayout:
     camera = Rect(
         margin, body_top, width - margin * 2 - gap - sidebar_width, body_height
     )
-    preview_height = max(px(190), round(body_height * 0.44))
+    preview_height = max(px(190), round(body_height * 0.56))
     preview = Rect(camera.right + gap, body_top, sidebar_width, preview_height)
     status = Rect(
         preview.x,
