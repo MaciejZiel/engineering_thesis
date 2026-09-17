@@ -458,8 +458,9 @@ What happens on start-up, in order:
 1. **Readiness check** on the dashboard server (`--robot-dashboard-port`,
    default `29999`). Local control, a robot mode other than `RUNNING` or a
    safety stop end the run with a message naming the problem instead of a
-   silently motionless arm. Skip it with `--no-robot-preflight`; an
-   unreachable dashboard is not treated as an error.
+   silently motionless arm. An unreachable dashboard also ends the run:
+   motion is only authorized with an explicitly verified dashboard answer,
+   so skip the whole check with `--no-robot-preflight` if you accept that.
 2. **Homing**: one `movej` to the UR home pose `[0, -90, 0, -90, 0, 0]` at
    `--robot-start-speed` (default `30` deg/s) and `--robot-start-accel`
    (default `60` deg/s²). No `servoj` is sent for `--robot-start-seconds`
