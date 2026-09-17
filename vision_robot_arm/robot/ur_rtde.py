@@ -12,11 +12,22 @@ from typing import Any, Callable
 RTDE_PORT = 30004
 PROTOCOL_VERSION = 2
 DEFAULT_FREQUENCY_HZ = 125.0
-DEFAULT_VARIABLES = ("actual_q", "robot_mode", "safety_status")
+DEFAULT_VARIABLES = (
+    "actual_q",
+    "actual_qd",
+    "actual_TCP_pose",
+    "actual_TCP_speed",
+    "robot_mode",
+    "safety_status",
+    "speed_scaling",
+    "target_speed_fraction",
+    "runtime_state",
+)
 HANDSHAKE_TIMEOUT_S = 2.0
 HEADER = struct.Struct(">HB")
 
 REQUEST_PROTOCOL_VERSION = 86
+GET_URCONTROL_VERSION = 118
 TEXT_MESSAGE = 77
 CONTROL_PACKAGE_SETUP_OUTPUTS = 79
 CONTROL_PACKAGE_START = 83
@@ -108,6 +119,7 @@ class RtdeClient:
         self._recipe: tuple[tuple[str, str], ...] = ()
         self._buffer = b""
         self.last_error: str | None = None
+        self.controller_version: tuple[int, int, int, int] | None = None
 
     @property
     def connected(self) -> bool:
@@ -168,6 +180,13 @@ class RtdeClient:
         )
         if not version or version[0] != 1:
             raise RtdeError(f"controller rejected RTDE protocol version {PROTOCOL_VERSION}")
+
+        version_payload = self._exchange(
+            GET_URCONTROL_VERSION, b"", GET_URCONTROL_VERSION
+        )
+        if len(version_payload) != 16:
+            raise RtdeError("controller returned an invalid software version")
+        self.controller_version = struct.unpack(">4I", version_payload)
 
         payload = struct.pack(">d", self._frequency_hz) + ",".join(self._variables).encode("utf-8")
         reply = self._exchange(CONTROL_PACKAGE_SETUP_OUTPUTS, payload, CONTROL_PACKAGE_SETUP_OUTPUTS)

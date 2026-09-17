@@ -5,6 +5,7 @@ from vision_robot_arm.robot.ur_rtde import (
     CONTROL_PACKAGE_SETUP_OUTPUTS,
     CONTROL_PACKAGE_START,
     DATA_PACKAGE,
+    GET_URCONTROL_VERSION,
     REQUEST_PROTOCOL_VERSION,
     TEXT_MESSAGE,
     RtdeClient,
@@ -55,6 +56,7 @@ def client_with(replies: list[bytes], variables: tuple[str, ...] = VARIABLES) ->
 def handshake_replies(types: bytes = TYPES) -> list[bytes]:
     return [
         encode_packet(REQUEST_PROTOCOL_VERSION, b"\x01"),
+        encode_packet(GET_URCONTROL_VERSION, struct.pack(">4I", 5, 22, 1, 42)),
         encode_packet(CONTROL_PACKAGE_SETUP_OUTPUTS, b"\x01" + types),
         encode_packet(CONTROL_PACKAGE_START, b"\x01"),
     ]
@@ -115,7 +117,8 @@ class HandshakeTests(unittest.TestCase):
 
         self.assertTrue(client.connect())
         self.assertTrue(client.connected)
-        self.assertIn(b"actual_q,robot_mode,safety_status", socket.sent[1])
+        self.assertIn(b"actual_q,robot_mode,safety_status", socket.sent[2])
+        self.assertEqual(client.controller_version, (5, 22, 1, 42))
         self.assertEqual(socket.timeouts[-1], 0.0)
 
     def test_missing_variable_fails_with_a_reason(self) -> None:
@@ -146,6 +149,17 @@ class HandshakeTests(unittest.TestCase):
 
         self.assertFalse(client.connect())
         self.assertIn("refused", client.last_error)
+
+    def test_invalid_controller_version_is_rejected(self) -> None:
+        client, _ = client_with(
+            [
+                encode_packet(REQUEST_PROTOCOL_VERSION, b"\x01"),
+                encode_packet(GET_URCONTROL_VERSION, b"short"),
+            ]
+        )
+
+        self.assertFalse(client.connect())
+        self.assertIn("software version", client.last_error)
 
 
 class ReadTests(unittest.TestCase):
