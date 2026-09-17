@@ -38,7 +38,8 @@ def create_robot_backend(config: RobotConfig) -> RobotBackend:
             raise SystemExit(
                 "--robot-right-host and/or --robot-left-host is required with --robot-backend ur"
             )
-        return URBackend(config)
+        config.validate()
+        return URBackend(config, auto_home=False, require_feedback=True)
     if config.backend == BACKEND_SERIAL:
         if config.port is None:
             raise SystemExit("--robot-port is required with --robot-backend serial")

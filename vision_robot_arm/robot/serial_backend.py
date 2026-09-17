@@ -22,6 +22,11 @@ JOINT_CODES = {
 GRIPPER_CODE = "G"
 LIFT_MODE_CODE = "L"
 FRAME_TERMINATOR = "\n"
+WRITE_TIMEOUT_S = 0.25
+
+
+class SerialWriteError(RuntimeError):
+    """A failed or incomplete frame latches the link closed; never retry motion."""
 
 Importer = Callable[[str], Any]
 
@@ -61,7 +66,7 @@ class SerialBackend:
     ) -> None:
         module = serial_module if serial_module is not None else load_serial_module()
         try:
-            self._connection = module.Serial(port, baud_rate, timeout=0)
+            self._connection = module.Serial(port, baud_rate, timeout=0, write_timeout=WRITE_TIMEOUT_S)
         except (OSError, ValueError) as error:
             raise SystemExit(f"Could not open serial port {port}: {error}") from error
 
@@ -72,8 +77,12 @@ class SerialBackend:
         self._next_send_at = 0.0
         self._last_frame: bytes | None = None
         self._tracker = TargetTracker()
+        self._fault: str | None = None
+        self._closed = False
 
     def send(self, targets: JointTargets) -> None:
+        if self._fault is not None or self._closed:
+            raise SerialWriteError(self._fault or "Serial connection is closed")
         if not targets.has_data and self._tracker.last_targets is None:
             return
         self._tracker.update(targets)
@@ -87,7 +96,14 @@ class SerialBackend:
         if accumulated is None:
             return
         frame = encode_targets(accumulated)
-        self._connection.write(frame)
+        try:
+            written = self._connection.write(frame)
+            if written != len(frame):
+                raise OSError(f"incomplete frame ({written!r}/{len(frame)} bytes)")
+        except (OSError, ValueError) as error:
+            self._fault = f"Serial write failed on {self._port}: {error}"
+            self.close()
+            raise SerialWriteError(self._fault) from error
         self._last_frame = frame
         self._next_send_at = now + self._send_interval
 
@@ -99,4 +115,10 @@ class SerialBackend:
         return [f"serial {self._port} @ {self._baud_rate}: {last}"]
 
     def close(self) -> None:
-        self._connection.close()
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._connection.close()
+        except OSError:
+            pass

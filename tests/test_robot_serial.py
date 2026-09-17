@@ -2,6 +2,8 @@ import unittest
 
 from vision_robot_arm.robot.serial_backend import (
     SerialBackend,
+    SerialWriteError,
+    WRITE_TIMEOUT_S,
     encode_targets,
     load_serial_module,
 )
@@ -22,10 +24,11 @@ class FakeClock:
 
 
 class FakeSerialPort:
-    def __init__(self, port: str, baud_rate: int, timeout: float) -> None:
+    def __init__(self, port: str, baud_rate: int, timeout: float, write_timeout: float) -> None:
         self.port = port
         self.baud_rate = baud_rate
         self.timeout = timeout
+        self.write_timeout = write_timeout
         self.written: list[bytes] = []
         self.closed = False
 
@@ -41,14 +44,14 @@ class FakeSerialModule:
     def __init__(self) -> None:
         self.ports: list[FakeSerialPort] = []
 
-    def Serial(self, port: str, baud_rate: int, timeout: float) -> FakeSerialPort:
-        fake = FakeSerialPort(port, baud_rate, timeout)
+    def Serial(self, port: str, baud_rate: int, timeout: float, write_timeout: float) -> FakeSerialPort:
+        fake = FakeSerialPort(port, baud_rate, timeout, write_timeout)
         self.ports.append(fake)
         return fake
 
 
 class FailingSerialModule:
-    def Serial(self, port: str, baud_rate: int, timeout: float) -> None:
+    def Serial(self, port: str, baud_rate: int, timeout: float, write_timeout: float) -> None:
         raise OSError("device not found")
 
 
@@ -115,6 +118,8 @@ class SerialBackendTests(unittest.TestCase):
 
         self.assertEqual(module.ports[0].port, "COM3")
         self.assertEqual(module.ports[0].baud_rate, 9600)
+        self.assertEqual(module.ports[0].timeout, 0)
+        self.assertEqual(module.ports[0].write_timeout, WRITE_TIMEOUT_S)
 
     def test_writes_frames_rate_limited(self) -> None:
         module = FakeSerialModule()
@@ -192,6 +197,31 @@ class SerialBackendTests(unittest.TestCase):
         backend.close()
 
         self.assertTrue(module.ports[0].closed)
+
+    def test_failed_or_partial_write_closes_and_latches_link(self) -> None:
+        from unittest.mock import Mock
+
+        for result in (0, 3, None, OSError("disconnected"), TimeoutError("write timed out")):
+            with self.subTest(result=result):
+                module = FakeSerialModule()
+                backend = SerialBackend("COM3", 9600, 0.05, serial_module=module)
+                port = module.ports[0]
+                port.write = Mock(side_effect=result) if isinstance(result, Exception) else Mock(return_value=result)
+                with self.assertRaisesRegex(SerialWriteError, "COM3"):
+                    backend.send(right({"elbow": 45.0}))
+                self.assertTrue(port.closed)
+                with self.assertRaises(SerialWriteError):
+                    backend.send(right({"elbow": 45.0}))
+                port.write.assert_called_once()
+
+    def test_closed_backend_cannot_send_even_empty_targets(self) -> None:
+        module = FakeSerialModule()
+        backend = SerialBackend("COM3", 9600, 0.05, serial_module=module)
+        backend.close()
+        backend.close()
+        with self.assertRaises(SerialWriteError):
+            backend.send(JointTargets(timestamp_ms=1))
+        self.assertEqual(module.ports[0].written, [])
 
     def test_unopenable_port_exits_with_message(self) -> None:
         with self.assertRaises(SystemExit) as context:
