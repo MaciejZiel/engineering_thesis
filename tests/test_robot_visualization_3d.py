@@ -15,6 +15,8 @@ from vision_robot_arm.robot.visualization_3d import (
     LABEL,
     LABEL_MIN_WIDTH,
     BASE,
+    HUMAN_HEAD,
+    HUMAN_TORSO,
     LEFT_ARM,
     RIGHT_ARM,
     Camera3D,
@@ -121,17 +123,23 @@ def arm_state(shoulder: float, elbow: float) -> RobotState:
 
 
 def tracked_pose(elbow_height: float = -0.22) -> PoseState:
-    points = [LandmarkPoint(0.0, 0.0, 0.0) for _ in range(17)]
+    points = [LandmarkPoint(0.0, 0.0, 0.0) for _ in range(33)]
     points[11] = LandmarkPoint(-0.19, 0.0, 0.0)
     points[12] = LandmarkPoint(0.19, 0.0, 0.0)
     points[13] = LandmarkPoint(-0.30, 0.10, elbow_height)
     points[14] = LandmarkPoint(0.31, 0.08, elbow_height)
     points[15] = LandmarkPoint(-0.22, 0.34, -0.14)
     points[16] = LandmarkPoint(0.26, 0.31, -0.10)
+    points[0] = LandmarkPoint(0.0, 0.06, 0.26)
+    points[23] = LandmarkPoint(-0.13, 0.0, -0.52)
+    points[24] = LandmarkPoint(0.13, 0.0, -0.52)
     return PoseState(1, points, points, {}, {}, {}, (), False, body_landmarks=points)
 
 
 BODY_INDICES = {
+    "NOSE": 0,
+    "LEFT_HIP": 23,
+    "RIGHT_HIP": 24,
     "LEFT_SHOULDER": 11,
     "RIGHT_SHOULDER": 12,
     "LEFT_ELBOW": 13,
@@ -198,6 +206,34 @@ class ReadabilityTests(unittest.TestCase):
 
         self.assertEqual(np.count_nonzero(matches(top_band(narrow), LABEL)), 0)
         self.assertGreater(np.count_nonzero(matches(top_band(wide), LABEL)), 0)
+
+    def test_the_tracked_arms_hang_off_a_body_instead_of_floating(self) -> None:
+        """Two bare sticks in mid-air do not read as a person."""
+        with_body = render(432, 267, None, tracked_pose(), BODY_INDICES)
+
+        invisible = tracked_pose()
+        hidden = PoseState(
+            1,
+            invisible.landmarks,
+            invisible.world_landmarks,
+            {},
+            {},
+            {},
+            (),
+            False,
+            body_landmarks=[
+                LandmarkPoint(point.x, point.y, point.z, visibility=0.0)
+                for point in invisible.body_landmarks
+            ],
+        )
+        without_body = render(432, 267, None, hidden, BODY_INDICES)
+
+        for color in (HUMAN_TORSO, HUMAN_HEAD):
+            with self.subTest(part=color):
+                drawn = np.count_nonzero(matches(with_body, color))
+                # Anti-aliased arm edges stray near these colours, so compare the two.
+                self.assertGreater(drawn, 40)
+                self.assertGreater(drawn, 4 * np.count_nonzero(matches(without_body, color)))
 
     def test_a_raised_tool_is_tied_to_the_floor_by_a_drop_line(self) -> None:
         """Perspective alone cannot say how high a hand is."""

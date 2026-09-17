@@ -27,6 +27,9 @@ TARGET_ARM: Color = (118, 111, 104)
 TARGET_TCP: Color = (85, 220, 245)
 HUMAN_ARM: Color = (101, 211, 165)
 HUMAN_HAND: Color = (113, 225, 186)
+# The torso is context for the arms, so it stays quieter than they are.
+HUMAN_TORSO: Color = (64, 116, 95)
+HUMAN_HEAD: Color = (84, 148, 120)
 DROP_LINE: Color = (70, 66, 62)
 JOINT: Color = (238, 236, 233)
 BASE: Color = (88, 82, 77)
@@ -44,7 +47,7 @@ HUMAN_OFFSET: Point3 = (0.0, -0.62, 0.92)
 CONTENT_BOX: tuple[tuple[float, float], ...] = (
     (-0.74, 0.74),
     (-0.76, 0.22),
-    (0.0, 1.12),
+    (0.0, 1.24),
 )
 # The floor is a reference, not content: it may run off the panel edges.
 GRID_BOX: tuple[tuple[float, float], ...] = ((-1.0, 1.0), (-0.9, 0.5))
@@ -53,6 +56,15 @@ GRID_BOX: tuple[tuple[float, float], ...] = ((-1.0, 1.0), (-0.9, 0.5))
 LABEL_MIN_WIDTH = 720
 GRID_STEP_M = 0.25
 GRID_MAJOR_EVERY = 2
+
+# Two arms with nothing between them read as sticks floating in the air.
+TORSO_LINKS = (
+    ("LEFT_SHOULDER", "RIGHT_SHOULDER"),
+    ("LEFT_SHOULDER", "LEFT_HIP"),
+    ("RIGHT_SHOULDER", "RIGHT_HIP"),
+    ("LEFT_HIP", "RIGHT_HIP"),
+)
+MIN_BODY_VISIBILITY = 0.5
 
 HAND_CONNECTIONS = (
     (0, 1),
@@ -130,6 +142,7 @@ def draw_workspace_3d(
         else:
             cv2.line(canvas, start, end, segment.color, segment.thickness, cv2.LINE_AA)
 
+    _draw_head(cv2, canvas, project, pose_state, indices, scale)
     _draw_bases(cv2, canvas, project, scale)
     _draw_joint_markers(cv2, canvas, project, robot_state, scale)
     _draw_tcp_targets(cv2, canvas, project, robot_state, scale)
@@ -202,6 +215,7 @@ def _append_tracked_arms(
 ) -> None:
     if state is None or state.world_landmarks is None:
         return
+    _append_torso(segments, state, indices, scale)
     for side in ("left", "right"):
         points = _arm_points(state, indices, side)
         segments.extend(
@@ -214,6 +228,49 @@ def _append_tracked_arms(
             for a, b in HAND_CONNECTIONS
             if max(a, b) < len(hand_points)
         )
+
+
+def _append_torso(
+    segments: list[Segment3D],
+    state: PoseState,
+    indices: dict[str, int],
+    scale: float,
+) -> None:
+    """Shoulders, spine and head, so the tracked arms hang off a body you can read."""
+    thickness = max(1, round(2 * scale))
+    for start, end in TORSO_LINKS:
+        points = _named_points(state, indices, (start, end))
+        if points:
+            segments.append(Segment3D(points[0], points[1], HUMAN_TORSO, thickness))
+
+    shoulders = _named_points(state, indices, ("LEFT_SHOULDER", "RIGHT_SHOULDER"))
+    head = _named_points(state, indices, ("NOSE",))
+    if shoulders and head:
+        neck = tuple((a + b) / 2 for a, b in zip(*shoulders))
+        segments.append(Segment3D(neck, head[0], HUMAN_HEAD, thickness))
+
+
+def _named_points(
+    state: PoseState, indices: dict[str, int], names: tuple[str, ...]
+) -> list[Point3]:
+    """Every requested landmark, or nothing: half a limb is worse than none."""
+    body_coordinates = state.body_landmarks is not None
+    world = state.body_landmarks or state.world_landmarks
+    if world is None:
+        return []
+    points: list[Point3] = []
+    for name in names:
+        index = indices.get(name)
+        if index is None or not 0 <= index < len(world):
+            return []
+        point = world[index]
+        if point.visibility < MIN_BODY_VISIBILITY:
+            return []
+        scene = _body_to_scene(point) if body_coordinates else _pose_to_scene(point)
+        if not all(math.isfinite(value) for value in scene):
+            return []
+        points.append(scene)
+    return points
 
 
 def _append_drop_lines(
@@ -271,6 +328,28 @@ def _hand_points(state: PoseState, side: str) -> list[Point3]:
     ]
 
 
+def _draw_head(
+    cv2: Any,
+    canvas: Any,
+    project: Any,
+    state: PoseState | None,
+    indices: dict[str, int],
+    scale: float,
+) -> None:
+    """A bare neck line reads as an antenna; a head closes the figure off."""
+    if state is None:
+        return
+    head = _named_points(state, indices, ("NOSE",))
+    if not head:
+        return
+    point = project(head[0])
+    if point is None:
+        return
+    cv2.circle(
+        canvas, point[:2], max(3, round(5 * scale)), HUMAN_HEAD, -1, cv2.LINE_AA
+    )
+
+
 def _draw_bases(cv2: Any, canvas: Any, project: Any, scale: float) -> None:
     """The ring carries the arm's colour, so no legend is needed to tell them apart."""
     for x, color in (
@@ -312,8 +391,8 @@ def _draw_tcp_targets(
 ) -> None:
     if state is None:
         return
-    radius = max(5, round(8 * scale))
-    thickness = max(1, round(scale))
+    # A plain ring, not a gunsight: the target is a hint, not the subject of the view.
+    radius = max(4, round(6 * scale))
     for side in (ARM_LEFT, ARM_RIGHT):
         arm = state.arm(side)
         if arm is None or arm.tcp_target is None:
@@ -321,15 +400,7 @@ def _draw_tcp_targets(
         point = project(arm.tcp_target)
         if point is None:
             continue
-        x, y = point[:2]
-        reach = radius + max(2, round(3 * scale))
-        cv2.circle(canvas, (x, y), radius, TARGET_TCP, thickness, cv2.LINE_AA)
-        cv2.line(
-            canvas, (x - reach, y), (x + reach, y), TARGET_TCP, thickness, cv2.LINE_AA
-        )
-        cv2.line(
-            canvas, (x, y - reach), (x, y + reach), TARGET_TCP, thickness, cv2.LINE_AA
-        )
+        cv2.circle(canvas, point[:2], radius, TARGET_TCP, max(1, round(scale)), cv2.LINE_AA)
 
 
 def _draw_axis_gizmo(
