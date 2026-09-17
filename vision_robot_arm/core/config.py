@@ -39,6 +39,8 @@ class AppConfig:
     min_detection_confidence: float = 0.5
     min_pose_presence_confidence: float = 0.5
     min_tracking_confidence: float = 0.5
+    hand_detection_confidence: float = 0.4
+    hand_presence_confidence: float = 0.4
 
     def validate(self) -> None:
         if self.print_interval <= 0:
@@ -53,6 +55,8 @@ class AppConfig:
             ("--min-detection-confidence", self.min_detection_confidence),
             ("--min-pose-presence-confidence", self.min_pose_presence_confidence),
             ("--min-tracking-confidence", self.min_tracking_confidence),
+            ("--hand-detection-confidence", self.hand_detection_confidence),
+            ("--hand-presence-confidence", self.hand_presence_confidence),
         ):
             # MediaPipe aborts the process on an out-of-range value instead of raising.
             if not 0.0 <= value <= 1.0:

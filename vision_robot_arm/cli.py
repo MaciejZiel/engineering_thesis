@@ -30,6 +30,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Webcam pose tracker for the vision robot arm prototype (two UR7e cobots)."
     )
+    parser.add_argument("--hand-detection-confidence", type=float, default=0.4,
+                        help="Independent hand detection confidence, 0..1. Default: 0.4.")
+    parser.add_argument("--hand-presence-confidence", type=float, default=0.4,
+                        help="Independent hand presence confidence, 0..1. Default: 0.4.")
     parser.add_argument(
         "--camera",
         type=int,
@@ -350,6 +354,8 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         hands=args.hands,
         num_poses=args.num_poses,
         min_detection_confidence=args.min_detection_confidence,
+        hand_detection_confidence=args.hand_detection_confidence,
+        hand_presence_confidence=args.hand_presence_confidence,
         min_pose_presence_confidence=args.min_pose_presence_confidence,
         min_tracking_confidence=args.min_tracking_confidence,
     )

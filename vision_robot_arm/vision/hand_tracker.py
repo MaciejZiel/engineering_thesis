@@ -25,8 +25,8 @@ class HandTracker:
             ),
             running_mode=deps.vision.RunningMode.VIDEO,
             num_hands=2,
-            min_hand_detection_confidence=min(config.min_detection_confidence, HAND_DETECTION_CONFIDENCE),
-            min_hand_presence_confidence=min(config.min_pose_presence_confidence, HAND_PRESENCE_CONFIDENCE),
+            min_hand_detection_confidence=config.hand_detection_confidence,
+            min_hand_presence_confidence=config.hand_presence_confidence,
             min_tracking_confidence=config.min_tracking_confidence,
         )
         self._landmarker = deps.vision.HandLandmarker.create_from_options(options)
