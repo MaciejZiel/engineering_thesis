@@ -6,8 +6,8 @@ Completed code is not evidence of hardware safety or validated tracking accuracy
 
 ## 1. Control lifecycle and stale data (audit items 1–8)
 
-- [x] Fail closed on homing timeout when RTDE is configured; stop both arms.
-- [x] Separate connection, homing, arming, pause and explicit resume in interactive UR sessions.
+- [x] Capture the stationary current pose from RTDE without an automatic home move.
+- [x] Separate connection, feedback capture, arming, pause and explicit resume.
 - [ ] Expire per-arm/per-joint targets and clear them on tracking loss.
 - [x] Reject stale feedback and react to controller fault states before streaming.
 - [ ] Define dual-arm workspace constraints with the hardware owner.

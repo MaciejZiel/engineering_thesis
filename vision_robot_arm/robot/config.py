@@ -85,9 +85,6 @@ class RobotConfig:
     preflight: bool = True
     servo_gain: int = 300
     servo_lookahead_s: float = 0.1
-    start_seconds: float = 2.0
-    start_speed_deg_s: float = 30.0
-    start_accel_deg_s2: float = 60.0
     tool_output: int = 0
     port: str | None = None
     baud_rate: int = 115200
@@ -141,9 +138,6 @@ class RobotConfig:
             ("--robot-send-interval", self.send_interval),
             ("--robot-max-speed", self.max_speed_deg_s),
             ("--robot-deadband", self.joint_deadband_deg),
-            ("--robot-start-seconds", self.start_seconds),
-            ("--robot-start-speed", self.start_speed_deg_s),
-            ("--robot-start-accel", self.start_accel_deg_s2),
             ("--robot-servo-lookahead", self.servo_lookahead_s),
             ("--robot-commissioning-speed", self.commissioning_speed_deg_s),
             ("--robot-commissioning-excursion", self.commissioning_excursion_deg),
@@ -202,14 +196,6 @@ class RobotConfig:
         ):
             if not 0 < port < 65536:
                 raise SystemExit(f"{flag} must be between 1 and 65535")
-        if self.start_seconds < 0:
-            raise SystemExit("--robot-start-seconds must be 0 or greater")
-        if not 0 < self.start_speed_deg_s <= UR7E_MAX_JOINT_SPEED_DEG_S:
-            raise SystemExit(
-                f"--robot-start-speed must be between 0 and {UR7E_MAX_JOINT_SPEED_DEG_S:.0f} deg/s"
-            )
-        if self.start_accel_deg_s2 <= 0:
-            raise SystemExit("--robot-start-accel must be greater than 0")
         if not 0 <= self.tool_output <= 1:
             raise SystemExit("--robot-tool-output must be 0 or 1")
         if self.servo_gain < 100 or self.servo_gain > 2000:

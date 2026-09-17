@@ -326,24 +326,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the dashboard check for Remote Control, robot mode and safety status.",
     )
     robot.add_argument(
-        "--robot-start-seconds",
-        type=float,
-        default=2.0,
-        help="Seconds reserved for the initial movej to the home pose. Default: 2.",
-    )
-    robot.add_argument(
-        "--robot-start-speed",
-        type=float,
-        default=30.0,
-        help="Joint speed of that initial movej in degrees per second. Default: 30.",
-    )
-    robot.add_argument(
-        "--robot-start-accel",
-        type=float,
-        default=60.0,
-        help="Joint acceleration of the initial movej in degrees per second squared. Default: 60.",
-    )
-    robot.add_argument(
         "--robot-tool-output",
         type=int,
         default=0,
@@ -449,9 +431,6 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         dashboard_port=args.robot_dashboard_port,
         feedback=args.robot_feedback,
         preflight=args.robot_preflight,
-        start_seconds=args.robot_start_seconds,
-        start_speed_deg_s=args.robot_start_speed,
-        start_accel_deg_s2=args.robot_start_accel,
         tool_output=args.robot_tool_output,
         servo_gain=args.robot_servo_gain,
         servo_lookahead_s=args.robot_servo_lookahead,

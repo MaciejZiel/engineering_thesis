@@ -12,7 +12,7 @@ class NumericValidationTests(unittest.TestCase):
     def test_robot_rejects_nonfinite_or_non_numeric_values(self):
         for field in (
             "print_interval", "send_interval", "max_speed_deg_s", "joint_deadband_deg",
-            "start_seconds", "start_speed_deg_s", "start_accel_deg_s2", "servo_lookahead_s",
+            "servo_lookahead_s",
         ):
             for value in INVALID_NUMBERS:
                 with self.subTest(field=field, value=str(value)[:30]):
@@ -50,7 +50,7 @@ class NumericValidationTests(unittest.TestCase):
 
     def test_valid_robot_config_and_boundaries(self):
         RobotConfig().validate()
-        RobotConfig(joint_deadband_deg=0, start_seconds=0, servo_lookahead_s=0.03).validate()
+        RobotConfig(joint_deadband_deg=0, servo_lookahead_s=0.03).validate()
         RobotConfig(servo_gain=2000, servo_lookahead_s=0.2, max_speed_deg_s=180).validate()
 
     def test_app_rejects_invalid_numbers_before_model_lookup(self):

@@ -9,10 +9,8 @@ from vision_robot_arm.robot.config import (
 from vision_robot_arm.robot.targets import GRIPPER_CLOSE, GRIPPER_OPEN, ArmTargets, JointTargets
 from vision_robot_arm.robot.ur_backend import (
     URBackend,
-    HomingError,
     ControlFault,
     encode_gripper,
-    encode_movej,
     encode_servoj,
     encode_stopj,
 )
@@ -126,13 +124,6 @@ class EncodeTests(unittest.TestCase):
             b"servoj([0.0000, -0.7854, 1.5708, -1.5708, 0.0000, 0.0000], 0, 0, 0.050, 0.100, 300)\n",
         )
 
-    def test_movej_converts_speed_and_acceleration_to_radians(self) -> None:
-        frame = encode_movej({"shoulder": -90.0}, speed_deg_s=30.0, accel_deg_s2=60.0)
-
-        self.assertTrue(frame.startswith(b"movej([0.0000, -1.5708, 0.0000, -1.5708, 0.0000, 0.0000]"))
-        self.assertIn(f"a={math.radians(60.0):.3f}".encode(), frame)
-        self.assertIn(f"v={math.radians(30.0):.3f}".encode(), frame)
-
     def test_stopj_decelerates_in_radians(self) -> None:
         self.assertEqual(encode_stopj(120.0), f"stopj({math.radians(120.0):.3f})\n".encode())
 
@@ -142,17 +133,6 @@ class EncodeTests(unittest.TestCase):
 
 
 class URBackendTests(unittest.TestCase):
-    def test_connection_only_does_not_home_or_stream(self):
-        connector = FakeConnector()
-        backend = URBackend(
-            RobotConfig(backend="ur", right_host="test", preflight=False),
-            connector=connector, rtde_factory=None, auto_home=False,
-        )
-        backend.send(targets(right={"shoulder": -80.0}))
-        self.assertEqual(connector.sockets["test"].sent, [])
-        backend.home()
-        self.assertEqual(len(connector.sockets["test"].commands(b"movej(")), 1)
-
     def test_default_construction_never_homes(self):
         connector = FakeConnector()
         backend = URBackend(
@@ -163,47 +143,11 @@ class URBackendTests(unittest.TestCase):
         self.assertEqual(connector.sockets["test"].sent, [])
         backend.close()
 
-    def test_home_rechecks_all_feedback_before_either_arm_moves(self):
-        for sample in (None, {"actual_q": (0.0,) * 6},
-                       {"actual_q": (0.0,) * 6, "robot_mode": 7, "safety_status": 3}):
-            with self.subTest(sample=sample):
-                connector = FakeConnector()
-                factory = FakeRtdeFactory()
-                backend = URBackend(
-                    RobotConfig(backend="ur", right_host="right", left_host="left", preflight=False),
-                    connector=connector, rtde_factory=factory, require_feedback=True,
-                )
-                factory.clients["right"].sample = {
-                    "actual_q": (0.0,) * 6, "robot_mode": 7, "safety_status": 1,
-                }
-                factory.clients["left"].sample = sample
-                with self.assertRaises(ControlFault):
-                    backend.home()
-                for sock in connector.sockets.values():
-                    self.assertEqual(sock.commands(b"movej("), [])
-                    self.assertTrue(sock.closed)
-                with self.assertRaises(ControlFault):
-                    backend.home()
-
-    def test_home_rechecks_dashboard_after_connect(self):
-        from unittest.mock import Mock
-
-        connector = FakeConnector()
-        query = Mock(side_effect=[ready_status("", 0), None])
-        backend = URBackend(
-            RobotConfig(backend="ur", right_host="test"),
-            connector=connector, rtde_factory=None, status_query=query,
-        )
-        with self.assertRaisesRegex(SystemExit, "dashboard unavailable"):
-            backend.home()
-        self.assertEqual(connector.sockets["test"].commands(b"movej("), [])
-        self.assertTrue(connector.sockets["test"].closed)
-
     def test_required_feedback_failure_closes_connection_without_homing(self):
         connector = FakeConnector()
         with self.assertRaises(ControlFault):
             URBackend(RobotConfig(backend="ur", right_host="test", preflight=False),
-                      connector=connector, rtde_factory=None, auto_home=False,
+                      connector=connector, rtde_factory=None,
                       require_feedback=True)
         self.assertEqual(connector.sockets["test"].commands(b"movej("), [])
         self.assertTrue(connector.sockets["test"].closed)
@@ -222,7 +166,6 @@ class URBackendTests(unittest.TestCase):
             "left_host": "192.168.1.11",
             "send_interval": 1.0,
             "max_speed_deg_s": 90.0,
-            "start_seconds": 2.0,
             "preflight": False,
         }
         settings.update(overrides)
@@ -232,11 +175,12 @@ class URBackendTests(unittest.TestCase):
             clock=clock,
             rtde_factory=rtde_factory,
             status_query=no_status,
-            auto_home=True,
         )
+        for arm in backend._arms.values():
+            arm._armed = True
         return backend, clock
 
-    def test_connects_to_every_arm_and_homes_first(self) -> None:
+    def test_connects_to_every_arm_without_sending_motion(self) -> None:
         connector = FakeConnector()
 
         self.make_backend(connector)
@@ -244,7 +188,7 @@ class URBackendTests(unittest.TestCase):
         self.assertEqual(sorted(connector.sockets), ["192.168.1.10", "192.168.1.11"])
         self.assertEqual(connector.sockets["192.168.1.10"].port, 30002)
         for sock in connector.sockets.values():
-            self.assertEqual(len(sock.commands(b"movej(")), 1)
+            self.assertEqual(sock.sent, [])
 
     def test_connection_failure_exits_with_hint(self) -> None:
         config = RobotConfig(backend="ur", right_host="10.0.0.9", preflight=False)
@@ -254,29 +198,6 @@ class URBackendTests(unittest.TestCase):
 
         self.assertIn("10.0.0.9", str(context.exception))
         self.assertIn("Remote Control", str(context.exception))
-
-    def test_no_servoj_while_the_arm_is_still_homing(self) -> None:
-        connector = FakeConnector()
-        backend, clock = self.make_backend(connector)
-
-        clock.now = 1.0
-        backend.send(targets(right={"shoulder": -45.0}))
-
-        self.assertEqual(connector.sockets["192.168.1.10"].commands(b"servoj("), [])
-
-    def test_setpoint_waits_at_home_while_the_arm_is_homing(self) -> None:
-        connector = FakeConnector()
-        backend, clock = self.make_backend(connector, send_interval=0.1, max_speed_deg_s=60.0)
-
-        for step in range(1, 21):
-            clock.now = 0.1 * step
-            backend.send(targets(right={"shoulder": 0.0}))
-        clock.now = 2.1
-        backend.send(targets(right={"shoulder": 0.0}, ts=2))
-
-        first = connector.sockets["192.168.1.10"].commands(b"servoj(")[0]
-        shoulder = math.degrees(float(first.split(b"[")[1].split(b",")[1]))
-        self.assertAlmostEqual(shoulder, -90.0 + 60.0 * 0.1, delta=0.5)
 
     def test_second_arm_failure_closes_the_first_connection(self) -> None:
         opened: list[FakeSocket] = []
@@ -383,7 +304,7 @@ class URBackendTests(unittest.TestCase):
 
         self.assertIn("192.168.1.10", line)
         self.assertIn("open-loop", line)
-        self.assertIn("homing", line)
+        self.assertIn("S", line)
 
     def test_lift_mode_is_reported_in_the_robot_state(self) -> None:
         connector = FakeConnector()
@@ -431,7 +352,6 @@ class SafetyTests(unittest.TestCase):
             "left_host": "192.168.1.11",
             "send_interval": 0.05,
             "max_speed_deg_s": 60.0,
-            "start_seconds": 1.0,
             "preflight": False,
         }
         settings.update(overrides)
@@ -441,8 +361,9 @@ class SafetyTests(unittest.TestCase):
             clock=clock,
             rtde_factory=factory,
             status_query=no_status,
-            auto_home=True,
         )
+        for arm in backend._arms.values():
+            arm._armed = True
         return backend, clock
 
     def test_a_pose_gap_does_not_buy_one_giant_catch_up_step(self) -> None:
@@ -459,7 +380,7 @@ class SafetyTests(unittest.TestCase):
 
     def test_a_gripper_command_between_two_frames_still_reaches_the_arm(self) -> None:
         connector = FakeConnector()
-        backend, clock = self.make(connector, start_seconds=0.0)
+        backend, clock = self.make(connector)
 
         for frame in range(6):  # 30 fps into a 20 Hz link: half the frames are skipped
             clock.now = 0.001 + frame * 0.0333
@@ -484,72 +405,6 @@ class SafetyTests(unittest.TestCase):
             self.assertTrue(sock.closed)
         for client in factory.clients.values():
             self.assertTrue(client.closed)
-
-    def test_homing_waits_until_feedback_says_the_arm_arrived(self) -> None:
-        connector = FakeConnector()
-        factory = FakeRtdeFactory()
-        backend, clock = self.make(connector, factory)
-        far = (0.0, math.radians(-20.0), 0.0, math.radians(-90.0), 0.0, 0.0)
-        factory.clients["192.168.1.10"].sample = {"actual_q": far}
-
-        clock.now = 1.5  # past start_seconds, but the movej is still running
-        backend.send(targets(right={"shoulder": 0.0}))
-
-        self.assertEqual(connector.sockets["192.168.1.10"].commands(b"servoj("), [])
-
-        home = (0.0, math.radians(-90.0), 0.0, math.radians(-90.0), 0.0, 0.0)
-        factory.clients["192.168.1.10"].sample = {"actual_q": home}
-        clock.now = 2.0
-        backend.send(targets(right={"shoulder": 0.0}, ts=2))
-
-        self.assertEqual(len(connector.sockets["192.168.1.10"].commands(b"servoj(")), 1)
-
-    def test_servo_lag_does_not_send_the_arm_back_into_homing(self) -> None:
-        connector = FakeConnector()
-        factory = FakeRtdeFactory()
-        backend, clock = self.make(connector, factory)
-        client = factory.clients["192.168.1.10"]
-
-        def actual(shoulder_deg: float) -> dict:
-            return {"actual_q": (0.0, math.radians(shoulder_deg), 0.0, math.radians(-90.0), 0.0, 0.0)}
-
-        client.sample = actual(-90.0)
-        clock.now = 1.1
-        backend.send(targets(right={"shoulder": 0.0}))
-
-        for step in range(1, 30):
-            clock.now = 1.1 + 0.06 * step
-            client.sample = actual(-90.0 + 0.6 * step)  # the arm trails the setpoint, as servos do
-            backend.send(targets(right={"shoulder": 0.0}, ts=step + 1))
-
-        self.assertEqual(len(connector.sockets["192.168.1.10"].commands(b"servoj(")), 30)
-
-    def test_homing_timeout_stops_both_arms_without_streaming(self) -> None:
-        connector = FakeConnector()
-        factory = FakeRtdeFactory()
-        backend, clock = self.make(connector, factory)
-        factory.clients["192.168.1.10"].sample = {
-            "actual_q": (0.0, math.radians(-20.0), 0.0, math.radians(-90.0), 0.0, 0.0)
-        }
-
-        clock.now = 99.0
-        with self.assertRaises(HomingError):
-            backend.send(targets(right={"shoulder": -90.0}))
-        for sock in connector.sockets.values():
-            self.assertEqual(sock.commands(b"servoj("), [])
-            self.assertTrue(sock.closed)
-            self.assertEqual(len(sock.commands(b"stopj(")), 1)
-
-    def test_missing_homing_feedback_does_not_authorize_motion(self) -> None:
-        connector = FakeConnector()
-        backend, clock = self.make(connector, FakeRtdeFactory())
-        clock.now = 1.5
-        backend.send(targets(right={"shoulder": 0.0}))
-        for sock in connector.sockets.values():
-            self.assertEqual(sock.commands(b"servoj("), [])
-        clock.now = 99.0
-        with self.assertRaises(HomingError):
-            backend.send(targets(right={"shoulder": 0.0}))
 
     def test_silent_connected_feedback_expires_and_blocks_motion(self) -> None:
         connector = FakeConnector()
@@ -603,34 +458,6 @@ class SafetyTests(unittest.TestCase):
         state = backend.robot_state()
         self.assertNotAlmostEqual(state.arm("right").joints["shoulder"], -30.0, places=3)
         self.assertIn("feedback-lost", backend.status_lines()[0])
-
-    def test_a_failed_first_command_releases_the_socket(self) -> None:
-        opened: list[FakeSocket] = []
-        clients: list[FakeRtde] = []
-
-        def connector(host: str, port: int) -> FakeSocket:
-            sock = FakeSocket(host, port)
-            sock.fail_on_send = True
-            opened.append(sock)
-            return sock
-
-        def factory(host: str, port: int) -> FakeRtde:
-            client = FakeRtde(host, port)
-            clients.append(client)
-            return client
-
-        with self.assertRaises(SystemExit):
-            URBackend(
-                RobotConfig(backend="ur", right_host="10.0.0.2", preflight=False),
-                connector=connector,
-                rtde_factory=factory,
-                status_query=no_status,
-                auto_home=True,
-            )
-
-        self.assertTrue(opened[0].closed)
-        self.assertTrue(clients[0].closed)
-
 
 class PreflightTests(unittest.TestCase):
     def config(self) -> RobotConfig:

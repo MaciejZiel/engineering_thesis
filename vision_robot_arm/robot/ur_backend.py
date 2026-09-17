@@ -33,9 +33,6 @@ CONNECT_TIMEOUT_S = 2.0
 STOP_DECELERATION_DEG_S2 = 120.0
 # A pose gap must not turn into one giant catch-up step when the person returns.
 MAX_CATCHUP_INTERVALS = 3.0
-# With feedback the homing window ends when the arm has arrived, not when a timer says so.
-HOME_TOLERANCE_DEG = 3.0
-HOMING_TIMEOUT_FACTOR = 5.0
 FEEDBACK_MAX_AGE_S = 0.5
 COMMISSIONING_STATIONARY_DEG_S = 0.5
 JOINT_SHORT_NAMES = {"shoulder": "S", "elbow": "E", "wrist_1": "W1"}
@@ -49,10 +46,6 @@ class ControlFault(RuntimeError):
     """A latched control fault requires the session to be restarted."""
 
 
-class HomingError(ControlFault):
-    """A requested home position was not confirmed before its deadline."""
-
-
 def encode_servoj(
     joints_deg: dict[str, float],
     duration_s: float,
@@ -62,14 +55,6 @@ def encode_servoj(
     command = (
         f"servoj({_joint_vector(joints_deg)}, 0, 0, "
         f"{duration_s:.3f}, {lookahead_s:.3f}, {gain:d})\n"
-    )
-    return command.encode("ascii")
-
-
-def encode_movej(joints_deg: dict[str, float], speed_deg_s: float, accel_deg_s2: float) -> bytes:
-    command = (
-        f"movej({_joint_vector(joints_deg)}, "
-        f"a={math.radians(accel_deg_s2):.3f}, v={math.radians(speed_deg_s):.3f})\n"
     )
     return command.encode("ascii")
 
@@ -107,7 +92,6 @@ class URArm:
         connector: Connector,
         rtde_factory: RtdeFactory | None,
         clock: Clock,
-        auto_home: bool = False,
     ) -> None:
         self.name = name
         self.host = host
@@ -127,27 +111,12 @@ class URArm:
         self._feedback: dict[str, Any] = {}
         self._feedback_at: float | None = None
         self._rtde: RtdeClient | None = None
-        self._homed = False
-        self._home_started = False
-        self._homing_error: str | None = None
-        self._ready_at = clock() + config.start_seconds
-        self._homing_deadline = self._ready_at + config.start_seconds * HOMING_TIMEOUT_FACTOR
+        self._armed = False
         try:
             self._rtde = rtde_factory(host, config.rtde_port) if rtde_factory is not None else None
-            if auto_home:
-                self.home()
         except BaseException:
             self._release()
             raise
-
-    def home(self) -> None:
-        self._ready_at = self._clock() + self._config.start_seconds
-        self._homing_deadline = self._ready_at + max(1.0, self._config.start_seconds * HOMING_TIMEOUT_FACTOR)
-        self._home_started = True
-        self._homed = False
-        self._setpoints = SimulatedArm(self._config)
-        self._send(encode_movej(self._setpoints.joints, self._config.start_speed_deg_s,
-                                self._config.start_accel_deg_s2))
 
     def capture_current_as_setpoint(self) -> dict[str, float]:
         """Adopt fresh feedback as the control origin without issuing motion."""
@@ -156,9 +125,7 @@ class URArm:
             raise ControlFault(f"{self.name}: fresh joint feedback is required.")
         self._setpoints.joints.update(actual)
         self._setpoints.targets.update(actual)
-        self._home_started = True
-        self._homed = True
-        self._homing_error = None
+        self._armed = True
         return dict(actual)
 
     @property
@@ -214,33 +181,6 @@ class URArm:
             self._setpoints.targets.update(actual)
 
     @property
-    def homing(self) -> bool:
-        """True until the arm reaches the home pose; latched, because a servo always lags."""
-        if self._homing_error is not None:
-            raise HomingError(self._homing_error)
-        if not self._home_started:
-            return False
-        if self._homed:
-            return False
-        now = self._clock()
-        if now < self._ready_at:
-            return True
-        actual = self.feedback_joints
-        if self._rtde is not None:
-            arrived = actual is not None and all(
-                math.isfinite(actual[joint])
-                and abs(actual[joint] - target) <= HOME_TOLERANCE_DEG
-                for joint, target in self._setpoints.joints.items()
-            )
-            if not arrived:
-                if now >= self._homing_deadline:
-                    self._homing_error = f"Homing failed for {self.name}: home position was not confirmed."
-                    raise HomingError(self._homing_error)
-                return True
-        self._homed = True
-        return False
-
-    @property
     def feedback_joints(self) -> dict[str, float] | None:
         if self._feedback_at is None or self._clock() - self._feedback_at > FEEDBACK_MAX_AGE_S:
             return None
@@ -251,13 +191,9 @@ class URArm:
 
     def update(self, targets: ArmTargets, elapsed_s: float) -> None:
         """Move the setpoint toward the mapped pose, then command that setpoint."""
-        if not self._home_started:
+        if not self._armed:
             return
         self._setpoints.set_targets(targets.joints, targets.gripper)
-        if self.homing:
-            # The arm is still driving to the home pose; leave the setpoint there so
-            # the first servoj continues from where the robot actually is.
-            return
         self._setpoints.step(self._config.max_speed_deg_s * max(elapsed_s, 0.0))
         self._send(
             encode_servoj(
@@ -292,7 +228,7 @@ class URArm:
             raise ControlFault(f"{self.name}: controller safety state {safety} blocks motion.")
         if mode is not None and mode != 7:
             raise ControlFault(f"{self.name}: controller is not running (mode {mode}).")
-        if self._homed and self.feedback_joints is None:
+        if self._armed and self.feedback_joints is None:
             raise ControlFault(f"{self.name}: fresh position feedback is required to continue.")
 
     def state(self) -> ArmState:
@@ -304,15 +240,12 @@ class URArm:
 
     def status_line(self) -> str:
         health = self._health()
-        if self.homing:
-            detail = f"homing for {self._ready_at - self._clock():.1f}s"
-        else:
-            joints = self.feedback_joints or self._setpoints.joints
-            detail = " ".join(
-                f"{JOINT_SHORT_NAMES[joint]} {joints[joint]:6.1f}"
-                for joint in MAPPED_JOINTS
-                if joint in joints
-            )
+        joints = self.feedback_joints or self._setpoints.joints
+        detail = " ".join(
+            f"{JOINT_SHORT_NAMES[joint]} {joints[joint]:6.1f}"
+            for joint in MAPPED_JOINTS
+            if joint in joints
+        )
         return f"ur {self.name[0].upper()} {self.host} {health} {detail} grip {self._gripper or 'n/a'}"
 
     def close(self) -> None:
@@ -384,7 +317,6 @@ class URBackend:
         clock: Clock = time.monotonic,
         rtde_factory: RtdeFactory | None = default_rtde_factory,
         status_query: StatusQuery = query_status,
-        auto_home: bool = False,
         require_feedback: bool = False,
     ) -> None:
         self._config = config
@@ -402,7 +334,7 @@ class URBackend:
         self._arms: dict[str, URArm] = {}
         try:
             for name, host in config.hosts.items():
-                self._arms[name] = URArm(name, host, config, connector, factory, clock, auto_home=False)
+                self._arms[name] = URArm(name, host, config, connector, factory, clock)
                 if require_feedback and self._arms[name]._rtde is None:
                     raise ControlFault(f"{name}: the interactive hardware session requires RTDE feedback.")
         except BaseException:
@@ -415,36 +347,6 @@ class URBackend:
         self._jog_direction = 0
         self._jog_deadline = 0.0
         self._commissioning_last_step: float | None = None
-        if auto_home:
-            self.home()
-
-    def home(self) -> None:
-        if self._commissioning:
-            raise ControlFault(
-                "Commissioning never homes automatically; capture the current pose instead."
-            )
-        if self._fault is not None:
-            raise ControlFault(self._fault)
-        try:
-            if self._config.preflight:
-                _preflight(self._config, self._status_query)
-            # Validate both arms before either can begin a homing move.
-            for arm in self._arms.values():
-                arm.poll_feedback()
-                arm.check_control_health()
-                if self._require_feedback and (
-                    arm.feedback_joints is None
-                    or arm._feedback.get("robot_mode") != 7
-                    or arm._feedback.get("safety_status") not in (1, 2)
-                ):
-                    raise ControlFault(f"{arm.name}: fresh, complete RTDE feedback is required to home.")
-            for arm in self._arms.values():
-                arm.home()
-        except BaseException as error:
-            self._fault = str(error)
-            self.close()
-            raise
-
     def arm_commissioning(self) -> None:
         if not self._commissioning:
             raise ControlFault("This backend is not in commissioning mode.")
@@ -567,7 +469,7 @@ class URBackend:
         for arm in self._arms.values():
             arm.poll_feedback()
             arm.check_control_health()
-            ready = arm._home_started and not arm.homing and ready
+            ready = arm._armed and ready
         return ready
 
     def pause(self) -> None:
@@ -608,7 +510,6 @@ class URBackend:
             for arm in self._arms.values():
                 arm.poll_feedback()
                 arm.check_control_health()
-                _ = arm.homing
             for name, arm in self._arms.items():
                 arm.update(accumulated.arm(name), elapsed)
         except ControlFault as error:

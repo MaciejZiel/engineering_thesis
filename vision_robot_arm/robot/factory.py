@@ -29,9 +29,7 @@ def create_robot_controller(config: RobotConfig) -> RobotController:
         if config.operation == OPERATION_MONITOR:
             factory = lambda: URMonitorBackend(config)
         else:
-            factory = lambda: URBackend(
-                config, auto_home=False, require_feedback=True
-            )
+            factory = lambda: URBackend(config, require_feedback=True)
         return HardwareSession(config, factory)
     return MappedRobotController(
         RobotMapper(config, cartesian=config.backend == BACKEND_SIM),
@@ -50,7 +48,7 @@ def create_robot_backend(config: RobotConfig) -> RobotBackend:
                 "--robot-right-host and/or --robot-left-host is required with --robot-backend ur"
             )
         config.validate()
-        return URBackend(config, auto_home=False, require_feedback=True)
+        return URBackend(config, require_feedback=True)
     if config.backend == BACKEND_SERIAL:
         if config.port is None:
             raise SystemExit("--robot-port is required with --robot-backend serial")

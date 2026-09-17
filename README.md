@@ -205,8 +205,8 @@ position and velocity feedback; it does not silently continue open-loop.
 
 These software checks are not a hardware emergency stop or collision avoidance.
 Do not enable motion without the laboratory's approved workspace and procedures.
-The lower-level backend retains its legacy home method for tests and API
-compatibility; the interactive application does not call it.
+The motion backend exposes no automatic homing path; arming always starts from
+fresh, stationary RTDE feedback.
 
 The application uses one resizable OpenCV window named **Motion Twin**. The
 camera feed occupies the main area. A graphite sidebar contains a compact

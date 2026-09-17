@@ -59,14 +59,13 @@ class HardwareSession:
             self._fail(error)
 
     def pause(self) -> None:
-        if self.phase not in ("active", "homing", "commissioning"):
+        if self.phase not in ("active", "commissioning"):
             return
         try:
             self._backend.pause()
-            # Interrupted homing must be performed again, not counted as complete.
             self.phase = (
                 "connected"
-                if self.phase in ("homing", "commissioning")
+                if self.phase == "commissioning"
                 else "paused"
             )
             self._mapper.reset()
@@ -83,8 +82,6 @@ class HardwareSession:
             for side in self._config.hosts
         )
         try:
-            if self.phase == "homing" and self._backend.ready():
-                self.phase = "ready"
             if self.phase == "active":
                 if not self._usable:
                     self.pause()
@@ -112,8 +109,6 @@ class HardwareSession:
         if self._backend is None or self.phase == "fault":
             return None
         try:
-            if self.phase == "homing" and self._backend.ready():
-                self.phase = "ready"
             return self._backend.robot_state()
         except (Exception, SystemExit) as error:
             self._fail(error)
@@ -138,7 +133,6 @@ class HardwareSession:
             "monitoring": "Read-only monitoring",
             "commissioning": "Disarm commissioning",
             "connected": "Capture current pose (no motion)",
-            "homing": "Homing — P to pause",
             "ready": "Enable control",
             "active": "Pause control",
             "paused": "Resume control",
