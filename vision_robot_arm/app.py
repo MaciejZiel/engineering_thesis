@@ -1,5 +1,6 @@
 import math
 import time
+from dataclasses import dataclass
 
 from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE, AppConfig
 from vision_robot_arm.core.display import enable_high_dpi_awareness
@@ -50,6 +51,21 @@ WINDOW_NAME = "Motion Twin - Dual UR7e Control"
 # Some containers refuse to seek. Without a cap the loop would spin without ever
 # repainting or reading a key, and only an outside kill would stop it.
 MAX_REWIND_ATTEMPTS = 3
+CAMERA_FPS_TOLERANCE = 0.8
+CAMERA_FALLBACK_SIZES = ((1920, 1080), (1280, 720), (960, 540), (640, 480))
+
+
+@dataclass(frozen=True)
+class CameraMode:
+    width: int
+    height: int
+    fps: float
+    codec: str
+
+    def describe(self) -> str:
+        return (
+            f"{self.width}x{self.height} @ {self.fps:g} FPS ({self.codec or 'unknown'})"
+        )
 
 
 def update_mode_from_key(key: int, current_mode: str) -> str:
@@ -77,11 +93,6 @@ def run_app(config: AppConfig) -> int:
     robot_controller: RobotController | None = None
 
     try:
-        if config.video_path is None and config.width > 0:
-            capture.set(cv2.CAP_PROP_FRAME_WIDTH, config.width)
-        if config.video_path is None and config.height > 0:
-            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, config.height)
-
         if not capture.isOpened():
             if config.video_path is not None:
                 raise SystemExit(f"Could not open video file: {config.video_path}")
@@ -90,6 +101,11 @@ def run_app(config: AppConfig) -> int:
                     f"Could not open camera index {config.camera}. "
                     "Try another index, for example: python main.py --camera 1"
                 )
+
+        camera_mode = None
+        if config.video_path is None:
+            camera_mode = configure_camera(cv2, capture, config)
+            print(f"Camera mode: {camera_mode.describe()}")
 
         tracker = PoseTracker(deps, config)
         wrist_hold = WristAngleHold()
@@ -493,6 +509,49 @@ def _release_all(*resources: tuple[str, object]) -> None:
 
 def _simulation_canvas(np: object, size: tuple[int, int]) -> object:
     return np.zeros((size[1], size[0], 3), dtype=np.uint8)
+
+
+def configure_camera(cv2: object, capture: object, config: AppConfig) -> CameraMode:
+    """Prefer capture rate over resolution and request compressed USB transport first."""
+    mjpg = cv2.VideoWriter_fourcc(*"MJPG")
+    capture.set(cv2.CAP_PROP_FOURCC, mjpg)
+    capture.set(cv2.CAP_PROP_FPS, config.camera_fps)
+
+    candidates = []
+    if config.width > 0 and config.height > 0:
+        candidates.append((config.width, config.height))
+        candidates.extend(
+            size
+            for size in CAMERA_FALLBACK_SIZES
+            if size[0] <= config.width and size[1] <= config.height
+        )
+    else:
+        candidates.append((0, 0))
+
+    mode = _camera_mode(cv2, capture)
+    for width, height in dict.fromkeys(candidates):
+        if width > 0 and height > 0:
+            capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        # Some drivers reset FPS when the dimensions change.
+        capture.set(cv2.CAP_PROP_FPS, config.camera_fps)
+        mode = _camera_mode(cv2, capture)
+        if mode.fps <= 0 or mode.fps >= config.camera_fps * CAMERA_FPS_TOLERANCE:
+            break
+    return mode
+
+
+def _camera_mode(cv2: object, capture: object) -> CameraMode:
+    fourcc = int(capture.get(cv2.CAP_PROP_FOURCC))
+    codec = "".join(chr((fourcc >> (8 * index)) & 0xFF) for index in range(4)).strip(
+        "\x00"
+    )
+    return CameraMode(
+        width=max(0, round(capture.get(cv2.CAP_PROP_FRAME_WIDTH))),
+        height=max(0, round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))),
+        fps=max(0.0, float(capture.get(cv2.CAP_PROP_FPS))),
+        codec=codec,
+    )
 
 
 def _fit_frame(cv2: object, frame: object, config: AppConfig) -> object:

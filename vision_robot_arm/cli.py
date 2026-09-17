@@ -30,10 +30,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Webcam pose tracker for the vision robot arm prototype (two UR7e cobots)."
     )
-    parser.add_argument("--hand-detection-confidence", type=float, default=0.4,
-                        help="Independent hand detection confidence, 0..1. Default: 0.4.")
-    parser.add_argument("--hand-presence-confidence", type=float, default=0.4,
-                        help="Independent hand presence confidence, 0..1. Default: 0.4.")
+    parser.add_argument(
+        "--hand-detection-confidence",
+        type=float,
+        default=0.4,
+        help="Independent hand detection confidence, 0..1. Default: 0.4.",
+    )
+    parser.add_argument(
+        "--hand-presence-confidence",
+        type=float,
+        default=0.4,
+        help="Independent hand presence confidence, 0..1. Default: 0.4.",
+    )
     parser.add_argument(
         "--camera",
         type=int,
@@ -62,6 +70,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1080,
         help="Frame height in pixels; frames are resized when the camera gives another size. 0 keeps the camera size. Default: 1080.",
+    )
+    parser.add_argument(
+        "--fps",
+        type=float,
+        default=30.0,
+        help="Preferred camera frame rate; resolution is reduced first to preserve it. Default: 30.",
     )
     parser.add_argument(
         "--no-mirror",
@@ -279,7 +293,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--robot-shoulder-range",
         type=float,
         nargs=2,
-        default=(DEFAULT_SHOULDER_MAPPING.limit.minimum, DEFAULT_SHOULDER_MAPPING.limit.maximum),
+        default=(
+            DEFAULT_SHOULDER_MAPPING.limit.minimum,
+            DEFAULT_SHOULDER_MAPPING.limit.maximum,
+        ),
         metavar=("MIN", "MAX"),
         help="Allowed UR shoulder joint range in degrees. Default: -180 0.",
     )
@@ -287,7 +304,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--robot-elbow-range",
         type=float,
         nargs=2,
-        default=(DEFAULT_ELBOW_MAPPING.limit.minimum, DEFAULT_ELBOW_MAPPING.limit.maximum),
+        default=(
+            DEFAULT_ELBOW_MAPPING.limit.minimum,
+            DEFAULT_ELBOW_MAPPING.limit.maximum,
+        ),
         metavar=("MIN", "MAX"),
         help="Allowed UR elbow joint range in degrees (UR7e hardware: -160 160). Default: -160 160.",
     )
@@ -295,7 +315,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--robot-wrist-range",
         type=float,
         nargs=2,
-        default=(DEFAULT_WRIST_MAPPING.limit.minimum, DEFAULT_WRIST_MAPPING.limit.maximum),
+        default=(
+            DEFAULT_WRIST_MAPPING.limit.minimum,
+            DEFAULT_WRIST_MAPPING.limit.maximum,
+        ),
         metavar=("MIN", "MAX"),
         help="Allowed UR wrist 1 joint range in degrees. Default: -180 180.",
     )
@@ -344,6 +367,7 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         test_mode=args.test_mode,
         width=args.width,
         height=args.height,
+        camera_fps=args.fps,
         mirror=args.mirror,
         print_interval=args.print_interval,
         visibility_threshold=args.visibility_threshold,

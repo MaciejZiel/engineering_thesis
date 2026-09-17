@@ -1,20 +1,37 @@
 import unittest
+from pathlib import Path
 
 import numpy as np
 
-from pathlib import Path
-
-from vision_robot_arm.app import _fit_frame, _frame_timestamp_ms, _release_all, _remaining_frame_delay_ms
+from vision_robot_arm.app import (
+    _fit_frame,
+    _frame_timestamp_ms,
+    _release_all,
+    _remaining_frame_delay_ms,
+    configure_camera,
+)
 from vision_robot_arm.core.config import AppConfig
 
 
 class FakeCv2:
     INTER_AREA = 3
+    CAP_PROP_FRAME_WIDTH = 1
+    CAP_PROP_FRAME_HEIGHT = 2
+    CAP_PROP_FPS = 3
+    CAP_PROP_FOURCC = 4
+
+    @staticmethod
+    def VideoWriter_fourcc(*code: str) -> int:
+        return sum(
+            ord(character) << (8 * index) for index, character in enumerate(code)
+        )
 
     def __init__(self) -> None:
         self.resize_calls: list[tuple[tuple[int, int], int]] = []
 
-    def resize(self, _frame: object, size: tuple[int, int], interpolation: int) -> object:
+    def resize(
+        self, _frame: object, size: tuple[int, int], interpolation: int
+    ) -> object:
         self.resize_calls.append((size, interpolation))
         return np.zeros((size[1], size[0], 3), dtype=np.uint8)
 
@@ -51,6 +68,43 @@ class FitFrameTests(unittest.TestCase):
 
         self.assertEqual(result.shape[:2], (1080, 1728))
         self.assertEqual(cv2.resize_calls, [((1728, 1080), cv2.INTER_AREA)])
+
+
+class CameraConfigurationTests(unittest.TestCase):
+    class Capture:
+        def __init__(self, fps_by_width: dict[int, float]) -> None:
+            self.values = {1: 640.0, 2: 480.0, 3: 30.0, 4: 0.0}
+            self.fps_by_width = fps_by_width
+            self.calls = []
+
+        def set(self, prop: int, value: float) -> bool:
+            self.calls.append((prop, value))
+            self.values[prop] = value
+            if prop in (1, 3):
+                self.values[3] = self.fps_by_width.get(
+                    round(self.values[1]), value if prop == 3 else 0
+                )
+            return True
+
+        def get(self, prop: int) -> float:
+            return self.values[prop]
+
+    def test_requests_mjpg_before_resolution_and_keeps_full_hd_at_30_fps(self) -> None:
+        cv2 = FakeCv2()
+        capture = self.Capture({1920: 30.0})
+        mode = configure_camera(cv2, capture, AppConfig())
+        self.assertEqual(
+            capture.calls[0], (cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        )
+        self.assertEqual(
+            (mode.width, mode.height, mode.fps, mode.codec), (1920, 1080, 30.0, "MJPG")
+        )
+
+    def test_reduces_resolution_until_requested_fps_is_available(self) -> None:
+        mode = configure_camera(
+            FakeCv2(), self.Capture({1920: 5.0, 1280: 30.0}), AppConfig()
+        )
+        self.assertEqual((mode.width, mode.height, mode.fps), (1280, 720, 30.0))
 
 
 if __name__ == "__main__":
@@ -109,20 +163,28 @@ class TimestampTests(unittest.TestCase):
         return Cv2()
 
     def test_video_time_comes_from_the_clip_position(self) -> None:
-        stamp = _frame_timestamp_ms(self.cv2(), FakeCapture(900.0), self.video, 0.0, 867)
+        stamp = _frame_timestamp_ms(
+            self.cv2(), FakeCapture(900.0), self.video, 0.0, 867
+        )
 
         self.assertEqual(stamp, 900)
 
     def test_a_repeated_position_still_moves_forward(self) -> None:
-        stamp = _frame_timestamp_ms(self.cv2(), FakeCapture(900.0), self.video, 0.0, 900)
+        stamp = _frame_timestamp_ms(
+            self.cv2(), FakeCapture(900.0), self.video, 0.0, 900
+        )
 
         self.assertEqual(stamp, 901)
 
     def test_the_offset_keeps_frame_spacing_across_a_rewind(self) -> None:
         offset = 900 + 33
 
-        first = _frame_timestamp_ms(self.cv2(), FakeCapture(0.0), self.video, 0.0, 900, offset)
-        second = _frame_timestamp_ms(self.cv2(), FakeCapture(33.0), self.video, 0.0, first, offset)
+        first = _frame_timestamp_ms(
+            self.cv2(), FakeCapture(0.0), self.video, 0.0, 900, offset
+        )
+        second = _frame_timestamp_ms(
+            self.cv2(), FakeCapture(33.0), self.video, 0.0, first, offset
+        )
 
         self.assertEqual(first, 933)
         self.assertEqual(second - first, 33)
@@ -132,8 +194,12 @@ class TimestampTests(unittest.TestCase):
 
         started = time.monotonic()
 
-        first = _frame_timestamp_ms(self.cv2(), FakeCapture(0.0), AppConfig(), started, -1)
-        second = _frame_timestamp_ms(self.cv2(), FakeCapture(0.0), AppConfig(), started, first)
+        first = _frame_timestamp_ms(
+            self.cv2(), FakeCapture(0.0), AppConfig(), started, -1
+        )
+        second = _frame_timestamp_ms(
+            self.cv2(), FakeCapture(0.0), AppConfig(), started, first
+        )
 
         self.assertGreater(second, first)
 
@@ -142,6 +208,8 @@ class TimestampTests(unittest.TestCase):
 
         started = time.monotonic() - 2.0
 
-        stamp = _frame_timestamp_ms(self.cv2(), FakeCapture(0.0), AppConfig(), started, -1)
+        stamp = _frame_timestamp_ms(
+            self.cv2(), FakeCapture(0.0), AppConfig(), started, -1
+        )
 
         self.assertGreaterEqual(stamp, 2000)

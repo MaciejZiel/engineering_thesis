@@ -1,5 +1,5 @@
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from vision_robot_arm.core.config import DEFAULT_MODEL_PATH, AppConfig
 from vision_robot_arm.core.pose_state import LandmarkPoint, mirror_landmarks
@@ -25,6 +25,11 @@ class MirrorLandmarksTests(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
+    def test_camera_fps_must_be_in_a_sensible_range(self) -> None:
+        for value in (0, 121, float("nan")):
+            with self.assertRaises(SystemExit):
+                AppConfig(camera_fps=value).validate()
+
     def test_config_rejects_missing_video_file(self) -> None:
         config = AppConfig(video_path=Path("does_not_exist.mp4"))
 

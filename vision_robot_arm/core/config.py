@@ -3,7 +3,6 @@ from pathlib import Path
 
 from vision_robot_arm.robot.config import RobotConfig
 
-
 ANGLE_MODE = "angles"
 LANDMARK_MODE = "landmarks"
 BOTH_MODE = "both"
@@ -23,6 +22,7 @@ class AppConfig:
     camera: int = 0
     width: int = 1920
     height: int = 1080
+    camera_fps: float = 30.0
     mirror: bool = True
     print_interval: float = 0.5
     visibility_threshold: float = 0.55
@@ -45,6 +45,8 @@ class AppConfig:
     def validate(self) -> None:
         if self.print_interval <= 0:
             raise SystemExit("--print-interval must be greater than 0")
+        if not 1.0 <= self.camera_fps <= 120.0:
+            raise SystemExit("--fps must be between 1 and 120")
         if not 0.0 <= self.visibility_threshold <= 1.0:
             raise SystemExit("--visibility-threshold must be between 0 and 1")
         if not 0.0 < self.smoothing_alpha <= 1.0:
