@@ -19,7 +19,9 @@ HAND_MODEL_URL = (
 
 @dataclass(frozen=True)
 class AppConfig:
-    camera: int = 0
+    camera: int | str = 0
+    camera_backend: str = "auto"
+    camera_format: str = "auto"
     width: int = 1920
     height: int = 1080
     camera_fps: float = 30.0
@@ -49,6 +51,18 @@ class AppConfig:
             raise SystemExit("--print-interval must be greater than 0")
         if not 1.0 <= self.camera_fps <= 120.0:
             raise SystemExit("--fps must be between 1 and 120")
+        if isinstance(self.camera, int) and self.camera < 0:
+            raise SystemExit("--camera index must be 0 or greater")
+        valid_backends = ("auto", "v4l2", "dshow", "msmf", "avfoundation", "any")
+        if self.camera_backend.lower() not in valid_backends:
+            raise SystemExit(
+                f"--camera-backend must be one of: {', '.join(valid_backends)}"
+            )
+        valid_formats = ("auto", "mjpg", "yuyv", "nv12", "h264")
+        if self.camera_format.lower() not in valid_formats:
+            raise SystemExit(
+                f"--camera-format must be one of: {', '.join(valid_formats)}"
+            )
         if self.inference_width <= 0 or self.inference_height <= 0:
             raise SystemExit(
                 "--inference-width and --inference-height must be greater than 0"

@@ -1,7 +1,6 @@
 import math
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 
 from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE, AppConfig
 from vision_robot_arm.core.display import enable_high_dpi_awareness
@@ -49,26 +48,12 @@ from vision_robot_arm.vision.pose_tracker import PoseTracker
 from vision_robot_arm.vision.recording import CsvPoseRecorder
 from vision_robot_arm.vision.smoothing import LandmarkSmoother
 from vision_robot_arm.vision.state_builder import PoseStateBuilder
+from vision_robot_arm.vision.camera import open_camera_capture, configure_camera, resolve_cv2_backend
 
 WINDOW_NAME = "Motion Twin - Dual UR7e Control"
 # Some containers refuse to seek. Without a cap the loop would spin without ever
 # repainting or reading a key, and only an outside kill would stop it.
 MAX_REWIND_ATTEMPTS = 3
-CAMERA_FPS_TOLERANCE = 0.8
-CAMERA_FALLBACK_SIZES = ((1920, 1080), (1280, 720), (960, 540), (640, 480))
-
-
-@dataclass(frozen=True)
-class CameraMode:
-    width: int
-    height: int
-    fps: float
-    codec: str
-
-    def describe(self) -> str:
-        return (
-            f"{self.width}x{self.height} @ {self.fps:g} FPS ({self.codec or 'unknown'})"
-        )
 
 
 def update_mode_from_key(key: int, current_mode: str) -> str:
@@ -88,8 +73,9 @@ def run_app(config: AppConfig) -> int:
     indices = build_landmark_indices(deps.vision)
     names = build_landmark_names(deps.vision)
 
-    source = str(config.video_path) if config.video_path is not None else config.camera
-    capture = cv2.VideoCapture(source)
+    capture: object | None = None
+    actual_camera_index: int | str = config.camera
+    camera_backend_name = "any"
     tracker: PoseTracker | None = None
     hand_tracker: HandTracker | None = None
     recorder: CsvPoseRecorder | None = None
@@ -98,19 +84,27 @@ def run_app(config: AppConfig) -> int:
     inference_pool: ThreadPoolExecutor | None = None
 
     try:
-        if not capture.isOpened():
-            if config.video_path is not None:
+        if config.video_path is not None:
+            capture = cv2.VideoCapture(str(config.video_path))
+            if not capture.isOpened():
                 raise SystemExit(f"Could not open video file: {config.video_path}")
-            else:
+        else:
+            backend = resolve_cv2_backend(cv2, config.camera_backend)
+            capture, actual_camera_index, camera_backend_name = open_camera_capture(
+                config.camera, cv2, backend
+            )
+            if not capture.isOpened():
                 raise SystemExit(
-                    f"Could not open camera index {config.camera}. "
-                    "Try another index, for example: python main.py --camera 1"
+                    f"Could not open camera {config.camera}. "
+                    "Try listing cameras: python main.py --list-cameras"
                 )
 
         camera_mode = None
         if config.video_path is None:
             camera_mode = configure_camera(cv2, capture, config)
-            print(f"Camera mode: {camera_mode.describe()}")
+            print(
+                f"Camera {actual_camera_index} [{camera_backend_name}]: {camera_mode.describe()}"
+            )
 
         tracker = PoseTracker(deps, config)
         wrist_hold = WristAngleHold()
@@ -551,49 +545,6 @@ def _simulation_canvas(np: object, size: tuple[int, int]) -> object:
     return np.zeros((size[1], size[0], 3), dtype=np.uint8)
 
 
-def configure_camera(cv2: object, capture: object, config: AppConfig) -> CameraMode:
-    """Prefer capture rate over resolution and request compressed USB transport first."""
-    mjpg = cv2.VideoWriter_fourcc(*"MJPG")
-    capture.set(cv2.CAP_PROP_FOURCC, mjpg)
-    capture.set(cv2.CAP_PROP_FPS, config.camera_fps)
-
-    candidates = []
-    if config.width > 0 and config.height > 0:
-        candidates.append((config.width, config.height))
-        candidates.extend(
-            size
-            for size in CAMERA_FALLBACK_SIZES
-            if size[0] <= config.width and size[1] <= config.height
-        )
-    else:
-        candidates.append((0, 0))
-
-    mode = _camera_mode(cv2, capture)
-    for width, height in dict.fromkeys(candidates):
-        if width > 0 and height > 0:
-            capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        # Some drivers reset FPS when the dimensions change.
-        capture.set(cv2.CAP_PROP_FPS, config.camera_fps)
-        mode = _camera_mode(cv2, capture)
-        if mode.fps <= 0 or mode.fps >= config.camera_fps * CAMERA_FPS_TOLERANCE:
-            break
-    return mode
-
-
-def _camera_mode(cv2: object, capture: object) -> CameraMode:
-    fourcc = int(capture.get(cv2.CAP_PROP_FOURCC))
-    codec = "".join(chr((fourcc >> (8 * index)) & 0xFF) for index in range(4)).strip(
-        "\x00"
-    )
-    return CameraMode(
-        width=max(0, round(capture.get(cv2.CAP_PROP_FRAME_WIDTH))),
-        height=max(0, round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))),
-        fps=max(0.0, float(capture.get(cv2.CAP_PROP_FPS))),
-        codec=codec,
-    )
-
-
 def _fit_frame(cv2: object, frame: object, config: AppConfig) -> object:
     if config.width <= 0 or config.height <= 0:
         return frame
@@ -623,10 +574,11 @@ def _source_started_message(config: AppConfig) -> str:
     return "Camera started."
 
 
-def _source_label(config: AppConfig) -> str:
+def _source_label(config: AppConfig, actual_camera: int | str | None = None) -> str:
     if config.video_path is not None:
         return config.video_path.name[:24]
-    return f"CAM {config.camera}"
+    label = actual_camera if actual_camera is not None else config.camera
+    return f"CAM {label}"
 
 
 def _frame_wait_delay_ms(cv2: object, capture: object, config: AppConfig) -> int:

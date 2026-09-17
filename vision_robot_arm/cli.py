@@ -8,6 +8,7 @@ from vision_robot_arm.core.config import (
     DEFAULT_RECORDING_DIR,
     AppConfig,
 )
+from vision_robot_arm.core.runtime import load_runtime_dependencies
 from vision_robot_arm.robot.config import (
     BACKEND_CHOICES,
     BACKEND_DEBUG,
@@ -24,11 +25,31 @@ from vision_robot_arm.robot.config import (
     JointMapping,
     RobotConfig,
 )
+from vision_robot_arm.vision.camera import (
+    BACKEND_CHOICES as CAMERA_BACKEND_CHOICES,
+    FORMAT_CHOICES as CAMERA_FORMAT_CHOICES,
+    discover_cameras,
+    format_camera_list,
+)
+
+
+def _parse_camera_target(val: str) -> int | str:
+    if val.lower() == "auto":
+        return "auto"
+    try:
+        return int(val)
+    except ValueError:
+        return val
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Webcam pose tracker for the vision robot arm prototype (two UR7e cobots)."
+    )
+    parser.add_argument(
+        "--list-cameras",
+        action="store_true",
+        help="List available video cameras on the system and exit.",
     )
     parser.add_argument(
         "--hand-detection-confidence",
@@ -44,9 +65,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--camera",
-        type=int,
+        type=_parse_camera_target,
         default=0,
-        help="OpenCV camera index. Default: 0.",
+        help="OpenCV camera index or 'auto'. Default: 0.",
+    )
+    parser.add_argument(
+        "--camera-backend",
+        choices=CAMERA_BACKEND_CHOICES,
+        default="auto",
+        help="Video capture backend API. Default: auto.",
+    )
+    parser.add_argument(
+        "--camera-format",
+        choices=CAMERA_FORMAT_CHOICES,
+        default="auto",
+        help="Preferred pixel format for camera capture (e.g. mjpg for high FPS at 1080p). Default: auto.",
     )
     parser.add_argument(
         "--video",
@@ -373,6 +406,8 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
     )
     return AppConfig(
         camera=args.camera,
+        camera_backend=args.camera_backend,
+        camera_format=args.camera_format,
         video_path=args.video,
         loop_video=args.loop_video,
         robot=robot,
@@ -409,6 +444,12 @@ def _with_limit(mapping: JointMapping, limits: tuple[float, float]) -> JointMapp
 
 
 def main() -> int:
+    args = build_parser().parse_args()
+    if getattr(args, "list_cameras", False):
+        deps = load_runtime_dependencies()
+        cameras = discover_cameras(deps.cv2)
+        print(format_camera_list(cameras))
+        return 0
     config = parse_args()
     config.validate()
     return run_app(config)
