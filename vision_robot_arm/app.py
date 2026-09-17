@@ -465,7 +465,7 @@ def run_app(config: AppConfig) -> int:
                     robot_controller.jog(-1)
                 elif key == ord("]") or held_action == ACTION_JOG_POSITIVE:
                     robot_controller.jog(1)
-            if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
+            if not _window_is_visible(cv2, WINDOW_NAME):
                 return 0
             if key in (ord("q"), 27) or action == ACTION_QUIT:
                 return 0
@@ -618,6 +618,15 @@ def _frame_wait_delay_ms(cv2: object, capture: object, config: AppConfig) -> int
 def _remaining_frame_delay_ms(period_ms: int, processing_seconds: float) -> int:
     """Pump UI events without adding a second full frame period after inference."""
     return max(1, math.ceil(period_ms - max(0.0, processing_seconds) * 1000))
+
+
+def _window_is_visible(cv2: object, window_name: str) -> bool:
+    """Treat a concurrently closed OpenCV window as closed, not as an app fault."""
+    cv_error = getattr(cv2, "error", Exception)
+    try:
+        return cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1
+    except (AttributeError, cv_error):
+        return False
 
 
 def _frame_timestamp_ms(

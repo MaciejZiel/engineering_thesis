@@ -9,6 +9,7 @@ from vision_robot_arm.app import (
     _release_all,
     _remaining_frame_delay_ms,
     _resize_for_inference,
+    _window_is_visible,
     configure_camera,
 )
 from vision_robot_arm.core.config import AppConfig
@@ -164,6 +165,30 @@ class ReleaseTests(unittest.TestCase):
         )
 
         self.assertEqual(closed, ["robot", "camera"])
+
+
+class WindowStateTests(unittest.TestCase):
+    class CvError(Exception):
+        pass
+
+    class Cv2:
+        error = None
+        WND_PROP_VISIBLE = 4
+
+        def __init__(self, result: float = 1.0, fails: bool = False) -> None:
+            self.result = result
+            self.fails = fails
+            self.error = WindowStateTests.CvError
+
+        def getWindowProperty(self, _name: str, _property: int) -> float:
+            if self.fails:
+                raise self.error("window already closed")
+            return self.result
+
+    def test_closed_or_destroyed_window_is_not_visible(self) -> None:
+        self.assertTrue(_window_is_visible(self.Cv2(1.0), "app"))
+        self.assertFalse(_window_is_visible(self.Cv2(0.0), "app"))
+        self.assertFalse(_window_is_visible(self.Cv2(fails=True), "app"))
 
 
 class TimestampTests(unittest.TestCase):
