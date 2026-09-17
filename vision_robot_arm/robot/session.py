@@ -4,7 +4,7 @@ import math
 from typing import Callable
 
 from vision_robot_arm.core.pose_state import PoseState
-from vision_robot_arm.robot.config import RobotConfig
+from vision_robot_arm.robot.config import OPERATION_MONITOR, RobotConfig
 from vision_robot_arm.robot.mapping import RobotMapper
 from vision_robot_arm.robot.targets import MAPPED_JOINTS
 
@@ -30,7 +30,11 @@ class HardwareSession:
         try:
             if self.phase == "disconnected":
                 self._backend = self._factory()
-                self.phase = "connected"
+                self.phase = (
+                    "monitoring"
+                    if self._config.operation == OPERATION_MONITOR
+                    else "connected"
+                )
             elif self.phase == "connected":
                 self._backend.home()
                 self.phase = "homing"
@@ -55,6 +59,8 @@ class HardwareSession:
             self._fail(error)
 
     def update(self, state: PoseState) -> None:
+        if self.phase == "monitoring":
+            return
         targets = self._mapper.map(state)
         self._usable = all(
             all(joint in targets.arm(side).joints
@@ -104,6 +110,7 @@ class HardwareSession:
     def action_label(self) -> str:
         return {
             "disconnected": "Connect robot",
+            "monitoring": "Read-only monitoring",
             "connected": "Home robot (motion)",
             "homing": "Homing — P to pause",
             "ready": "Enable control",

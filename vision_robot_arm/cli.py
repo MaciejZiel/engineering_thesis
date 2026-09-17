@@ -18,6 +18,8 @@ from vision_robot_arm.robot.config import (
     DEFAULT_SHOULDER_MAPPING,
     DEFAULT_WRIST_MAPPING,
     UR7E_MAX_JOINT_SPEED_DEG_S,
+    OPERATION_CHOICES,
+    OPERATION_MONITOR,
     UR_DASHBOARD_PORT,
     UR_RTDE_PORT,
     UR_SECONDARY_PORT,
@@ -245,6 +247,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds between robot debug command prints. Default: 0.5.",
     )
     robot.add_argument(
+        "--robot-operation",
+        choices=OPERATION_CHOICES,
+        default=OPERATION_MONITOR,
+        help="UR mode: read-only monitor (default), commissioning, or vision tracking.",
+    )
+    robot.add_argument(
         "--robot-right-host",
         default=None,
         help="IP address of the UR7e driven by your right arm (--robot-backend ur).",
@@ -399,6 +407,7 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
 
     robot = RobotConfig(
         backend=backend,
+        operation=args.robot_operation,
         print_interval=args.robot_print_interval,
         right_host=args.robot_right_host,
         left_host=args.robot_left_host,

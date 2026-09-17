@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import Mock
 
 from vision_robot_arm.core.pose_state import PoseState
-from vision_robot_arm.robot.config import RobotConfig
+from vision_robot_arm.robot.config import OPERATION_TRACKING, RobotConfig
 from vision_robot_arm.robot.session import HardwareSession
 
 
@@ -18,7 +18,12 @@ class HardwareSessionTests(unittest.TestCase):
         self.backend = Mock()
         self.backend.ready.return_value = False
         self.factory = Mock(return_value=self.backend)
-        self.session = HardwareSession(RobotConfig(backend="ur", right_host="test"), self.factory)
+        self.session = HardwareSession(
+            RobotConfig(
+                backend="ur", operation=OPERATION_TRACKING, right_host="test"
+            ),
+            self.factory,
+        )
 
     def prepare(self):
         self.session.advance()
@@ -74,3 +79,18 @@ class HardwareSessionTests(unittest.TestCase):
         self.session.reset()
         self.assertEqual(self.session.phase, "connected")
         self.backend.pause.assert_called_once()
+
+    def test_monitor_mode_connects_without_calling_any_motion_method(self):
+        backend = Mock()
+        session = HardwareSession(
+            RobotConfig(backend="ur", right_host="test"),
+            Mock(return_value=backend),
+        )
+
+        session.advance()
+        session.advance()
+        session.update(pose())
+
+        self.assertEqual(session.phase, "monitoring")
+        backend.home.assert_not_called()
+        backend.send.assert_not_called()

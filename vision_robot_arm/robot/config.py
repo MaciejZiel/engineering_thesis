@@ -15,6 +15,15 @@ BACKEND_UR = "ur"
 BACKEND_SERIAL = "serial"
 BACKEND_CHOICES = (BACKEND_NONE, BACKEND_DEBUG, BACKEND_SIM, BACKEND_UR, BACKEND_SERIAL)
 
+OPERATION_MONITOR = "monitor"
+OPERATION_COMMISSIONING = "commissioning"
+OPERATION_TRACKING = "tracking"
+OPERATION_CHOICES = (
+    OPERATION_MONITOR,
+    OPERATION_COMMISSIONING,
+    OPERATION_TRACKING,
+)
+
 UR_SECONDARY_PORT = 30002
 UR_RTDE_PORT = 30004
 UR_DASHBOARD_PORT = 29999
@@ -62,6 +71,7 @@ DEFAULT_WRIST_MAPPING = JointMapping(
 @dataclass(frozen=True)
 class RobotConfig:
     backend: str = BACKEND_NONE
+    operation: str = OPERATION_MONITOR
     print_interval: float = 0.5
     right_host: str | None = None
     left_host: str | None = None
@@ -143,6 +153,9 @@ class RobotConfig:
         if self.backend not in BACKEND_CHOICES:
             choices = ", ".join(BACKEND_CHOICES)
             raise SystemExit(f"--robot-backend must be one of: {choices}")
+        if self.operation not in OPERATION_CHOICES:
+            choices = ", ".join(OPERATION_CHOICES)
+            raise SystemExit(f"--robot-operation must be one of: {choices}")
         if self.print_interval <= 0:
             raise SystemExit("--robot-print-interval must be greater than 0")
         if self.send_interval <= 0:

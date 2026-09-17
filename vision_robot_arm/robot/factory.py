@@ -5,6 +5,7 @@ from vision_robot_arm.robot.config import (
     BACKEND_SERIAL,
     BACKEND_SIM,
     BACKEND_UR,
+    OPERATION_MONITOR,
     RobotConfig,
 )
 from vision_robot_arm.robot.controller import (
@@ -16,6 +17,7 @@ from vision_robot_arm.robot.mapping import RobotMapper
 from vision_robot_arm.robot.serial_backend import SerialBackend
 from vision_robot_arm.robot.simulation import SimulationBackend
 from vision_robot_arm.robot.ur_backend import URBackend
+from vision_robot_arm.robot.ur_monitor import URMonitorBackend
 from vision_robot_arm.robot.session import HardwareSession
 
 
@@ -24,7 +26,13 @@ def create_robot_controller(config: RobotConfig) -> RobotController:
         return NullRobotController()
     if config.backend == BACKEND_UR:
         config.validate()
-        return HardwareSession(config, lambda: URBackend(config, auto_home=False, require_feedback=True))
+        if config.operation == OPERATION_MONITOR:
+            factory = lambda: URMonitorBackend(config)
+        else:
+            factory = lambda: URBackend(
+                config, auto_home=False, require_feedback=True
+            )
+        return HardwareSession(config, factory)
     return MappedRobotController(RobotMapper(config), create_robot_backend(config))
 
 

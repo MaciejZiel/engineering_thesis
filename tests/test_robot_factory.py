@@ -1,6 +1,7 @@
 import contextlib
 import io
 import unittest
+from unittest.mock import Mock, patch
 
 from vision_robot_arm.core.pose_state import PoseState
 from vision_robot_arm.robot.backend import DebugBackend
@@ -42,6 +43,21 @@ class FactoryTests(unittest.TestCase):
     def test_ur_backend_without_hosts_exits(self) -> None:
         with self.assertRaises(SystemExit):
             create_robot_controller(RobotConfig(backend="ur"))
+
+    def test_ur_defaults_to_read_only_monitor_backend(self) -> None:
+        backend = Mock()
+        with patch(
+            "vision_robot_arm.robot.factory.URMonitorBackend", return_value=backend
+        ) as monitor:
+            controller = create_robot_controller(
+                RobotConfig(backend="ur", right_host="10.0.0.2")
+            )
+            controller.advance()
+
+        monitor.assert_called_once()
+        self.assertEqual(controller.phase, "monitoring")
+        backend.home.assert_not_called()
+        backend.send.assert_not_called()
 
     def test_debug_backend_creates_mapped_controller(self) -> None:
         controller = create_robot_controller(RobotConfig(backend="debug"))
