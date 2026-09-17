@@ -6,6 +6,7 @@ from vision_robot_arm.robot.targets import GRIPPER_CLOSE, GRIPPER_OPEN, ArmTarge
 from vision_robot_arm.robot.ur_backend import (
     URBackend,
     HomingError,
+    ControlFault,
     encode_gripper,
     encode_movej,
     encode_servoj,
@@ -473,6 +474,37 @@ class SafetyTests(unittest.TestCase):
         clock.now = 99.0
         with self.assertRaises(HomingError):
             backend.send(targets(right={"shoulder": 0.0}))
+
+    def test_silent_connected_feedback_expires_and_blocks_motion(self) -> None:
+        connector = FakeConnector()
+        factory = FakeRtdeFactory()
+        backend, clock = self.make(connector, factory)
+        for client in factory.clients.values():
+            client.sample = {"actual_q": (0.0, -math.pi / 2, 0.0, -math.pi / 2, 0.0, 0.0)}
+        clock.now = 1.1
+        backend.send(targets(right={"shoulder": -80.0}))
+        for client in factory.clients.values():
+            client.sample = None  # Socket remains connected, but packets stop arriving.
+        clock.now = 1.7
+        with self.assertRaises(ControlFault):
+            backend.send(targets(right={"shoulder": -70.0}))
+        for sock in connector.sockets.values():
+            self.assertTrue(sock.closed)
+            self.assertEqual(len(sock.commands(b"servoj(")), 1)
+        with self.assertRaises(ControlFault):
+            backend.send(targets(right={"shoulder": -70.0}))
+
+    def test_controller_safety_fault_blocks_both_arms(self) -> None:
+        connector = FakeConnector()
+        factory = FakeRtdeFactory()
+        backend, clock = self.make(connector, factory)
+        factory.clients["192.168.1.11"].sample = {"safety_status": 3}
+        clock.now = 1.1
+        with self.assertRaises(ControlFault):
+            backend.send(targets(right={"shoulder": -80.0}))
+        for sock in connector.sockets.values():
+            self.assertEqual(sock.commands(b"servoj("), [])
+            self.assertTrue(sock.closed)
 
     def test_lost_feedback_stops_presenting_a_stale_pose(self) -> None:
         connector = FakeConnector()

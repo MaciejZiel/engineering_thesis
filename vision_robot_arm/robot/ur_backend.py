@@ -35,6 +35,7 @@ MAX_CATCHUP_INTERVALS = 3.0
 # With feedback the homing window ends when the arm has arrived, not when a timer says so.
 HOME_TOLERANCE_DEG = 3.0
 HOMING_TIMEOUT_FACTOR = 5.0
+FEEDBACK_MAX_AGE_S = 0.5
 JOINT_SHORT_NAMES = {"shoulder": "S", "elbow": "E", "wrist_1": "W1"}
 
 Connector = Callable[[str, int], Any]
@@ -42,7 +43,11 @@ RtdeFactory = Callable[[str, int], RtdeClient | None]
 StatusQuery = Callable[[str, int], Any]
 
 
-class HomingError(RuntimeError):
+class ControlFault(RuntimeError):
+    """A latched control fault requires the session to be restarted."""
+
+
+class HomingError(ControlFault):
     """A requested home position was not confirmed before its deadline."""
 
 
@@ -117,6 +122,7 @@ class URArm:
         self._setpoints = SimulatedArm(config)
         self._gripper: str | None = None
         self._feedback: dict[str, Any] = {}
+        self._feedback_at: float | None = None
         self._rtde: RtdeClient | None = None
         self._homed = False
         self._homing_error: str | None = None
@@ -160,8 +166,10 @@ class URArm:
 
     @property
     def feedback_joints(self) -> dict[str, float] | None:
+        if self._feedback_at is None or self._clock() - self._feedback_at > FEEDBACK_MAX_AGE_S:
+            return None
         actual = self._feedback.get("actual_q")
-        if not actual or len(actual) < len(JOINT_NAMES):
+        if not actual or len(actual) != len(JOINT_NAMES) or not all(math.isfinite(v) for v in actual):
             return None
         return {name: math.degrees(actual[index]) for index, name in enumerate(JOINT_NAMES)}
 
@@ -191,9 +199,23 @@ class URArm:
         sample = self._rtde.read()
         if sample:
             self._feedback = sample
+            self._feedback_at = self._clock()
         elif not self._rtde.connected:
             # Never present a stale pose as the live one.
             self._feedback = {}
+            self._feedback_at = None
+
+    def check_control_health(self) -> None:
+        if self._rtde is None:
+            return
+        safety = self._feedback.get("safety_status")
+        mode = self._feedback.get("robot_mode")
+        if safety is not None and safety not in (1, 2):
+            raise ControlFault(f"{self.name}: controller safety state {safety} blocks motion.")
+        if mode is not None and mode != 7:
+            raise ControlFault(f"{self.name}: controller is not running (mode {mode}).")
+        if self._homed and self.feedback_joints is None:
+            raise ControlFault(f"{self.name}: fresh position feedback is required to continue.")
 
     def state(self) -> ArmState:
         return ArmState(
@@ -237,6 +259,8 @@ class URArm:
             return "open-loop"
         if not self._rtde.connected:
             return "feedback-lost"
+        if self.feedback_joints is None:
+            return "feedback-stale"
         mode = ROBOT_MODES.get(self._feedback.get("robot_mode"), "?")
         safety = SAFETY_STATUSES.get(self._feedback.get("safety_status"), "?")
         return f"{mode}/{safety}"
@@ -285,6 +309,7 @@ class URBackend:
     ) -> None:
         self._config = config
         self._clock = clock
+        self._fault: str | None = None
         if config.preflight:
             _preflight(config, status_query)
         factory = rtde_factory if config.feedback else None
@@ -300,6 +325,8 @@ class URBackend:
         self._last_send_at: float | None = None
 
     def send(self, targets: JointTargets) -> None:
+        if self._fault is not None:
+            raise ControlFault(self._fault)
         if not targets.has_data:
             return
         self._tracker.update(targets)
@@ -319,10 +346,12 @@ class URBackend:
             # Check every arm before allowing either one to stream a new command.
             for arm in self._arms.values():
                 arm.poll_feedback()
+                arm.check_control_health()
                 _ = arm.homing
             for name, arm in self._arms.items():
                 arm.update(accumulated.arm(name), elapsed)
-        except HomingError:
+        except ControlFault as error:
+            self._fault = str(error)
             self.close()
             raise
 
