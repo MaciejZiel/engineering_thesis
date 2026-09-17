@@ -405,3 +405,120 @@ def format_camera_list(cameras: Sequence[CameraDevice]) -> str:
         formats_str = f" [formats: {', '.join(cam.formats)}]" if cam.formats else ""
         lines.append(f"{prefix} {cam.name}{formats_str}")
     return "\n".join(lines)
+
+
+def diagnose_camera(cv2: Any, camera_target: int | str, test_duration_s: float = 3.0) -> int:
+    """Run diagnostic tests on a camera and print detailed capabilities and performance metrics."""
+    import time
+
+    devices = discover_cameras(cv2)
+    if not devices and camera_target != "auto":
+        print(f"No cameras found. Run --list-cameras first.")
+        return 1
+
+    target_index: int | None = None
+    if isinstance(camera_target, int):
+        target_index = camera_target
+    elif isinstance(camera_target, str) and camera_target.lower() != "auto":
+        try:
+            target_index = int(camera_target)
+        except ValueError:
+            pass
+
+    if target_index is None:
+        if devices:
+            target_index = devices[0].index
+        else:
+            target_index = 0
+
+    backend = _default_cv2_backend(cv2)
+    print(f"Opening camera {target_index} with backend {backend}...")
+    capture = cv2.VideoCapture(target_index, backend)
+
+    if not capture.isOpened():
+        print(f"Error: Could not open camera {target_index}")
+        return 1
+
+    try:
+        fourcc = int(capture.get(cv2.CAP_PROP_FOURCC))
+        codec = "".join(chr((fourcc >> (8 * i)) & 0xFF) for i in range(4)).strip("\x00")
+        width = round(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = capture.get(cv2.CAP_PROP_FPS)
+        buffersize = capture.get(cv2.CAP_PROP_BUFFERSIZE)
+
+        print(f"\n=== Current Camera Settings ===")
+        print(f"Resolution: {width}x{height}")
+        print(f"Codec: {codec or 'unknown'}")
+        print(f"Reported FPS: {fps}")
+        print(f"Buffer size: {buffersize}")
+
+        print(f"\n=== Probing Supported Resolutions ===")
+        tested_resolutions = set()
+        for w, h in STANDARD_CAMERA_RESOLUTIONS:
+            capture.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+            actual_w = round(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+            actual_h = round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            if (actual_w, actual_h) not in tested_resolutions:
+                tested_resolutions.add((actual_w, actual_h))
+                print(f"  {w}x{h} -> {actual_w}x{actual_h}")
+
+        print(f"\n=== Probing Supported Formats ===")
+        for fmt in ("MJPG", "YUYV", "NV12", "H264"):
+            try:
+                fourcc_code = cv2.VideoWriter_fourcc(*fmt)
+                capture.set(cv2.CAP_PROP_FOURCC, fourcc_code)
+                actual_fourcc = int(capture.get(cv2.CAP_PROP_FOURCC))
+                actual_codec = "".join(chr((actual_fourcc >> (8 * i)) & 0xFF) for i in range(4)).strip("\x00")
+                if actual_codec:
+                    print(f"  {fmt}: active as {actual_codec}")
+            except Exception:
+                pass
+
+        print(f"\n=== Measuring Actual FPS (target: {test_duration_s}s) ===")
+        capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+        capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+        capture.set(cv2.CAP_PROP_FPS, 30)
+
+        frame_times: list[float] = []
+        frames_captured = 0
+        start_time = time.monotonic()
+        last_frame_time = start_time
+
+        while time.monotonic() - start_time < test_duration_s:
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                print(f"Warning: Frame read failed at frame {frames_captured}")
+                break
+
+            current_time = time.monotonic()
+            frame_times.append(current_time - last_frame_time)
+            last_frame_time = current_time
+            frames_captured += 1
+
+        elapsed = time.monotonic() - start_time
+
+        if frames_captured > 1:
+            measured_fps = frames_captured / elapsed
+            interval_times = frame_times[1:]
+            if interval_times:
+                avg_interval = sum(interval_times) / len(interval_times)
+                min_interval = min(interval_times)
+                max_interval = max(interval_times)
+                print(f"  Frames captured: {frames_captured}")
+                print(f"  Elapsed time: {elapsed:.2f}s")
+                print(f"  Measured FPS: {measured_fps:.2f}")
+                print(f"  Avg frame interval: {avg_interval*1000:.1f}ms")
+                print(f"  Min frame interval: {min_interval*1000:.1f}ms")
+                print(f"  Max frame interval: {max_interval*1000:.1f}ms")
+            else:
+                print("  Not enough frames for interval analysis.")
+        else:
+            print("  Not enough frames captured for analysis.")
+
+        print(f"\n=== Diagnostic Complete ===")
+        return 0
+
+    finally:
+        capture.release()

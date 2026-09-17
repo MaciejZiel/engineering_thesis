@@ -28,6 +28,7 @@ from vision_robot_arm.robot.config import (
 from vision_robot_arm.vision.camera import (
     BACKEND_CHOICES as CAMERA_BACKEND_CHOICES,
     FORMAT_CHOICES as CAMERA_FORMAT_CHOICES,
+    diagnose_camera,
     discover_cameras,
     format_camera_list,
 )
@@ -50,6 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--list-cameras",
         action="store_true",
         help="List available video cameras on the system and exit.",
+    )
+    parser.add_argument(
+        "--diagnose-camera",
+        type=_parse_camera_target,
+        default=None,
+        help="Diagnose a specific camera (index or 'auto') and print detailed capabilities, then exit.",
     )
     parser.add_argument(
         "--hand-detection-confidence",
@@ -450,6 +457,9 @@ def main() -> int:
         cameras = discover_cameras(deps.cv2)
         print(format_camera_list(cameras))
         return 0
+    if args.diagnose_camera is not None:
+        deps = load_runtime_dependencies()
+        return diagnose_camera(deps.cv2, args.diagnose_camera)
     config = parse_args()
     config.validate()
     return run_app(config)
