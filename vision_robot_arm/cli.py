@@ -8,7 +8,7 @@ from vision_robot_arm.core.config import (
     DEFAULT_RECORDING_DIR,
     AppConfig,
 )
-from vision_robot_arm.core.runtime import load_runtime_dependencies
+from vision_robot_arm.core.runtime import load_camera_dependency
 from vision_robot_arm.robot.config import (
     BACKEND_CHOICES,
     BACKEND_DEBUG,
@@ -28,17 +28,20 @@ from vision_robot_arm.robot.config import (
 from vision_robot_arm.vision.camera import (
     BACKEND_CHOICES as CAMERA_BACKEND_CHOICES,
     FORMAT_CHOICES as CAMERA_FORMAT_CHOICES,
-    diagnose_camera,
     discover_cameras,
     format_camera_list,
 )
+from vision_robot_arm.vision.camera_diagnostics import DiagnosticSettings, diagnose_camera
 
 
 def _parse_camera_target(val: str) -> int | str:
     if val.lower() == "auto":
         return "auto"
     try:
-        return int(val)
+        index = int(val)
+        if index < 0:
+            raise ValueError("Negative camera index")
+        return index
     except ValueError as error:
         raise argparse.ArgumentTypeError("Camera must be a non-negative index or 'auto'.") from error
 
@@ -56,7 +59,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--diagnose-camera",
         type=_parse_camera_target,
         default=None,
-        help="Diagnose a specific camera (index or 'auto') and print detailed capabilities, then exit.",
+        help="Measure delivery from a camera (index or 'auto'), without models or UI, then exit.",
+    )
+    parser.add_argument(
+        "--diagnostic-seconds", type=float, default=5.0,
+        help="Camera measurement window after warmup, 1..60 seconds. Default: 5.",
+    )
+    parser.add_argument(
+        "--diagnostic-warmup", type=float, default=2.0,
+        help="Camera warmup before measurement, 0..30 seconds. Default: 2.",
     )
     parser.add_argument(
         "--hand-detection-confidence",
@@ -451,15 +462,27 @@ def _with_limit(mapping: JointMapping, limits: tuple[float, float]) -> JointMapp
 
 
 def main() -> int:
-    args = build_parser().parse_args()
-    if getattr(args, "list_cameras", False):
-        deps = load_runtime_dependencies()
-        cameras = discover_cameras(deps.cv2)
+    parser = build_parser()
+    args = parser.parse_args()
+    if args.list_cameras and args.diagnose_camera is not None:
+        parser.error("--list-cameras and --diagnose-camera cannot be combined")
+    if args.list_cameras:
+        cameras = discover_cameras(load_camera_dependency())
         print(format_camera_list(cameras))
         return 0
     if args.diagnose_camera is not None:
-        deps = load_runtime_dependencies()
-        return diagnose_camera(deps.cv2, args.diagnose_camera)
+        if args.video is not None:
+            parser.error("--diagnose-camera cannot be combined with --video")
+        settings = DiagnosticSettings(
+            width=args.width, height=args.height, camera_fps=args.fps,
+            camera_format=args.camera_format, camera_backend=args.camera_backend,
+            duration_s=args.diagnostic_seconds, warmup_s=args.diagnostic_warmup,
+        )
+        try:
+            settings.validate()
+        except ValueError as error:
+            parser.error(str(error))
+        return diagnose_camera(load_camera_dependency(), args.diagnose_camera, settings=settings)
     config = parse_args()
     config.validate()
     return run_app(config)

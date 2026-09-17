@@ -11,6 +11,18 @@ class RuntimeDeps:
     base_options: Any
 
 
+def load_camera_dependency() -> Any:
+    """Load OpenCV without importing MediaPipe or constructing models."""
+    try:
+        import cv2  # type: ignore
+    except ImportError as error:
+        raise SystemExit(
+            "Missing dependency: opencv-contrib-python\n"
+            "Install it with: python -m pip install -r requirements.txt"
+        ) from error
+    return cv2
+
+
 def load_runtime_dependencies() -> RuntimeDeps:
     missing = []
     try:

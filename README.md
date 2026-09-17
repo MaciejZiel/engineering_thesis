@@ -61,6 +61,29 @@ If the default camera is not correct:
 python main.py --camera 1
 ```
 
+To list cameras or measure capture delivery without loading MediaPipe models or opening a window:
+
+```powershell
+python main.py --list-cameras
+python main.py --diagnose-camera 0 --width 1920 --height 1080 --camera-format mjpg
+```
+
+Diagnostics honor `--camera-backend`, `--camera-format`, `--width`, `--height`,
+and `--fps`. Use `--diagnostic-warmup 2 --diagnostic-seconds 5` to adjust the
+warmup and measurement windows. Each invocation measures one requested mode;
+driver-reported settings and delivered frame dimensions are shown separately.
+No images are stored, exposure is not changed, and robot connections are not
+opened. Read/interval p95 timings describe host delivery, **not** sensor-to-display
+latency. A low FPS result is a valid measurement, not proof of a particular cause.
+Native driver reads can block beyond the measurement window; it is not a hard
+process timeout.
+
+Capture preserves the driver's default buffer count. Forcing a single V4L2
+buffer reduced the tested USB camera from approximately 29.6 to 14.8 FPS at
+1080p MJPG. Removing that override restored 29.6 FPS in the application's capture
+path. This device-specific result does not establish end-to-end UI latency or
+performance on other cameras.
+
 To process a saved video instead of the webcam:
 
 ```powershell
