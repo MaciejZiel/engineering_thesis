@@ -155,6 +155,7 @@ class PoseStateBuilder:
             if body_frame is not None
             else {}
         )
+        body_points = _named_body_points(body_landmarks, self._indices)
 
         return PoseState(
             timestamp_ms=timestamp_ms,
@@ -171,6 +172,7 @@ class PoseStateBuilder:
             body_frame=body_frame,
             body_landmarks=body_landmarks,
             hand_body_landmarks=hand_body_landmarks,
+            body_points=body_points,
         )
 
     def capture_calibration(self, state: PoseState, required=()) -> int:
@@ -207,3 +209,17 @@ def _freeze_hands(
         )
         for side, landmarks in (hands or {}).items()
     }
+
+
+def _named_body_points(
+    body_landmarks: list[LandmarkPoint] | None, indices: dict[str, int]
+) -> dict[str, LandmarkPoint]:
+    if body_landmarks is None:
+        return {}
+    points = {}
+    for side in ("left", "right"):
+        for joint in ("shoulder", "elbow", "wrist"):
+            index = indices.get(f"{side.upper()}_{joint.upper()}")
+            if index is not None and 0 <= index < len(body_landmarks):
+                points[f"{side}_{joint}"] = body_landmarks[index]
+    return points

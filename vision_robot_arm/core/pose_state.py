@@ -64,6 +64,7 @@ class PoseState:
     hand_body_landmarks: dict[str, tuple[LandmarkPoint, ...]] = field(
         default_factory=dict
     )
+    body_points: dict[str, LandmarkPoint] = field(default_factory=dict)
 
     @property
     def display_angles(self) -> dict[str, float | None]:
