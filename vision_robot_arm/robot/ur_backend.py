@@ -105,7 +105,7 @@ class URArm:
         connector: Connector,
         rtde_factory: RtdeFactory | None,
         clock: Clock,
-        auto_home: bool = True,
+        auto_home: bool = False,
     ) -> None:
         self.name = name
         self.host = host
@@ -325,19 +325,24 @@ class URBackend:
         clock: Clock = time.monotonic,
         rtde_factory: RtdeFactory | None = default_rtde_factory,
         status_query: StatusQuery = query_status,
-        auto_home: bool = True,
+        auto_home: bool = False,
         require_feedback: bool = False,
     ) -> None:
         self._config = config
         self._clock = clock
+        config.validate()
         self._fault: str | None = None
+        self._require_feedback = require_feedback
+        self._status_query = status_query
+        if require_feedback and not config.feedback:
+            raise ControlFault("Hardware control requires RTDE feedback.")
         if config.preflight:
             _preflight(config, status_query)
         factory = rtde_factory if config.feedback else None
         self._arms: dict[str, URArm] = {}
         try:
             for name, host in config.hosts.items():
-                self._arms[name] = URArm(name, host, config, connector, factory, clock, auto_home)
+                self._arms[name] = URArm(name, host, config, connector, factory, clock, auto_home=False)
                 if require_feedback and self._arms[name]._rtde is None:
                     raise ControlFault(f"{name}: the interactive hardware session requires RTDE feedback.")
         except BaseException:
@@ -346,14 +351,29 @@ class URBackend:
         self._tracker = TargetTracker()
         self._next_send_at = 0.0
         self._last_send_at: float | None = None
+        if auto_home:
+            self.home()
 
     def home(self) -> None:
         if self._fault is not None:
             raise ControlFault(self._fault)
         try:
+            if self._config.preflight:
+                _preflight(self._config, self._status_query)
+            # Validate both arms before either can begin a homing move.
+            for arm in self._arms.values():
+                arm.poll_feedback()
+                arm.check_control_health()
+                if self._require_feedback and (
+                    arm.feedback_joints is None
+                    or arm._feedback.get("robot_mode") != 7
+                    or arm._feedback.get("safety_status") not in (1, 2)
+                ):
+                    raise ControlFault(f"{arm.name}: fresh, complete RTDE feedback is required to home.")
             for arm in self._arms.values():
                 arm.home()
-        except BaseException:
+        except BaseException as error:
+            self._fault = str(error)
             self.close()
             raise
 
@@ -435,7 +455,10 @@ def _preflight(config: RobotConfig, status_query: StatusQuery) -> None:
     for name, host in config.hosts.items():
         status = status_query(host, config.dashboard_port)
         if status is None:
-            continue
+            raise SystemExit(
+                f"Cannot verify the {name} UR7e at {host}: dashboard unavailable. "
+                "No motion is authorized. --no-robot-preflight explicitly disables this check."
+            )
         problem = status.blocking_problem()
         if problem:
             raise SystemExit(

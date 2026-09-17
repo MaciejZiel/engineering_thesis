@@ -145,6 +145,52 @@ class URBackendTests(unittest.TestCase):
         backend.home()
         self.assertEqual(len(connector.sockets["test"].commands(b"movej(")), 1)
 
+    def test_default_construction_never_homes(self):
+        connector = FakeConnector()
+        backend = URBackend(
+            RobotConfig(backend="ur", right_host="test", preflight=False),
+            connector=connector, rtde_factory=None,
+        )
+        backend.send(targets(right={"shoulder": -80.0}))
+        self.assertEqual(connector.sockets["test"].sent, [])
+        backend.close()
+
+    def test_home_rechecks_all_feedback_before_either_arm_moves(self):
+        for sample in (None, {"actual_q": (0.0,) * 6},
+                       {"actual_q": (0.0,) * 6, "robot_mode": 7, "safety_status": 3}):
+            with self.subTest(sample=sample):
+                connector = FakeConnector()
+                factory = FakeRtdeFactory()
+                backend = URBackend(
+                    RobotConfig(backend="ur", right_host="right", left_host="left", preflight=False),
+                    connector=connector, rtde_factory=factory, require_feedback=True,
+                )
+                factory.clients["right"].sample = {
+                    "actual_q": (0.0,) * 6, "robot_mode": 7, "safety_status": 1,
+                }
+                factory.clients["left"].sample = sample
+                with self.assertRaises(ControlFault):
+                    backend.home()
+                for sock in connector.sockets.values():
+                    self.assertEqual(sock.commands(b"movej("), [])
+                    self.assertTrue(sock.closed)
+                with self.assertRaises(ControlFault):
+                    backend.home()
+
+    def test_home_rechecks_dashboard_after_connect(self):
+        from unittest.mock import Mock
+
+        connector = FakeConnector()
+        query = Mock(side_effect=[ready_status("", 0), None])
+        backend = URBackend(
+            RobotConfig(backend="ur", right_host="test"),
+            connector=connector, rtde_factory=None, status_query=query,
+        )
+        with self.assertRaisesRegex(SystemExit, "dashboard unavailable"):
+            backend.home()
+        self.assertEqual(connector.sockets["test"].commands(b"movej("), [])
+        self.assertTrue(connector.sockets["test"].closed)
+
     def test_required_feedback_failure_closes_connection_without_homing(self):
         connector = FakeConnector()
         with self.assertRaises(ControlFault):
@@ -178,6 +224,7 @@ class URBackendTests(unittest.TestCase):
             clock=clock,
             rtde_factory=rtde_factory,
             status_query=no_status,
+            auto_home=True,
         )
         return backend, clock
 
@@ -386,6 +433,7 @@ class SafetyTests(unittest.TestCase):
             clock=clock,
             rtde_factory=factory,
             status_query=no_status,
+            auto_home=True,
         )
         return backend, clock
 
@@ -569,6 +617,7 @@ class SafetyTests(unittest.TestCase):
                 connector=connector,
                 rtde_factory=factory,
                 status_query=no_status,
+                auto_home=True,
             )
 
         self.assertTrue(opened[0].closed)
@@ -590,12 +639,13 @@ class PreflightTests(unittest.TestCase):
         self.assertIn("Local control", message)
         self.assertIn("--no-robot-preflight", message)
 
-    def test_unreachable_dashboard_does_not_block_startup(self) -> None:
+    def test_unreachable_dashboard_blocks_before_opening_command_connection(self) -> None:
         connector = FakeConnector()
 
-        URBackend(self.config(), connector=connector, rtde_factory=None, status_query=no_status)
+        with self.assertRaisesRegex(SystemExit, "dashboard unavailable"):
+            URBackend(self.config(), connector=connector, rtde_factory=None, status_query=no_status)
 
-        self.assertIn("10.0.0.2", connector.sockets)
+        self.assertEqual(connector.sockets, {})
 
     def test_ready_robot_starts(self) -> None:
         connector = FakeConnector()
