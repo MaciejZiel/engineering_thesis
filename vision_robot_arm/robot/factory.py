@@ -16,11 +16,15 @@ from vision_robot_arm.robot.mapping import RobotMapper
 from vision_robot_arm.robot.serial_backend import SerialBackend
 from vision_robot_arm.robot.simulation import SimulationBackend
 from vision_robot_arm.robot.ur_backend import URBackend
+from vision_robot_arm.robot.session import HardwareSession
 
 
 def create_robot_controller(config: RobotConfig) -> RobotController:
     if config.backend == BACKEND_NONE:
         return NullRobotController()
+    if config.backend == BACKEND_UR:
+        config.validate()
+        return HardwareSession(config, lambda: URBackend(config, auto_home=False, require_feedback=True))
     return MappedRobotController(RobotMapper(config), create_robot_backend(config))
 
 

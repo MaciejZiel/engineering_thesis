@@ -134,6 +134,26 @@ class EncodeTests(unittest.TestCase):
 
 
 class URBackendTests(unittest.TestCase):
+    def test_connection_only_does_not_home_or_stream(self):
+        connector = FakeConnector()
+        backend = URBackend(
+            RobotConfig(backend="ur", right_host="test", preflight=False),
+            connector=connector, rtde_factory=None, auto_home=False,
+        )
+        backend.send(targets(right={"shoulder": -80.0}))
+        self.assertEqual(connector.sockets["test"].sent, [])
+        backend.home()
+        self.assertEqual(len(connector.sockets["test"].commands(b"movej(")), 1)
+
+    def test_required_feedback_failure_closes_connection_without_homing(self):
+        connector = FakeConnector()
+        with self.assertRaises(ControlFault):
+            URBackend(RobotConfig(backend="ur", right_host="test", preflight=False),
+                      connector=connector, rtde_factory=None, auto_home=False,
+                      require_feedback=True)
+        self.assertEqual(connector.sockets["test"].commands(b"movej("), [])
+        self.assertTrue(connector.sockets["test"].closed)
+
     def make_backend(
         self,
         connector: FakeConnector,

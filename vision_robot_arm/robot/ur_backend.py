@@ -105,6 +105,7 @@ class URArm:
         connector: Connector,
         rtde_factory: RtdeFactory | None,
         clock: Clock,
+        auto_home: bool = True,
     ) -> None:
         self.name = name
         self.host = host
@@ -125,25 +126,41 @@ class URArm:
         self._feedback_at: float | None = None
         self._rtde: RtdeClient | None = None
         self._homed = False
+        self._home_started = False
         self._homing_error: str | None = None
         self._ready_at = clock() + config.start_seconds
         self._homing_deadline = self._ready_at + config.start_seconds * HOMING_TIMEOUT_FACTOR
         try:
             self._rtde = rtde_factory(host, config.rtde_port) if rtde_factory is not None else None
-            self._send(
-                encode_movej(
-                    self._setpoints.joints, config.start_speed_deg_s, config.start_accel_deg_s2
-                )
-            )
+            if auto_home:
+                self.home()
         except BaseException:
             self._release()
             raise
+
+    def home(self) -> None:
+        self._ready_at = self._clock() + self._config.start_seconds
+        self._homing_deadline = self._ready_at + max(1.0, self._config.start_seconds * HOMING_TIMEOUT_FACTOR)
+        self._home_started = True
+        self._homed = False
+        self._setpoints = SimulatedArm(self._config)
+        self._send(encode_movej(self._setpoints.joints, self._config.start_speed_deg_s,
+                                self._config.start_accel_deg_s2))
+
+    def pause(self) -> None:
+        self._send(encode_stopj())
+        actual = self.feedback_joints
+        if actual is not None:
+            self._setpoints.joints.update(actual)
+            self._setpoints.targets.update(actual)
 
     @property
     def homing(self) -> bool:
         """True until the arm reaches the home pose; latched, because a servo always lags."""
         if self._homing_error is not None:
             raise HomingError(self._homing_error)
+        if not self._home_started:
+            return False
         if self._homed:
             return False
         now = self._clock()
@@ -175,6 +192,8 @@ class URArm:
 
     def update(self, targets: ArmTargets, elapsed_s: float) -> None:
         """Move the setpoint toward the mapped pose, then command that setpoint."""
+        if not self._home_started:
+            return
         self._setpoints.set_targets(targets.joints, targets.gripper)
         if self.homing:
             # The arm is still driving to the home pose; leave the setpoint there so
@@ -306,6 +325,8 @@ class URBackend:
         clock: Clock = time.monotonic,
         rtde_factory: RtdeFactory | None = default_rtde_factory,
         status_query: StatusQuery = query_status,
+        auto_home: bool = True,
+        require_feedback: bool = False,
     ) -> None:
         self._config = config
         self._clock = clock
@@ -316,13 +337,44 @@ class URBackend:
         self._arms: dict[str, URArm] = {}
         try:
             for name, host in config.hosts.items():
-                self._arms[name] = URArm(name, host, config, connector, factory, clock)
-        except SystemExit:
+                self._arms[name] = URArm(name, host, config, connector, factory, clock, auto_home)
+                if require_feedback and self._arms[name]._rtde is None:
+                    raise ControlFault(f"{name}: the interactive hardware session requires RTDE feedback.")
+        except BaseException:
             self.close()
             raise
         self._tracker = TargetTracker()
         self._next_send_at = 0.0
         self._last_send_at: float | None = None
+
+    def home(self) -> None:
+        if self._fault is not None:
+            raise ControlFault(self._fault)
+        try:
+            for arm in self._arms.values():
+                arm.home()
+        except BaseException:
+            self.close()
+            raise
+
+    def ready(self) -> bool:
+        ready = True
+        for arm in self._arms.values():
+            arm.poll_feedback()
+            arm.check_control_health()
+            ready = arm._home_started and not arm.homing and ready
+        return ready
+
+    def pause(self) -> None:
+        self._tracker = TargetTracker()
+        self._last_send_at = None
+        self._next_send_at = 0.0
+        try:
+            for arm in self._arms.values():
+                arm.pause()
+        except BaseException:
+            self.close()
+            raise
 
     def send(self, targets: JointTargets) -> None:
         if self._fault is not None:

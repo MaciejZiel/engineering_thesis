@@ -27,6 +27,7 @@ ACTION_MODE = "mode"
 ACTION_QUIT = "quit"
 ACTION_RECORD = "record"
 ACTION_DETAILS = "details"
+ACTION_CONTROL = "control"
 
 
 @dataclass(frozen=True)
@@ -254,6 +255,8 @@ class DashboardUi:
         source_label: str,
         robot_state_available: bool = True,
         can_calibrate: bool | None = None,
+        control_label: str | None = None,
+        alert: str | None = None,
     ) -> Any:
         camera_height, camera_width = camera_frame.shape[:2]
         width, height = self._canvas_size or (
@@ -272,7 +275,8 @@ class DashboardUi:
             if person_detected
             else "Step into view with your shoulders and hands visible."
         )
-        p.text(subtitle, x, top + p.px(36), color=MUTED, size=14, width=width - 2 * x)
+        p.text(alert or subtitle, x, top + p.px(36), color=RED if alert else MUTED,
+               size=14, width=width - 2 * x)
         if recording:
             p.dot(width - x - p.px(125), top + p.px(12), RED)
             p.text(
@@ -302,7 +306,7 @@ class DashboardUi:
             if can_calibrate is None
             else person_detected and can_calibrate
         )
-        self._footer(p, layout, mode, recording, calibration_ready, calibrated)
+        self._footer(p, layout, mode, recording, calibration_ready, calibrated, control_label)
         return canvas
 
     def _header(self, p: Painter, layout: DashboardLayout, robot: str) -> None:
@@ -543,6 +547,7 @@ class DashboardUi:
         recording: bool,
         detected: bool,
         calibrated: bool,
+        control_label: str | None = None,
     ) -> None:
         rect, pad = layout.footer, layout.margin
         p.line((pad, rect.y), (rect.right - pad, rect.y))
@@ -584,7 +589,9 @@ class DashboardUi:
                 True,
                 False,
             ),
-            (ACTION_MODE, f"Console: {mode}", "1–3", 178, False, True, False),
+            (ACTION_CONTROL if control_label else ACTION_MODE,
+             control_label or f"Console: {mode}", "H" if control_label else "1–3",
+             178, False, True, bool(control_label)),
             (
                 ACTION_FULLSCREEN,
                 "Exit full screen" if self._fullscreen else "Full screen",

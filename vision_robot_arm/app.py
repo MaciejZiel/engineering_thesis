@@ -6,6 +6,7 @@ from vision_robot_arm.core.display import enable_high_dpi_awareness
 from vision_robot_arm.core.pose_state import LandmarkPoint, mirror_landmarks
 from vision_robot_arm.core.runtime import load_runtime_dependencies
 from vision_robot_arm.robot.controller import RobotController
+from vision_robot_arm.robot.session import HardwareSession
 from vision_robot_arm.robot.factory import create_robot_controller
 from vision_robot_arm.robot.visualization import draw_simulation
 from vision_robot_arm.vision.dashboard import (
@@ -14,6 +15,7 @@ from vision_robot_arm.vision.dashboard import (
     ACTION_MODE,
     ACTION_QUIT,
     ACTION_RECORD,
+    ACTION_CONTROL,
     DashboardUi,
     cycle_output_mode,
 )
@@ -307,6 +309,9 @@ def run_app(config: AppConfig) -> int:
                 source_label=_source_label(config),
                 robot_state_available=robot_state is not None,
                 can_calibrate=can_calibrate,
+                control_label=(robot_controller.action_label
+                               if isinstance(robot_controller, HardwareSession) else None),
+                alert=(getattr(robot_controller, "error", None) or recorder.last_error),
             )
             cv2.imshow(WINDOW_NAME, dashboard_frame)
 
@@ -316,6 +321,11 @@ def run_app(config: AppConfig) -> int:
             dashboard.sync_window_size()
             dashboard.handle_key(key)
             action = dashboard.consume_action()
+            if isinstance(robot_controller, HardwareSession):
+                if key == ord("h") or action == ACTION_CONTROL:
+                    robot_controller.advance()
+                if key == ord("p"):
+                    robot_controller.pause()
             if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
                 return 0
             if key in (ord("q"), 27) or action == ACTION_QUIT:

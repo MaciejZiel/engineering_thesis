@@ -135,6 +135,22 @@ recording means something different from a run with hand tracking on.
 
 ## Dashboard UI
 
+### Hardware control lifecycle
+
+Selecting the UR backend in the application no longer connects or moves an arm
+at startup. The hardware button (keyboard **H**) advances one explicit step:
+**Connect → Home (moves the robots) → Enable control**. Homing must be confirmed
+before control can be enabled. **P** pauses motion; resuming requires another
+explicit action. Missing any mapped joint on a configured arm pauses the session.
+Returning into view does not automatically resume control. A fault closes both
+connections and requires restarting the session. The interactive UR session requires
+RTDE feedback; it does not silently continue open-loop if feedback is unavailable.
+
+These software checks are not a hardware emergency stop or collision avoidance.
+Do not enable motion without the laboratory's approved workspace and procedures.
+The lower-level backend retains its legacy auto-home option for API compatibility;
+the interactive application explicitly disables it.
+
 The application uses one resizable OpenCV window named **Motion Twin**. The
 camera feed occupies the main area. A graphite sidebar contains a compact
 schematic of both UR7e arms and the session's tracking, calibration, recording
