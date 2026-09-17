@@ -83,6 +83,24 @@ class StillJointTests(unittest.TestCase):
 
 
 class LandmarkSmootherTests(unittest.TestCase):
+    def test_same_elapsed_time_has_same_response_at_different_frame_rates(self):
+        values = []
+        for interval in (20, 50, 100):
+            smoother = LandmarkSmoother(0.35, noise_floor=0)
+            smoother.update([LandmarkPoint(0, 0, 0)], 0)
+            for timestamp in range(interval, 301, interval):
+                value = smoother.update([LandmarkPoint(1, 0, 0)], timestamp)
+            values.append(value[0].x)
+        self.assertAlmostEqual(values[0], values[1])
+        self.assertAlmostEqual(values[1], values[2])
+
+    def test_stale_and_rewound_landmarks_are_not_blended(self):
+        for timestamp in (0, 1000):
+            smoother = LandmarkSmoother(0.1)
+            smoother.update([LandmarkPoint(0, 0, 0)], 100)
+            result = smoother.update([LandmarkPoint(1, 0, 0)], timestamp)
+            self.assertEqual(result[0].x, 1)
+
     def test_smooths_coordinates_and_keeps_current_visibility(self) -> None:
         smoother = LandmarkSmoother(alpha=0.5)
         smoother.update([LandmarkPoint(0.0, 0.0, 0.0, visibility=0.9)])

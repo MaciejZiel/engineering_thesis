@@ -170,6 +170,7 @@ def run_app(config: AppConfig) -> int:
                     ),
                     hand_smoothers,
                     config.smoothing_alpha,
+                    timestamp_ms,
                 )
                 # Everything downstream hinges on the wrist, so correct it first.
                 pose_landmarks = refine_pose_wrists(pose_landmarks, hands_by_side, indices)
@@ -344,6 +345,7 @@ def _smooth_hands(
     hands_by_side: dict[str, list],
     smoothers: dict[str, LandmarkSmoother],
     alpha: float,
+    timestamp_ms: int | None = None,
 ) -> dict[str, list]:
     """The hand tracker output is raw, and it was drawn and measured exactly as it arrived."""
     for side in set(smoothers) - set(hands_by_side):
@@ -351,7 +353,9 @@ def _smooth_hands(
     smoothed = {}
     for side, hand in hands_by_side.items():
         smoother = smoothers.setdefault(side, LandmarkSmoother(alpha))
-        smoothed[side] = smoother.update([LandmarkPoint.from_landmark(point) for point in hand])
+        smoothed[side] = smoother.update(
+            [LandmarkPoint.from_landmark(point) for point in hand], timestamp_ms
+        )
     return smoothed
 
 

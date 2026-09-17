@@ -38,7 +38,7 @@ class PoseStateBuilder:
         hand_tracking_enabled: bool = False,
     ) -> PoseState:
         raw_landmarks = [LandmarkPoint.from_landmark(landmark) for landmark in landmarks]
-        smoothed_landmarks = self._landmark_smoother.update(raw_landmarks)
+        smoothed_landmarks = self._landmark_smoother.update(raw_landmarks, timestamp_ms)
 
         smoothed_world_landmarks = None
         if world_landmarks is not None:
@@ -47,7 +47,7 @@ class PoseStateBuilder:
                 for landmark in world_landmarks
             ]
             smoothed_world_landmarks = self._world_landmark_smoother.update(
-                raw_world_landmarks
+                raw_world_landmarks, timestamp_ms
             )
 
         raw_angles = calculate_angles(

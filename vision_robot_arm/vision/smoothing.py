@@ -73,8 +73,18 @@ class LandmarkSmoother:
         self._min_visibility = min_visibility
         self._noise_floor = noise_floor
         self._previous: list[LandmarkPoint] | None = None
+        self._timestamp_ms: int | None = None
+        self._frame_units = 1.0
 
-    def update(self, landmarks: list[LandmarkPoint]) -> list[LandmarkPoint]:
+    def update(self, landmarks: list[LandmarkPoint], timestamp_ms: int | None = None) -> list[LandmarkPoint]:
+        self._frame_units = 1.0
+        if timestamp_ms is not None and self._timestamp_ms is not None:
+            elapsed = timestamp_ms - self._timestamp_ms
+            if elapsed <= 0 or elapsed > 500:
+                self.reset()
+            else:
+                self._frame_units = elapsed / (1000.0 / 30.0)
+        self._timestamp_ms = timestamp_ms
         if self._previous is None or len(self._previous) != len(landmarks):
             self._previous = landmarks
             return landmarks
@@ -93,9 +103,11 @@ class LandmarkSmoother:
 
     def reset(self) -> None:
         self._previous = None
+        self._timestamp_ms = None
 
     def _smooth(self, current: float, previous: float) -> float:
         alpha = taper(self._alpha, abs(current - previous), self._noise_floor)
+        alpha = 1.0 - (1.0 - alpha) ** self._frame_units
         return alpha * current + (1.0 - alpha) * previous
 
     def _valid(self, point: LandmarkPoint) -> bool:
