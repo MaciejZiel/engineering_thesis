@@ -33,13 +33,21 @@ class SimulatedArm:
         self.joints = {name: config.home_for(name) for name in JOINT_NAMES}
         self.targets = dict(self.joints)
         self.gripper = GRIPPER_OPEN
+        self.tcp_target: tuple[float, float, float] | None = None
 
-    def set_targets(self, joints: dict[str, float], gripper: str | None) -> None:
+    def set_targets(
+        self,
+        joints: dict[str, float],
+        gripper: str | None,
+        tcp_target: tuple[float, float, float] | None = None,
+    ) -> None:
         for joint, value in joints.items():
             if joint in self.targets:
                 self.targets[joint] = self._config.limit_for(joint).clamp(value)
         if gripper is not None:
             self.gripper = gripper
+        if tcp_target is not None:
+            self.tcp_target = tcp_target
 
     def step(self, max_delta: float) -> None:
         for joint, target in self.targets.items():
@@ -52,7 +60,12 @@ class SimulatedArm:
 
     @property
     def state(self) -> ArmState:
-        return ArmState(joints=dict(self.joints), targets=dict(self.targets), gripper=self.gripper)
+        return ArmState(
+            joints=dict(self.joints),
+            targets=dict(self.targets),
+            gripper=self.gripper,
+            tcp_target=self.tcp_target,
+        )
 
 
 class SimulationBackend:
@@ -74,7 +87,11 @@ class SimulationBackend:
         for name, arm_targets in targets.arms.items():
             arm = self._arms.get(name)
             if arm is not None:
-                arm.set_targets(arm_targets.joints, arm_targets.gripper)
+                arm.set_targets(
+                    arm_targets.joints,
+                    arm_targets.gripper,
+                    arm_targets.tcp_target,
+                )
         self._lift_mode = targets.lift_mode
 
         now = self._clock()

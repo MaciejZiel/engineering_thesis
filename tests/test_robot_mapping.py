@@ -1,6 +1,9 @@
 import unittest
 
-from vision_robot_arm.core.pose_state import PoseState
+import math
+
+from vision_robot_arm.core.pose_state import LandmarkPoint, PoseState
+from vision_robot_arm.robot.cartesian_mapping import ROBOT_BASES
 from vision_robot_arm.robot.config import (
     DEFAULT_ELBOW_MAPPING,
     DEFAULT_SHOULDER_MAPPING,
@@ -10,6 +13,7 @@ from vision_robot_arm.robot.config import (
     RobotConfig,
 )
 from vision_robot_arm.robot.mapping import RobotMapper
+from vision_robot_arm.robot.kinematics import ur7e_joint_points
 from vision_robot_arm.robot.targets import (
     GRIPPER_CLOSE,
     GRIPPER_OPEN,
@@ -138,6 +142,32 @@ class RobotMapperTests(unittest.TestCase):
 
         self.assertIsNone(targets.arm("right").gripper)
         self.assertTrue(targets.lift_mode)
+
+    def test_cartesian_mapping_places_tcp_at_mirrored_xyz_target(self) -> None:
+        mapper = RobotMapper(RobotConfig(), cartesian=True)
+        pose = make_state({})
+        pose.body_points.update(
+            right_shoulder=LandmarkPoint(0.2, 0.0, 0.0),
+            right_wrist=LandmarkPoint(0.5, 0.15, 0.2),
+        )
+
+        arm = mapper.map(pose).arm("right")
+
+        self.assertEqual(len(arm.joints), 6)
+        self.assertIsNotNone(arm.tcp_target)
+        assert arm.tcp_target is not None
+        endpoint = ur7e_joint_points(arm.joints, ROBOT_BASES["right"])[-1]
+        self.assertLess(math.dist(endpoint, arm.tcp_target), 0.008)
+        self.assertLess(arm.tcp_target[1], -0.34)
+        self.assertGreater(arm.tcp_target[2], 0.62)
+
+    def test_cartesian_mapping_omits_unreliable_arm_instead_of_guessing(self) -> None:
+        mapper = RobotMapper(RobotConfig(), cartesian=True)
+
+        targets = mapper.map(make_state({}))
+
+        self.assertEqual(targets.arm("right").joints, {})
+        self.assertIsNone(targets.arm("right").tcp_target)
 
 
 class JointTargetsTests(unittest.TestCase):

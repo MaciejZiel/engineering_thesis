@@ -3,7 +3,7 @@ import io
 import unittest
 from unittest.mock import Mock, patch
 
-from vision_robot_arm.core.pose_state import PoseState
+from vision_robot_arm.core.pose_state import LandmarkPoint, PoseState
 from vision_robot_arm.robot.backend import DebugBackend
 from vision_robot_arm.robot.config import RobotConfig
 from vision_robot_arm.robot.controller import MappedRobotController, NullRobotController
@@ -82,12 +82,20 @@ class FactoryTests(unittest.TestCase):
 
     def test_sim_backend_reports_two_arms(self) -> None:
         controller = create_robot_controller(RobotConfig(backend="sim"))
+        pose = make_state({})
+        pose.body_points.update(
+            right_shoulder=LandmarkPoint(0.2, 0.0, 0.0),
+            right_wrist=LandmarkPoint(0.5, 0.0, 0.0),
+            left_shoulder=LandmarkPoint(-0.2, 0.0, 0.0),
+            left_wrist=LandmarkPoint(-0.5, 0.0, 0.0),
+        )
 
-        controller.update(make_state({"right_shoulder_elevation": 45.0, "left_wrist": 120.0}))
+        controller.update(pose)
 
         state = controller.robot_state()
-        self.assertEqual(state.arm("right").targets["shoulder"], -135.0)
-        self.assertEqual(state.arm("left").targets["wrist_1"], 60.0)
+        self.assertEqual(len(state.arm("right").targets), 6)
+        self.assertEqual(len(state.arm("left").targets), 6)
+        self.assertIsNotNone(state.arm("right").tcp_target)
         self.assertTrue(controller.status_lines()[0].startswith("sim R:"))
 
 

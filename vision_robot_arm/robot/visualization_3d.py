@@ -23,6 +23,7 @@ GRID_MAJOR: Color = (72, 67, 63)
 LEFT_ARM: Color = (235, 165, 91)
 RIGHT_ARM: Color = (104, 178, 241)
 TARGET_ARM: Color = (112, 105, 98)
+TARGET_TCP: Color = (85, 220, 245)
 HUMAN_ARM: Color = (101, 211, 165)
 HUMAN_HAND: Color = (113, 225, 186)
 JOINT: Color = (238, 236, 233)
@@ -130,6 +131,7 @@ def draw_workspace_3d(
             )
 
     _draw_joint_markers(cv2, canvas, project, robot_state, width, height)
+    _draw_tcp_targets(cv2, canvas, project, robot_state, width, height)
     _draw_labels(cv2, canvas, project, width, height)
     _draw_tracking_coordinates(cv2, canvas, pose_state, indices, width, height)
 
@@ -248,6 +250,30 @@ def _draw_joint_markers(
                 )
 
 
+def _draw_tcp_targets(
+    cv2: Any,
+    canvas: Any,
+    project: Any,
+    state: RobotState | None,
+    width: int,
+    height: int,
+) -> None:
+    if state is None:
+        return
+    radius = max(4, round(min(width, height) * 0.022))
+    for side in (ARM_LEFT, ARM_RIGHT):
+        arm = state.arm(side)
+        if arm is None or arm.tcp_target is None:
+            continue
+        point = project(arm.tcp_target)
+        if point is None:
+            continue
+        x, y = point[:2]
+        cv2.circle(canvas, (x, y), radius, TARGET_TCP, 1, cv2.LINE_AA)
+        cv2.line(canvas, (x - radius - 2, y), (x + radius + 2, y), TARGET_TCP, 1, cv2.LINE_AA)
+        cv2.line(canvas, (x, y - radius - 2), (x, y + radius + 2), TARGET_TCP, 1, cv2.LINE_AA)
+
+
 def _draw_labels(cv2: Any, canvas: Any, project: Any, width: int, height: int) -> None:
     font = cv2.FONT_HERSHEY_SIMPLEX
     scale = max(0.32, min(width, height) / 900)
@@ -261,7 +287,7 @@ def _draw_labels(cv2: Any, canvas: Any, project: Any, width: int, height: int) -
             cv2.putText(canvas, label, point[:2], font, scale, color, 1, cv2.LINE_AA)
     cv2.putText(
         canvas,
-        "body XYZ: X right / Y forward / Z up",
+        "TCP: X right / Y depth MIRRORED / Z up",
         (8, max(14, round(height * 0.08))),
         font,
         scale,

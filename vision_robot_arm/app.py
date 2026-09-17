@@ -129,7 +129,7 @@ def run_app(config: AppConfig) -> int:
         recorder = CsvPoseRecorder(config.recording_dir)
         robot_controller = create_robot_controller(config.robot)
         preview_controller = MappedRobotController(
-            RobotMapper(config.robot), SimulationBackend(config.robot)
+            RobotMapper(config.robot, cartesian=True), SimulationBackend(config.robot)
         )
         state_builder = PoseStateBuilder(
             indices=indices,

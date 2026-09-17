@@ -33,7 +33,10 @@ def create_robot_controller(config: RobotConfig) -> RobotController:
                 config, auto_home=False, require_feedback=True
             )
         return HardwareSession(config, factory)
-    return MappedRobotController(RobotMapper(config), create_robot_backend(config))
+    return MappedRobotController(
+        RobotMapper(config, cartesian=config.backend == BACKEND_SIM),
+        create_robot_backend(config),
+    )
 
 
 def create_robot_backend(config: RobotConfig) -> RobotBackend:

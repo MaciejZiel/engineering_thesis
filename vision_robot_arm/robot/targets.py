@@ -42,6 +42,7 @@ GRIPPER_CLOSE = "close"
 class ArmTargets:
     joints: dict[str, float] = field(default_factory=dict)
     gripper: str | None = None
+    tcp_target: tuple[float, float, float] | None = None
 
     @property
     def has_data(self) -> bool:
@@ -78,6 +79,7 @@ class ArmState:
     joints: dict[str, float]
     targets: dict[str, float]
     gripper: str
+    tcp_target: tuple[float, float, float] | None = None
 
     @property
     def settled(self) -> bool:

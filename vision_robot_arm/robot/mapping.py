@@ -1,7 +1,9 @@
 import math
 
 from vision_robot_arm.core.pose_state import PoseState
+from vision_robot_arm.robot.cartesian_mapping import ROBOT_BASES, tracked_tcp_target
 from vision_robot_arm.robot.config import RobotConfig
+from vision_robot_arm.robot.kinematics import solve_position_ik
 from vision_robot_arm.robot.targets import (
     ARM_NAMES,
     GRIPPER_CLOSE,
@@ -9,6 +11,7 @@ from vision_robot_arm.robot.targets import (
     MAPPED_JOINTS,
     ArmTargets,
     JointTargets,
+    UR_HOME_DEG,
 )
 
 LIFT_MODE_GESTURE = "right_hand_up"
@@ -17,12 +20,21 @@ OPEN_HAND_GESTURE = "{arm}_hand_open"
 
 
 class RobotMapper:
-    def __init__(self, config: RobotConfig) -> None:
+    def __init__(self, config: RobotConfig, *, cartesian: bool = False) -> None:
         self._config = config
+        self._cartesian = cartesian
         self._last_joints: dict[str, float] = {}
+        self._ik_solutions = {arm: dict(UR_HOME_DEG) for arm in ARM_NAMES}
 
     def map(self, state: PoseState) -> JointTargets:
-        arms = {arm: self._map_arm(arm, state) for arm in ARM_NAMES}
+        arms = {
+            arm: (
+                self._map_cartesian_arm(arm, state)
+                if self._cartesian
+                else self._map_arm(arm, state)
+            )
+            for arm in ARM_NAMES
+        }
         return JointTargets(
             timestamp_ms=state.timestamp_ms,
             arms=arms,
@@ -31,6 +43,24 @@ class RobotMapper:
 
     def reset(self) -> None:
         self._last_joints.clear()
+        self._ik_solutions = {arm: dict(UR_HOME_DEG) for arm in ARM_NAMES}
+
+    def _map_cartesian_arm(self, arm: str, state: PoseState) -> ArmTargets:
+        target = tracked_tcp_target(state, arm)
+        gripper = _gripper_from_gestures(arm, state.gestures)
+        if target is None:
+            return ArmTargets(gripper=gripper)
+        solution = solve_position_ik(
+            target, self._ik_solutions[arm], ROBOT_BASES[arm]
+        )
+        if solution is None:
+            return ArmTargets(gripper=gripper)
+        self._ik_solutions[arm] = solution
+        joints = {
+            joint: self._apply_deadband(f"{arm}_{joint}", value)
+            for joint, value in solution.items()
+        }
+        return ArmTargets(joints=joints, gripper=gripper, tcp_target=target)
 
     def _map_arm(self, arm: str, state: PoseState) -> ArmTargets:
         joints: dict[str, float] = {}
