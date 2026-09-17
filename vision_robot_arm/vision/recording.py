@@ -1,7 +1,9 @@
 import csv
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import TextIO
+from uuid import uuid4
 
 from vision_robot_arm.vision.arm_pose import ELEVATION_ANGLE_NAMES
 from vision_robot_arm.vision.metrics import ANGLE_DEFINITIONS
@@ -17,6 +19,8 @@ class CsvPoseRecorder:
         self._file: TextIO | None = None
         self._writer: csv.DictWriter[str] | None = None
         self._path: Path | None = None
+        self.last_error: str | None = None
+        self._last_flush = 0.0
 
     @property
     def is_recording(self) -> bool:
@@ -31,29 +35,50 @@ class CsvPoseRecorder:
             return self._path
 
         self._output_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self._path = self._output_dir / f"pose_recording_{timestamp}.csv"
-        self._file = self._path.open("w", newline="", encoding="utf-8")
-        fieldnames = self._build_fieldnames(landmark_names)
-        self._writer = csv.DictWriter(self._file, fieldnames=fieldnames)
-        self._writer.writeheader()
-        self._file.flush()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        self._path = self._output_dir / f"pose_recording_{timestamp}_{uuid4().hex[:8]}.csv"
+        self.last_error = None
+        try:
+            self._file = self._path.open("x", newline="", encoding="utf-8")
+            fieldnames = self._build_fieldnames(landmark_names)
+            self._writer = csv.DictWriter(self._file, fieldnames=fieldnames)
+            self._writer.writeheader()
+            self._file.flush()
+            self._last_flush = time.monotonic()
+        except OSError:
+            self._abort()
+            raise
         return self._path
 
     def stop(self) -> Path | None:
         stopped_path = self._path
-        if self._file is not None:
-            self._file.flush()
-            self._file.close()
-        self._file = None
-        self._writer = None
-        self._path = None
+        file = self._file
+        self._file, self._writer, self._path = None, None, None
+        if file is not None:
+            try:
+                file.flush()
+            finally:
+                file.close()
         return stopped_path
 
     def toggle(self, landmark_names: dict[int, str]) -> tuple[bool, Path | None]:
-        if self.is_recording:
-            return False, self.stop()
-        return True, self.start(landmark_names)
+        try:
+            if self.is_recording:
+                return False, self.stop()
+            return True, self.start(landmark_names)
+        except OSError as error:
+            self.last_error = f"Recording failed: {error}"
+            self._abort()
+            return False, None
+
+    def _abort(self) -> None:
+        file = self._file
+        self._file, self._writer = None, None
+        if file is not None:
+            try:
+                file.close()
+            except OSError:
+                pass
 
     def write_state(self, state: PoseState, landmark_names: dict[int, str]) -> None:
         if self._writer is None or self._file is None:
@@ -83,8 +108,15 @@ class CsvPoseRecorder:
                 row[f"{name}_world_y"] = landmark.y
                 row[f"{name}_world_z"] = landmark.z
 
-        self._writer.writerow(row)
-        self._file.flush()
+        try:
+            self._writer.writerow(row)
+            now = time.monotonic()
+            if now - self._last_flush >= 1.0:
+                self._file.flush()
+                self._last_flush = now
+        except OSError as error:
+            self.last_error = f"Recording failed: {error}"
+            self._abort()
 
     def _build_fieldnames(self, landmark_names: dict[int, str]) -> list[str]:
         fieldnames = ["timestamp_ms", "calibrated", "gestures"]

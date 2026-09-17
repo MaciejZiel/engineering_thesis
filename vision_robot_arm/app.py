@@ -296,7 +296,9 @@ def run_app(config: AppConfig) -> int:
                 recording=recorder.is_recording,
                 robot_label=config.robot.backend if config.robot.enabled else "off",
                 gestures=current_state.gestures if current_state else (),
-                status_lines=tuple(robot_controller.status_lines()),
+                status_lines=tuple(robot_controller.status_lines()) + (
+                    (recorder.last_error,) if recorder.last_error else ()
+                ),
                 tracking_quality=tracking_quality,
                 fps=display_fps,
                 source_label=_source_label(config),
@@ -320,7 +322,9 @@ def run_app(config: AppConfig) -> int:
                 print(f"Calibration captured from {count} angles.")
             if key == ord("r") or action == ACTION_RECORD:
                 is_recording, path = recorder.toggle(names)
-                if is_recording:
+                if recorder.last_error:
+                    print(recorder.last_error)
+                elif is_recording:
                     print(f"Recording started: {path}")
                 else:
                     print(f"Recording stopped: {path}")
