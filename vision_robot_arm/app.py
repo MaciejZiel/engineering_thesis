@@ -1,4 +1,5 @@
 import time
+import math
 
 from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE, AppConfig
 from vision_robot_arm.core.display import enable_high_dpi_awareness
@@ -117,6 +118,7 @@ def run_app(config: AppConfig) -> int:
 
         rewind_attempts = 0
         while True:
+            frame_started_at = time.monotonic()
             ok, frame = capture.read()
             if not ok:
                 if config.video_path is None:
@@ -308,7 +310,9 @@ def run_app(config: AppConfig) -> int:
             )
             cv2.imshow(WINDOW_NAME, dashboard_frame)
 
-            key = cv2.waitKey(wait_delay_ms) & 0xFF
+            key = cv2.waitKey(_remaining_frame_delay_ms(
+                wait_delay_ms, time.monotonic() - frame_started_at
+            )) & 0xFF
             dashboard.sync_window_size()
             dashboard.handle_key(key)
             action = dashboard.consume_action()
@@ -403,9 +407,14 @@ def _frame_wait_delay_ms(cv2: object, capture: object, config: AppConfig) -> int
     if config.video_path is None:
         return 1
     fps = capture.get(cv2.CAP_PROP_FPS)
-    if fps <= 0:
+    if not math.isfinite(fps) or fps <= 0:
         return 1
     return max(1, int(1000 / fps))
+
+
+def _remaining_frame_delay_ms(period_ms: int, processing_seconds: float) -> int:
+    """Pump UI events without adding a second full frame period after inference."""
+    return max(1, math.ceil(period_ms - max(0.0, processing_seconds) * 1000))
 
 
 def _frame_timestamp_ms(

@@ -4,7 +4,7 @@ import numpy as np
 
 from pathlib import Path
 
-from vision_robot_arm.app import _fit_frame, _frame_timestamp_ms, _release_all
+from vision_robot_arm.app import _fit_frame, _frame_timestamp_ms, _release_all, _remaining_frame_delay_ms
 from vision_robot_arm.core.config import AppConfig
 
 
@@ -20,6 +20,11 @@ class FakeCv2:
 
 
 class FitFrameTests(unittest.TestCase):
+    def test_video_wait_only_uses_the_remaining_frame_budget(self):
+        self.assertEqual(_remaining_frame_delay_ms(40, 0.025), 15)
+        self.assertEqual(_remaining_frame_delay_ms(40, 0.1), 1)
+        self.assertEqual(_remaining_frame_delay_ms(1, 0.02), 1)
+
     def test_does_not_upscale_or_stretch_small_camera_frame(self) -> None:
         cv2 = FakeCv2()
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
