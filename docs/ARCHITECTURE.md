@@ -116,9 +116,10 @@ PoseState -> RobotMapper -> JointTargets -> RobotBackend
   robot side can show state on screen without touching drawing code.
 - Every backend also exposes `robot_state() -> RobotState | None`: per arm
   (`right`, `left`) the current and target shoulder/elbow/wrist angles and
-  the gripper, plus the lift-mode flag. `robot/visualization.py` renders it
-  into a canvas with two three-link arms. `vision/dashboard.py` embeds that
-  canvas beside the camera feed in the application's only window;
+  the gripper, plus the lift-mode flag. `robot/visualization_3d.py` renders it
+  into a canvas as two UR7e arms in a perspective workspace, framed by a fixed
+  volume so the view never drifts while you move. `vision/dashboard.py` embeds
+  that canvas beside the camera feed in the application's only window;
   `vision/drawing.py` labels the body joints with their angles when
   `--test-mode` is on.
 - Angles measured outside the pose model reach the robot through

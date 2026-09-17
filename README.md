@@ -297,7 +297,7 @@ vision_robot_arm/
     simulation.py          # two simulated UR7e arms
     targets.py             # UR joint names, JointTargets, ArmState, RobotState
     ur_backend.py          # URScript servoj over TCP to the UR7e controllers
-    visualization.py       # robot digital twin embedded in the dashboard
+    visualization_3d.py    # 3D workspace preview embedded in the dashboard
 models/
   hand_landmarker.task
   pose_landmarker_lite.task
@@ -311,7 +311,7 @@ tests/
   test_robot_ur.py
   test_robot_ur_dashboard.py
   test_robot_ur_rtde.py
-  test_robot_visualization.py
+  test_robot_visualization_3d.py
   test_vision_drawing.py
   test_vision_hand_gestures.py
   test_vision_metrics.py

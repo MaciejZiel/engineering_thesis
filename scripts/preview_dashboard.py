@@ -65,11 +65,14 @@ def render_previews(output: Path, sizes: list[tuple[int, int]]) -> None:
         },
         False,
     )
-    sim = np.zeros((540, 960, 3), np.uint8)
-    draw_workspace_3d(cv2, np, sim, state, None, {})
     for width, height in sizes:
         ui = DashboardUi(cv2, np, "Offline preview")
         ui._canvas_size = (width, height)
+        # Render the workspace at the size the panel really gets, as the app does;
+        # rendering once and letting the dashboard downscale hides every detail flaw.
+        panel_width, panel_height = ui.simulation_target_size()
+        sim = np.zeros((panel_height, panel_width, 3), np.uint8)
+        draw_workspace_3d(cv2, np, sim, state, None, {})
         for name in ("tracking", "waiting", "recording", "details"):
             ui._details = name == "details"
             detected = name != "waiting"
