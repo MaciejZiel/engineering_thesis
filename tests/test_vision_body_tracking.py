@@ -3,6 +3,7 @@ import unittest
 from dataclasses import dataclass
 
 from vision_robot_arm.vision.body_tracking import (
+    BodyFrameStabilizer,
     build_body_frame,
     transform_hands_to_body,
     transform_pose_to_body,
@@ -110,6 +111,45 @@ class BodyFrameTests(unittest.TestCase):
         transformed = transform_pose_to_body(frame, image, world)
         self.assertTrue(math.isnan(transformed[5].x))
         self.assertEqual(transformed[5].visibility, 0.0)
+
+
+class BodyFrameStabilizerTests(unittest.TestCase):
+    def frame(self, forward=(0.0, 0.0, -1.0)):
+        from vision_robot_arm.core.pose_state import BodyFrame3D
+
+        return BodyFrame3D(
+            (0.0, 0.0, 0.0),
+            (-1.0, 0.0, 0.0),
+            forward,
+            (0.0, -1.0, 0.0),
+            "shoulders_hips",
+        )
+
+    def test_short_dropout_holds_frame_and_marks_source(self) -> None:
+        stabilizer = BodyFrameStabilizer(0.35, max_hold_ms=250)
+        stabilizer.update(self.frame(), 1000)
+
+        held = stabilizer.update(None, 1200)
+
+        self.assertIsNotNone(held)
+        self.assertEqual(held.source, "shoulders_hips_held")
+
+    def test_expired_dropout_removes_frame(self) -> None:
+        stabilizer = BodyFrameStabilizer(0.35, max_hold_ms=250)
+        stabilizer.update(self.frame(), 1000)
+
+        self.assertIsNone(stabilizer.update(None, 1251))
+
+    def test_axis_change_is_smoothed_without_losing_unit_length(self) -> None:
+        stabilizer = BodyFrameStabilizer(0.35)
+        stabilizer.update(self.frame(), 1000)
+        changed = self.frame(forward=(0.0, 0.2, -0.98))
+
+        result = stabilizer.update(changed, 1033)
+
+        self.assertIsNotNone(result)
+        self.assertLess(abs(result.forward[1]), 0.2)
+        self.assertAlmostEqual(math.dist((0, 0, 0), result.forward), 1.0)
 
 
 if __name__ == "__main__":

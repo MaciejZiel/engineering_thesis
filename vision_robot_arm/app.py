@@ -46,7 +46,10 @@ from vision_robot_arm.vision.landmarks import (
 from vision_robot_arm.vision.output import emit_console_data
 from vision_robot_arm.vision.pose_tracker import PoseTracker
 from vision_robot_arm.vision.recording import CsvPoseRecorder
-from vision_robot_arm.vision.smoothing import LandmarkSmoother
+from vision_robot_arm.vision.smoothing import (
+    MAX_WORLD_LANDMARK_SPEED_M_S,
+    LandmarkSmoother,
+)
 from vision_robot_arm.vision.state_builder import PoseStateBuilder
 from vision_robot_arm.vision.camera import (
     configure_camera,
@@ -247,6 +250,7 @@ def run_app(config: AppConfig) -> int:
                     hand_world_smoothers,
                     config.smoothing_alpha,
                     timestamp_ms,
+                    max_speed=MAX_WORLD_LANDMARK_SPEED_M_S,
                 )
                 # Everything downstream hinges on the wrist, so correct it first.
                 pose_landmarks = refine_pose_wrists(
@@ -521,13 +525,16 @@ def _smooth_hands(
     smoothers: dict[str, LandmarkSmoother],
     alpha: float,
     timestamp_ms: int | None = None,
+    max_speed: float | None = None,
 ) -> dict[str, list]:
     """The hand tracker output is raw, and it was drawn and measured exactly as it arrived."""
     for side in set(smoothers) - set(hands_by_side):
         del smoothers[side]
     smoothed = {}
     for side, hand in hands_by_side.items():
-        smoother = smoothers.setdefault(side, LandmarkSmoother(alpha))
+        smoother = smoothers.setdefault(
+            side, LandmarkSmoother(alpha, max_speed=max_speed)
+        )
         smoothed[side] = smoother.update(
             [LandmarkPoint.from_landmark(point) for point in hand], timestamp_ms
         )

@@ -11,6 +11,7 @@ MOTION_FLOOR_DEG_S = 100.0
 MIN_RESPONSE = 0.10
 # Velocity has to be averaged over several frames, or it is just noise again.
 VELOCITY_ALPHA = 0.15
+MAX_WORLD_LANDMARK_SPEED_M_S = 4.0
 
 
 def taper(alpha: float, change: float, noise_floor: float) -> float:
@@ -68,27 +69,38 @@ class LandmarkSmoother:
         alpha: float,
         min_visibility: float = 0.55,
         noise_floor: float = LANDMARK_NOISE,
+        max_speed: float | None = None,
     ) -> None:
         self._alpha = alpha
         self._min_visibility = min_visibility
         self._noise_floor = noise_floor
+        self._max_speed = max_speed
         self._previous: list[LandmarkPoint] | None = None
         self._timestamp_ms: int | None = None
         self._frame_units = 1.0
+        self._elapsed_s: float | None = None
 
     def update(self, landmarks: list[LandmarkPoint], timestamp_ms: int | None = None) -> list[LandmarkPoint]:
         self._frame_units = 1.0
+        self._elapsed_s = None
         if timestamp_ms is not None and self._timestamp_ms is not None:
             elapsed = timestamp_ms - self._timestamp_ms
             if elapsed <= 0 or elapsed > 500:
                 self.reset()
             else:
                 self._frame_units = elapsed / (1000.0 / 30.0)
+                self._elapsed_s = elapsed / 1000.0
         self._timestamp_ms = timestamp_ms
         if self._previous is None or len(self._previous) != len(landmarks):
             self._previous = landmarks
             return landmarks
 
+        limited = [
+            self._limit_motion(current, previous)
+            if self._valid(current) and self._valid(previous)
+            else current
+            for current, previous in zip(landmarks, self._previous)
+        ]
         smoothed = [
             LandmarkPoint(
                 x=self._smooth(current.x, previous.x),
@@ -96,7 +108,7 @@ class LandmarkSmoother:
                 z=self._smooth(current.z, previous.z),
                 visibility=current.visibility,
             ) if self._valid(current) and self._valid(previous) else current
-            for current, previous in zip(landmarks, self._previous)
+            for current, previous in zip(limited, self._previous)
         ]
         self._previous = smoothed
         return smoothed
@@ -113,6 +125,24 @@ class LandmarkSmoother:
     def _valid(self, point: LandmarkPoint) -> bool:
         return point.visibility >= self._min_visibility and all(
             math.isfinite(value) for value in (point.x, point.y, point.z)
+        )
+
+    def _limit_motion(
+        self, current: LandmarkPoint, previous: LandmarkPoint
+    ) -> LandmarkPoint:
+        if self._max_speed is None or self._elapsed_s is None:
+            return current
+        delta = (current.x - previous.x, current.y - previous.y, current.z - previous.z)
+        distance = math.sqrt(sum(value * value for value in delta))
+        maximum = self._max_speed * self._elapsed_s
+        if distance <= maximum or distance < 1e-12:
+            return current
+        scale = maximum / distance
+        return LandmarkPoint(
+            previous.x + delta[0] * scale,
+            previous.y + delta[1] * scale,
+            previous.z + delta[2] * scale,
+            current.visibility,
         )
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from typing import Any, Iterable
 
 from vision_robot_arm.core.pose_state import BodyFrame3D, LandmarkPoint
@@ -10,6 +11,60 @@ from vision_robot_arm.vision.landmarks import is_reliable
 
 Vector3 = tuple[float, float, float]
 MIN_AXIS_LENGTH_M = 1e-4
+BODY_FRAME_HOLD_MS = 250
+
+
+class BodyFrameStabilizer:
+    """Smooth body-axis rotation and bridge only very short reference dropouts."""
+
+    def __init__(self, alpha: float, max_hold_ms: int = BODY_FRAME_HOLD_MS) -> None:
+        self._alpha = alpha
+        self._max_hold_ms = max_hold_ms
+        self._previous: BodyFrame3D | None = None
+        self._last_valid_ms: int | None = None
+
+    def update(
+        self, frame: BodyFrame3D | None, timestamp_ms: int
+    ) -> BodyFrame3D | None:
+        if self._last_valid_ms is not None and timestamp_ms <= self._last_valid_ms:
+            self.reset()
+        if frame is None:
+            if (
+                self._previous is not None
+                and self._last_valid_ms is not None
+                and timestamp_ms - self._last_valid_ms <= self._max_hold_ms
+            ):
+                return replace(
+                    self._previous, source=f"{self._previous.source}_held"
+                )
+            self.reset()
+            return None
+        if self._previous is not None and self._last_valid_ms is not None:
+            elapsed = timestamp_ms - self._last_valid_ms
+            if elapsed <= 500:
+                alpha = 1.0 - (1.0 - self._alpha) ** (elapsed / (1000.0 / 30.0))
+                right = _unit(_blend(self._previous.right, frame.right, alpha))
+                up_hint = _blend(self._previous.up, frame.up, alpha)
+                if right is not None:
+                    up = _unit(_reject(up_hint, right))
+                    forward = _unit(_cross(up, right)) if up is not None else None
+                    if forward is not None:
+                        up = _unit(_cross(right, forward))
+                        if up is not None:
+                            frame = BodyFrame3D(
+                                frame.origin,
+                                right,
+                                forward,
+                                up,
+                                frame.source,
+                            )
+        self._previous = frame
+        self._last_valid_ms = timestamp_ms
+        return frame
+
+    def reset(self) -> None:
+        self._previous = None
+        self._last_valid_ms = None
 
 
 def build_body_frame(
@@ -148,6 +203,10 @@ def _subtract(first: Vector3, second: Vector3) -> Vector3:
 
 def _scale(vector: Vector3, scalar: float) -> Vector3:
     return tuple(value * scalar for value in vector)
+
+
+def _blend(first: Vector3, second: Vector3, alpha: float) -> Vector3:
+    return tuple((1.0 - alpha) * a + alpha * b for a, b in zip(first, second))
 
 
 def _dot(first: Vector3, second: Vector3) -> float:

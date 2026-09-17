@@ -133,6 +133,22 @@ class LandmarkSmootherTests(unittest.TestCase):
 
         self.assertEqual(smoother.update(new_landmarks), new_landmarks)
 
+    def test_metric_outlier_is_limited_by_physical_speed(self) -> None:
+        smoother = LandmarkSmoother(alpha=1.0, noise_floor=0, max_speed=1.0)
+        smoother.update([LandmarkPoint(0.0, 0.0, 0.0)], 1000)
+
+        result = smoother.update([LandmarkPoint(0.0, 0.0, 2.0)], 1100)
+
+        self.assertAlmostEqual(result[0].z, 0.1)
+
+    def test_plausible_metric_motion_is_not_limited(self) -> None:
+        smoother = LandmarkSmoother(alpha=1.0, noise_floor=0, max_speed=4.0)
+        smoother.update([LandmarkPoint(0.0, 0.0, 0.0)], 1000)
+
+        result = smoother.update([LandmarkPoint(0.0, 0.0, 0.1)], 1100)
+
+        self.assertAlmostEqual(result[0].z, 0.1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,13 +6,18 @@ from typing import Any
 from vision_robot_arm.core.pose_state import LandmarkPoint, PoseState
 from vision_robot_arm.vision.calibration import PoseCalibration
 from vision_robot_arm.vision.body_tracking import (
+    BodyFrameStabilizer,
     build_body_frame,
     transform_hands_to_body,
     transform_pose_to_body,
 )
 from vision_robot_arm.vision.gestures import detect_gestures
 from vision_robot_arm.vision.metrics import calculate_angles
-from vision_robot_arm.vision.smoothing import AngleSmoother, LandmarkSmoother
+from vision_robot_arm.vision.smoothing import (
+    MAX_WORLD_LANDMARK_SPEED_M_S,
+    AngleSmoother,
+    LandmarkSmoother,
+)
 
 
 class PoseStateBuilder:
@@ -26,9 +31,12 @@ class PoseStateBuilder:
         self._min_visibility = min_visibility
         self._landmark_smoother = LandmarkSmoother(smoothing_alpha, min_visibility)
         self._world_landmark_smoother = LandmarkSmoother(
-            smoothing_alpha, min_visibility
+            smoothing_alpha,
+            min_visibility,
+            max_speed=MAX_WORLD_LANDMARK_SPEED_M_S,
         )
         self._angle_smoother = AngleSmoother(smoothing_alpha)
+        self._body_frame_stabilizer = BodyFrameStabilizer(smoothing_alpha)
         self._calibration = PoseCalibration()
         self._calibration_samples = deque()
 
@@ -126,11 +134,14 @@ class PoseStateBuilder:
 
         frozen_hands = _freeze_hands(hand_landmarks)
         frozen_world_hands = _freeze_hands(hand_world_landmarks)
-        body_frame = build_body_frame(
-            smoothed_landmarks,
-            smoothed_world_landmarks,
-            self._indices,
-            self._min_visibility,
+        body_frame = self._body_frame_stabilizer.update(
+            build_body_frame(
+                smoothed_landmarks,
+                smoothed_world_landmarks,
+                self._indices,
+                self._min_visibility,
+            ),
+            timestamp_ms,
         )
         body_landmarks = (
             transform_pose_to_body(
@@ -181,6 +192,7 @@ class PoseStateBuilder:
         self._landmark_smoother.reset()
         self._world_landmark_smoother.reset()
         self._angle_smoother.reset()
+        self._body_frame_stabilizer.reset()
 
 
 def _freeze_hands(
