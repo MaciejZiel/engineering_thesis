@@ -48,7 +48,11 @@ from vision_robot_arm.vision.pose_tracker import PoseTracker
 from vision_robot_arm.vision.recording import CsvPoseRecorder
 from vision_robot_arm.vision.smoothing import LandmarkSmoother
 from vision_robot_arm.vision.state_builder import PoseStateBuilder
-from vision_robot_arm.vision.camera import open_camera_capture, configure_camera, resolve_cv2_backend
+from vision_robot_arm.vision.camera import (
+    configure_camera,
+    open_camera_capture,
+    resolve_cv2_backend,
+)
 
 WINDOW_NAME = "Motion Twin - Dual UR7e Control"
 # Some containers refuse to seek. Without a cap the loop would spin without ever
@@ -411,7 +415,7 @@ def run_app(config: AppConfig) -> int:
                 + ((recorder.last_error,) if recorder.last_error else ()),
                 tracking_quality=tracking_quality,
                 fps=display_fps,
-                source_label=_source_label(config),
+                source_label=_source_label(config, actual_camera_index),
                 robot_state_available=True,
                 can_calibrate=can_calibrate,
                 control_label=(
@@ -507,7 +511,7 @@ def run_app(config: AppConfig) -> int:
             ),
             ("hand tracker", None if hand_tracker is None else hand_tracker.close),
             ("pose tracker", None if tracker is None else tracker.close),
-            ("camera", capture.release),
+            ("camera", None if capture is None else capture.release),
         )
         cv2.destroyAllWindows()
 

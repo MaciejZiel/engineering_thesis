@@ -292,9 +292,10 @@ def open_camera_capture(
             except Exception:
                 pass
             return cap, target_index, _backend_name(backend, cv2)
-        cap.release()
+        # An explicit source must never silently switch to a different person/camera.
+        return cap, target_index, _backend_name(backend, cv2)
 
-    # If auto or primary failed, scan for available capture devices
+    # Automatic selection scans available capture devices
     devices = discover_cameras(cv2)
     for dev in devices:
         if target_index is not None and dev.index == target_index:

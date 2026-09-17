@@ -38,8 +38,8 @@ def _parse_camera_target(val: str) -> int | str:
         return "auto"
     try:
         return int(val)
-    except ValueError:
-        return val
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("Camera must be a non-negative index or 'auto'.") from error
 
 
 def build_parser() -> argparse.ArgumentParser:
