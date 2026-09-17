@@ -92,7 +92,12 @@ class MeasurementTests(unittest.TestCase):
         capture = FakeCapture(clock)
         capture.slow_frames = 2
         cv2 = fake_cv2(capture)
-        report = collect_diagnostic(cv2, 9, DiagnosticSettings(duration_s=1, warmup_s=1), clock)
+        report = collect_diagnostic(
+            cv2,
+            9,
+            DiagnosticSettings(duration_s=1, warmup_s=1, camera_backend="v4l2"),
+            clock,
+        )
         self.assertTrue(report["valid"])
         self.assertAlmostEqual(report["measurement"]["fps"], 20)
         self.assertEqual(report["warmup"]["frames"], 2)
