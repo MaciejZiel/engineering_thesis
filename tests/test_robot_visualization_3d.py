@@ -6,11 +6,11 @@ import numpy as np
 
 from vision_robot_arm.core.pose_state import LandmarkPoint, PoseState
 from vision_robot_arm.robot.targets import UR_HOME_DEG
+from vision_robot_arm.robot.kinematics import ur7e_joint_points
 from vision_robot_arm.robot.visualization_3d import (
     BACKGROUND,
     BASE_SEPARATION_M,
     draw_workspace_3d,
-    ur7e_joint_points,
 )
 
 

@@ -2,16 +2,16 @@
 
 import math
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 from vision_robot_arm.core.pose_state import PoseState
+from vision_robot_arm.robot.cartesian_mapping import BASE_SEPARATION_M
+from vision_robot_arm.robot.kinematics import ur7e_joint_points
 from vision_robot_arm.robot.targets import (
     ARM_LEFT,
     ARM_RIGHT,
-    JOINT_NAMES,
     UR_HOME_DEG,
     RobotState,
-    full_joint_pose,
 )
 
 Point3 = tuple[float, float, float]
@@ -31,7 +31,6 @@ AXIS_X: Color = (90, 110, 238)
 AXIS_Y: Color = (104, 205, 126)
 AXIS_Z: Color = (74, 184, 246)
 
-BASE_SEPARATION_M = 0.5
 HUMAN_OFFSET: Point3 = (0.0, -0.62, 0.92)
 HAND_CONNECTIONS = (
     (0, 1),
@@ -57,17 +56,6 @@ HAND_CONNECTIONS = (
     (0, 17),
 )
 
-# Official UR5e/UR7e standard DH parameters, metres/radians.
-UR7E_DH = (
-    (0.0, 0.1625, math.pi / 2),
-    (-0.425, 0.0, 0.0),
-    (-0.3922, 0.0, 0.0),
-    (0.0, 0.1333, math.pi / 2),
-    (0.0, 0.0997, -math.pi / 2),
-    (0.0, 0.0996, 0.0),
-)
-
-
 @dataclass(frozen=True)
 class Camera3D:
     position: Point3 = (1.45, -2.15, 1.45)
@@ -82,18 +70,6 @@ class Segment3D:
     color: Color
     thickness: int = 1
     dashed: bool = False
-
-
-def ur7e_joint_points(joints_deg: dict[str, float], base: Point3) -> tuple[Point3, ...]:
-    """Return base plus all six UR7e joint-frame origins from standard DH kinematics."""
-    pose = full_joint_pose(joints_deg)
-    transform = _identity()
-    points = [base]
-    for name, (a, d, alpha) in zip(JOINT_NAMES, UR7E_DH):
-        transform = _matmul(transform, _dh(math.radians(pose[name]), d, a, alpha))
-        point = _transform_point(transform, (0.0, 0.0, 0.0))
-        points.append((point[0] + base[0], point[1] + base[1], point[2] + base[2]))
-    return tuple(points)
 
 
 def draw_workspace_3d(
@@ -396,7 +372,6 @@ def _projector(np: Any, width: int, height: int, camera: Camera3D) -> Any:
 
     return project
 
-
 def _dashed_line(
     cv2: Any,
     canvas: Any,
@@ -416,39 +391,3 @@ def _dashed_line(
             round(start[1] + dy * next_step / steps),
         )
         cv2.line(canvas, a, b, color, thickness, cv2.LINE_AA)
-
-
-def _identity() -> tuple[tuple[float, ...], ...]:
-    return tuple(
-        tuple(1.0 if row == column else 0.0 for column in range(4)) for row in range(4)
-    )
-
-
-def _dh(
-    theta: float, d: float, a: float, alpha: float
-) -> tuple[tuple[float, ...], ...]:
-    ct, st, ca, sa = math.cos(theta), math.sin(theta), math.cos(alpha), math.sin(alpha)
-    return (
-        (ct, -st * ca, st * sa, a * ct),
-        (st, ct * ca, -ct * sa, a * st),
-        (0.0, sa, ca, d),
-        (0.0, 0.0, 0.0, 1.0),
-    )
-
-
-def _matmul(
-    first: Iterable[Iterable[float]], second: Iterable[Iterable[float]]
-) -> tuple[tuple[float, ...], ...]:
-    first_rows, second_rows = tuple(map(tuple, first)), tuple(map(tuple, second))
-    columns = tuple(zip(*second_rows))
-    return tuple(
-        tuple(sum(a * b for a, b in zip(row, column)) for column in columns)
-        for row in first_rows
-    )
-
-
-def _transform_point(transform: tuple[tuple[float, ...], ...], point: Point3) -> Point3:
-    vector = (*point, 1.0)
-    return tuple(
-        sum(row[index] * vector[index] for index in range(4)) for row in transform[:3]
-    )
