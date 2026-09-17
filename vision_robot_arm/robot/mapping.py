@@ -38,10 +38,13 @@ class RobotMapper:
             mapping = self._config.mapping_for(joint)
             if mapping is None:
                 continue
-            body_angle = state.angles.get(f"{arm}_{mapping.source}")
+            source = state.relative_angles if state.calibrated else state.angles
+            body_angle = source.get(f"{arm}_{mapping.source}")
             if body_angle is None or not math.isfinite(body_angle):
                 continue
-            joints[joint] = self._apply_deadband(f"{arm}_{joint}", mapping.to_robot(body_angle))
+            target = (mapping.limit.clamp(self._config.home_for(joint) + mapping.sign * body_angle)
+                      if state.calibrated else mapping.to_robot(body_angle))
+            joints[joint] = self._apply_deadband(f"{arm}_{joint}", target)
         return ArmTargets(joints=joints, gripper=_gripper_from_gestures(arm, state.gestures))
 
     def _apply_deadband(self, key: str, value: float) -> float:

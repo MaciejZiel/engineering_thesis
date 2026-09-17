@@ -137,6 +137,15 @@ recording means something different from a run with hand tracking on.
 
 ### Hardware control lifecycle
 
+Calibration (**C**) now requires stable measurements over at least 600 ms in an
+800 ms window, with all three mapped angles for each configured arm (both arms
+in preview). The captured human pose maps to the robot's configured home;
+subsequent motion uses signed angular offsets. Calibration changes pause hardware
+control. **K** saves the profile to `recordings/calibration.json`, **L** loads it,
+and **X** resets calibration. Loading never automatically enables motion. Profiles
+must be recaptured when the camera/operator setup changes. Without calibration,
+the existing absolute angle mapping is retained.
+
 Selecting the UR backend in the application no longer connects or moves an arm
 at startup. The hardware button (keyboard **H**) advances one explicit step:
 **Connect → Home (moves the robots) → Enable control**. Homing must be confirmed

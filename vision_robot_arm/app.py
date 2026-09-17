@@ -119,6 +119,7 @@ def run_app(config: AppConfig) -> int:
             print(f"Test mode: joint angle labels and embedded robot simulation ({config.robot.backend}).")
 
         rewind_attempts = 0
+        session_message: str | None = None
         while True:
             frame_started_at = time.monotonic()
             ok, frame = capture.read()
@@ -311,7 +312,7 @@ def run_app(config: AppConfig) -> int:
                 can_calibrate=can_calibrate,
                 control_label=(robot_controller.action_label
                                if isinstance(robot_controller, HardwareSession) else None),
-                alert=(getattr(robot_controller, "error", None) or recorder.last_error),
+                alert=(getattr(robot_controller, "error", None) or recorder.last_error or session_message),
             )
             cv2.imshow(WINDOW_NAME, dashboard_frame)
 
@@ -333,8 +334,30 @@ def run_app(config: AppConfig) -> int:
             if key == ord("f") or action == ACTION_FULLSCREEN:
                 dashboard.toggle_fullscreen()
             if (key == ord("c") or action == ACTION_CALIBRATE) and can_calibrate:
-                count = state_builder.capture_calibration(current_state)
-                print(f"Calibration captured from {count} angles.")
+                robot_controller.reset()
+                sides = tuple(config.robot.hosts) or ("left", "right")
+                required = tuple(f"{side}_{source}" for side in sides
+                                 for source in ("shoulder_elevation", "elbow", "wrist"))
+                count = state_builder.capture_calibration(current_state, required)
+                session_message = (f"Calibration captured from {count} angles."
+                                   if count else "Hold all arm joints steady and visible for 0.8 seconds, then retry calibration.")
+                print(session_message)
+            if key in (ord("k"), ord("l"), ord("x")):
+                robot_controller.reset()
+                profile = config.recording_dir / "calibration.json"
+                try:
+                    if key == ord("k"):
+                        state_builder.save_calibration(profile)
+                        session_message = f"Calibration saved: {profile}"
+                    elif key == ord("l"):
+                        state_builder.load_calibration(profile)
+                        session_message = "Calibration loaded. Check the preview before enabling control."
+                    else:
+                        state_builder.reset_calibration()
+                        session_message = "Calibration reset. Absolute mapping restored."
+                except (OSError, ValueError) as error:
+                    session_message = f"Calibration failed: {error}"
+                print(session_message)
             if key == ord("r") or action == ACTION_RECORD:
                 is_recording, path = recorder.toggle(names)
                 if recorder.last_error:

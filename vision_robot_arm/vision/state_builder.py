@@ -1,4 +1,6 @@
 import math
+from collections import deque
+from pathlib import Path
 from typing import Any
 
 from vision_robot_arm.vision.calibration import PoseCalibration
@@ -21,6 +23,7 @@ class PoseStateBuilder:
         self._world_landmark_smoother = LandmarkSmoother(smoothing_alpha, min_visibility)
         self._angle_smoother = AngleSmoother(smoothing_alpha)
         self._calibration = PoseCalibration()
+        self._calibration_samples = deque()
 
     @property
     def calibrated(self) -> bool:
@@ -65,6 +68,11 @@ class PoseStateBuilder:
             raw_angles.update({name: value for name, value in extra_angles.items()
                                if value is not None and math.isfinite(value)})
         smoothed_angles = self._angle_smoother.update(raw_angles, timestamp_ms)
+        if self._calibration_samples and timestamp_ms <= self._calibration_samples[-1][0]:
+            self._calibration_samples.clear()
+        self._calibration_samples.append((timestamp_ms, dict(raw_angles)))
+        while self._calibration_samples and timestamp_ms - self._calibration_samples[0][0] > 800:
+            self._calibration_samples.popleft()
         relative_angles = self._calibration.relative_angles(smoothed_angles)
         gestures = detect_gestures(
             smoothed_landmarks,
@@ -84,10 +92,20 @@ class PoseStateBuilder:
             calibrated=self._calibration.calibrated,
         )
 
-    def capture_calibration(self, state: PoseState) -> int:
-        return self._calibration.capture(state.angles)
+    def capture_calibration(self, state: PoseState, required=()) -> int:
+        return self._calibration.capture_stable(list(self._calibration_samples), required)
+
+    def reset_calibration(self) -> None:
+        self._calibration.reset()
+
+    def save_calibration(self, path: Path) -> None:
+        self._calibration.save(path)
+
+    def load_calibration(self, path: Path) -> None:
+        self._calibration.load(path)
 
     def reset_tracking(self) -> None:
+        self._calibration_samples.clear()
         self._landmark_smoother.reset()
         self._world_landmark_smoother.reset()
         self._angle_smoother.reset()
