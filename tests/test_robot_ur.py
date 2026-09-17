@@ -282,11 +282,12 @@ class URBackendTests(unittest.TestCase):
         connector = FakeConnector()
         factory = FakeRtdeFactory()
         backend, clock = self.make_backend(connector, rtde_factory=factory)
-        factory.clients["192.168.1.10"].sample = {
-            "actual_q": (0.0, math.radians(-89.5), 0.0, math.radians(-90.0), 0.0, 0.0),
-            "robot_mode": 7,
-            "safety_status": 1,
-        }
+        for host, shoulder in (("192.168.1.10", -89.5), ("192.168.1.11", -70.0)):
+            factory.clients[host].sample = {
+                "actual_q": (0.0, math.radians(shoulder), 0.0, math.radians(-90.0), 0.0, 0.0),
+                "robot_mode": 7,
+                "safety_status": 1,
+            }
 
         clock.now = 3.0
         backend.send(targets(right={"shoulder": -45.0}))
@@ -442,18 +443,20 @@ class SafetyTests(unittest.TestCase):
         factory = FakeRtdeFactory()
         backend, clock = self.make(connector, factory)
         client = factory.clients["192.168.1.10"]
-        client.sample = {
-            "actual_q": (0.0, math.radians(-30.0), 0.0, math.radians(-90.0), 0.0, 0.0),
-            "robot_mode": 7,
-            "safety_status": 1,
-        }
+        for host in ("192.168.1.10", "192.168.1.11"):
+            factory.clients[host].sample = {
+                "actual_q": (0.0, math.radians(-30.0), 0.0, math.radians(-90.0), 0.0, 0.0),
+                "robot_mode": 7,
+                "safety_status": 1,
+            }
         clock.now = 2.0
         backend.send(targets(right={"shoulder": -80.0}))
         self.assertAlmostEqual(backend.robot_state().arm("right").joints["shoulder"], -30.0, places=3)
 
         client.drop()
         clock.now = 2.5
-        backend.send(targets(right={"shoulder": -80.0}, ts=2))
+        with self.assertRaises(ControlFault):
+            backend.send(targets(right={"shoulder": -80.0}, ts=2))
 
         state = backend.robot_state()
         self.assertNotAlmostEqual(state.arm("right").joints["shoulder"], -30.0, places=3)
