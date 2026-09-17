@@ -155,6 +155,7 @@ def draw_workspace_3d(
 
     _draw_joint_markers(cv2, canvas, project, robot_state, width, height)
     _draw_labels(cv2, canvas, project, width, height)
+    _draw_tracking_coordinates(cv2, canvas, pose_state, indices, width, height)
 
 
 def _append_grid(segments: list[Segment3D]) -> None:
@@ -206,7 +207,8 @@ def _append_tracked_arms(
 ) -> None:
     if state is None or state.world_landmarks is None:
         return
-    world = state.world_landmarks
+    body_coordinates = state.body_landmarks is not None
+    world = state.body_landmarks or state.world_landmarks
     for side in ("left", "right"):
         names = (
             f"{side.upper()}_SHOULDER",
@@ -219,13 +221,24 @@ def _append_tracked_arms(
             if index is None or not 0 <= index < len(world):
                 points = []
                 break
-            points.append(_pose_to_scene(world[index]))
+            points.append(
+                _body_to_scene(world[index])
+                if body_coordinates
+                else _pose_to_scene(world[index])
+            )
         segments.extend(
             Segment3D(a, b, HUMAN_ARM, 3) for a, b in zip(points, points[1:])
         )
-        hand = state.hand_world_landmarks.get(side, ())
+        hand = (
+            state.hand_body_landmarks.get(side, ())
+            if body_coordinates
+            else state.hand_world_landmarks.get(side, ())
+        )
         if hand:
-            hand_points = [_pose_to_scene(point) for point in hand]
+            hand_points = [
+                _body_to_scene(point) if body_coordinates else _pose_to_scene(point)
+                for point in hand
+            ]
             segments.extend(
                 Segment3D(hand_points[a], hand_points[b], HUMAN_HAND, 1)
                 for a, b in HAND_CONNECTIONS
@@ -272,7 +285,7 @@ def _draw_labels(cv2: Any, canvas: Any, project: Any, width: int, height: int) -
             cv2.putText(canvas, label, point[:2], font, scale, color, 1, cv2.LINE_AA)
     cv2.putText(
         canvas,
-        "tracked 3D",
+        "body XYZ: X right / Y forward / Z up",
         (8, max(14, round(height * 0.08))),
         font,
         scale,
@@ -280,6 +293,57 @@ def _draw_labels(cv2: Any, canvas: Any, project: Any, width: int, height: int) -
         1,
         cv2.LINE_AA,
     )
+
+
+def _draw_tracking_coordinates(
+    cv2: Any,
+    canvas: Any,
+    state: PoseState | None,
+    indices: dict[str, int],
+    width: int,
+    height: int,
+) -> None:
+    if state is None or state.body_landmarks is None:
+        return
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = max(0.28, min(width, height) / 1100)
+    y = max(30, round(height * 0.14))
+    source = state.body_frame.source.replace("shoulders_", "") if state.body_frame else ""
+    cv2.putText(
+        canvas,
+        f"origin: shoulders / vertical: {source}",
+        (8, y),
+        font,
+        scale,
+        GRID_MAJOR,
+        1,
+        cv2.LINE_AA,
+    )
+    y += max(13, round(height * 0.055))
+    for side in ("left", "right"):
+        values = []
+        for joint in ("ELBOW", "WRIST"):
+            index = indices.get(f"{side.upper()}_{joint}")
+            if index is None or not 0 <= index < len(state.body_landmarks):
+                continue
+            point = state.body_landmarks[index]
+            if not all(math.isfinite(value) for value in (point.x, point.y, point.z)):
+                continue
+            values.append(
+                f"{joint[0]} {point.x:+.2f} {point.y:+.2f} {point.z:+.2f}"
+            )
+        if values:
+            cv2.putText(
+                canvas,
+                f"{side[0].upper()}  " + "  |  ".join(values) + " m",
+                (8, y),
+                font,
+                scale,
+                HUMAN_ARM,
+                1,
+                cv2.LINE_AA,
+            )
+            y += max(13, round(height * 0.055))
     cv2.putText(
         canvas,
         "0.5 m base spacing",
@@ -297,6 +361,15 @@ def _pose_to_scene(point: Any) -> Point3:
         float(point.x) + HUMAN_OFFSET[0],
         float(point.z) + HUMAN_OFFSET[1],
         -float(point.y) + HUMAN_OFFSET[2],
+    )
+
+
+def _body_to_scene(point: Any) -> Point3:
+    """Body coordinates already use X right, Y forward/depth, Z up."""
+    return (
+        float(point.x) + HUMAN_OFFSET[0],
+        float(point.y) + HUMAN_OFFSET[1],
+        float(point.z) + HUMAN_OFFSET[2],
     )
 
 

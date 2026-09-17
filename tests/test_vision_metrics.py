@@ -4,7 +4,7 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 
-from vision_robot_arm.core.pose_state import LandmarkPoint, PoseState
+from vision_robot_arm.core.pose_state import BodyFrame3D, LandmarkPoint, PoseState
 from vision_robot_arm.vision.calibration import PoseCalibration
 from vision_robot_arm.vision.gestures import detect_gestures
 from vision_robot_arm.vision.metrics import (
@@ -170,6 +170,40 @@ class RecordingTests(unittest.TestCase):
         self.assertEqual(row["hand_world_frame"], "pose_wrist_anchored_m")
         self.assertEqual(row["left_hand_wrist_z"], "-0.3")
         self.assertEqual(row["left_hand_wrist_world_z"], "-0.6")
+
+    def test_csv_records_body_relative_xyz_for_pose_and_hands(self) -> None:
+        body = LandmarkPoint(0.1, 0.4, 0.2)
+        frame = BodyFrame3D(
+            (0.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0),
+            (0.0, 0.0, -1.0),
+            (0.0, -1.0, 0.0),
+            "shoulders_hips",
+        )
+        state = PoseState(
+            1,
+            [body],
+            [body],
+            {},
+            {},
+            {},
+            (),
+            False,
+            body_frame=frame,
+            body_landmarks=[body],
+            hand_body_landmarks={"left": (body,)},
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            recorder = CsvPoseRecorder(Path(temp_dir))
+            path = recorder.start({0: "nose"})
+            recorder.write_state(state, {0: "nose"})
+            recorder.stop()
+            with path.open(newline="", encoding="utf-8") as csv_file:
+                row = next(csv.DictReader(csv_file))
+        self.assertEqual(row["control_frame"], "shoulder_center_m:x_right,y_forward,z_up")
+        self.assertEqual(row["control_frame_source"], "shoulders_hips")
+        self.assertEqual(row["nose_body_y"], "0.4")
+        self.assertEqual(row["left_hand_wrist_body_y"], "0.4")
 
 
 class GestureTests(unittest.TestCase):

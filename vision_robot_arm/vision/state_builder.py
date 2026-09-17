@@ -5,6 +5,11 @@ from typing import Any
 
 from vision_robot_arm.core.pose_state import LandmarkPoint, PoseState
 from vision_robot_arm.vision.calibration import PoseCalibration
+from vision_robot_arm.vision.body_tracking import (
+    build_body_frame,
+    transform_hands_to_body,
+    transform_pose_to_body,
+)
 from vision_robot_arm.vision.gestures import detect_gestures
 from vision_robot_arm.vision.metrics import calculate_angles
 from vision_robot_arm.vision.smoothing import AngleSmoother, LandmarkSmoother
@@ -119,6 +124,27 @@ class PoseStateBuilder:
             }
         )
 
+        frozen_hands = _freeze_hands(hand_landmarks)
+        frozen_world_hands = _freeze_hands(hand_world_landmarks)
+        body_frame = build_body_frame(
+            smoothed_landmarks,
+            smoothed_world_landmarks,
+            self._indices,
+            self._min_visibility,
+        )
+        body_landmarks = (
+            transform_pose_to_body(
+                body_frame, smoothed_landmarks, smoothed_world_landmarks
+            )
+            if body_frame is not None and smoothed_world_landmarks is not None
+            else None
+        )
+        hand_body_landmarks = (
+            transform_hands_to_body(body_frame, frozen_world_hands)
+            if body_frame is not None
+            else {}
+        )
+
         return PoseState(
             timestamp_ms=timestamp_ms,
             landmarks=smoothed_landmarks,
@@ -128,9 +154,12 @@ class PoseStateBuilder:
             relative_angles=relative_angles,
             gestures=gestures,
             calibrated=self._calibration.calibrated,
-            hand_landmarks=_freeze_hands(hand_landmarks),
-            hand_world_landmarks=_freeze_hands(hand_world_landmarks),
+            hand_landmarks=frozen_hands,
+            hand_world_landmarks=frozen_world_hands,
             angle_sources=angle_sources,
+            body_frame=body_frame,
+            body_landmarks=body_landmarks,
+            hand_body_landmarks=hand_body_landmarks,
         )
 
     def capture_calibration(self, state: PoseState, required=()) -> int:

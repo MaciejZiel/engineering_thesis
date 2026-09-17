@@ -410,7 +410,7 @@ class DashboardUi:
         pad = p.px(20)
         p.text("3D workspace", rect.x + pad, rect.y + p.px(19), size=16, strong=True)
         p.text(
-            "2 × UR7e · XYZ",
+            "2 × UR7e · BODY XYZ",
             rect.right - pad,
             rect.y + p.px(22),
             size=12,

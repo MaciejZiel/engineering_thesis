@@ -116,6 +116,14 @@ class CsvPoseRecorder:
             "hand_world_frame": "pose_wrist_anchored_m"
             if state.hand_world_landmarks
             else "",
+            "control_frame": (
+                "shoulder_center_m:x_right,y_forward,z_up"
+                if state.body_frame is not None
+                else ""
+            ),
+            "control_frame_source": (
+                state.body_frame.source if state.body_frame is not None else ""
+            ),
         }
 
         for name in RECORDED_ANGLES:
@@ -137,9 +145,17 @@ class CsvPoseRecorder:
                 row[f"{name}_world_y"] = landmark.y
                 row[f"{name}_world_z"] = landmark.z
 
+        if state.body_landmarks is not None:
+            for index, landmark in enumerate(state.body_landmarks):
+                name = landmark_names.get(index, str(index))
+                row[f"{name}_body_x"] = landmark.x
+                row[f"{name}_body_y"] = landmark.y
+                row[f"{name}_body_z"] = landmark.z
+
         for side in ("left", "right"):
             image_hand = state.hand_landmarks.get(side, ())
             world_hand = state.hand_world_landmarks.get(side, ())
+            body_hand = state.hand_body_landmarks.get(side, ())
             for index, name in enumerate(HAND_LANDMARK_NAMES):
                 prefix = f"{side}_hand_{name}"
                 if index < len(image_hand):
@@ -152,6 +168,11 @@ class CsvPoseRecorder:
                     row[f"{prefix}_world_x"] = point.x
                     row[f"{prefix}_world_y"] = point.y
                     row[f"{prefix}_world_z"] = point.z
+                if index < len(body_hand):
+                    point = body_hand[index]
+                    row[f"{prefix}_body_x"] = point.x
+                    row[f"{prefix}_body_y"] = point.y
+                    row[f"{prefix}_body_z"] = point.z
 
         try:
             self._writer.writerow(row)
@@ -170,6 +191,8 @@ class CsvPoseRecorder:
             "gestures",
             "pose_world_frame",
             "hand_world_frame",
+            "control_frame",
+            "control_frame_source",
         ]
         for name in RECORDED_ANGLES:
             fieldnames.append(f"angle_{name}")
@@ -187,6 +210,9 @@ class CsvPoseRecorder:
                     f"{name}_world_x",
                     f"{name}_world_y",
                     f"{name}_world_z",
+                    f"{name}_body_x",
+                    f"{name}_body_y",
+                    f"{name}_body_z",
                 ]
             )
         for side in ("left", "right"):
@@ -194,7 +220,10 @@ class CsvPoseRecorder:
                 prefix = f"{side}_hand_{name}"
                 fieldnames.extend(
                     f"{prefix}_{suffix}"
-                    for suffix in ("x", "y", "z", "world_x", "world_y", "world_z")
+                    for suffix in (
+                        "x", "y", "z", "world_x", "world_y", "world_z",
+                        "body_x", "body_y", "body_z",
+                    )
                 )
         return fieldnames
 

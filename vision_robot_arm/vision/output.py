@@ -11,6 +11,7 @@ def print_landmarks(
     landmarks: list[Any],
     world_landmarks: list[Any] | None,
     names: dict[int, str],
+    body_landmarks: list[Any] | None = None,
 ) -> None:
     for index, landmark in enumerate(landmarks):
         name = names.get(index, str(index))
@@ -24,6 +25,12 @@ def print_landmarks(
             line += (
                 f" | world_x={world.x: .3f} "
                 f"world_y={world.y: .3f} world_z={world.z: .3f}"
+            )
+        if body_landmarks and index < len(body_landmarks):
+            body = body_landmarks[index]
+            line += (
+                f" | body_x={body.x: .3f} "
+                f"body_y={body.y: .3f} body_z={body.z: .3f}"
             )
         print(line)
 
@@ -40,6 +47,8 @@ def emit_console_data(mode: str, state: PoseState, names: dict[int, str]) -> Non
             print("relative " + format_angles(state.relative_angles))
 
     if mode in (LANDMARK_MODE, BOTH_MODE):
-        print_landmarks(state.landmarks, state.world_landmarks, names)
+        print_landmarks(
+            state.landmarks, state.world_landmarks, names, state.body_landmarks
+        )
 
     sys.stdout.flush()

@@ -63,3 +63,23 @@ class WorkspaceRendererTests(unittest.TestCase):
             state,
             {"LEFT_SHOULDER": 0, "LEFT_ELBOW": 1, "LEFT_WRIST": 2},
         )
+
+    def test_body_forward_axis_changes_rendered_arm_geometry(self) -> None:
+        indices = {"LEFT_SHOULDER": 0, "LEFT_ELBOW": 1, "LEFT_WRIST": 2}
+
+        def state(forward: float) -> PoseState:
+            camera = [LandmarkPoint(0, 0, 0)] * 3
+            body = [
+                LandmarkPoint(-0.2, 0, 0),
+                LandmarkPoint(-0.2, forward, -0.2),
+                LandmarkPoint(-0.2, forward, -0.4),
+            ]
+            return PoseState(
+                1, camera, camera, {}, {}, {}, (), False, body_landmarks=body
+            )
+
+        flat = np.zeros((320, 480, 3), dtype=np.uint8)
+        forward = np.zeros_like(flat)
+        draw_workspace_3d(cv2, np, flat, None, state(0), indices)
+        draw_workspace_3d(cv2, np, forward, None, state(0.45), indices)
+        self.assertFalse(np.array_equal(flat, forward))

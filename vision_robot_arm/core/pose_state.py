@@ -34,6 +34,17 @@ def mirror_landmarks(landmarks: list[LandmarkPoint]) -> list[LandmarkPoint]:
 
 
 @dataclass(frozen=True)
+class BodyFrame3D:
+    """Metric body frame: X right, Y forward, Z up, anchored at the shoulders."""
+
+    origin: tuple[float, float, float]
+    right: tuple[float, float, float]
+    forward: tuple[float, float, float]
+    up: tuple[float, float, float]
+    source: str
+
+
+@dataclass(frozen=True)
 class PoseState:
     timestamp_ms: int
     landmarks: list[LandmarkPoint]
@@ -48,6 +59,11 @@ class PoseState:
         default_factory=dict
     )
     angle_sources: dict[str, str] = field(default_factory=dict)
+    body_frame: BodyFrame3D | None = None
+    body_landmarks: list[LandmarkPoint] | None = None
+    hand_body_landmarks: dict[str, tuple[LandmarkPoint, ...]] = field(
+        default_factory=dict
+    )
 
     @property
     def display_angles(self) -> dict[str, float | None]:
