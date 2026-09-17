@@ -6,7 +6,7 @@ Completed code is not evidence of hardware safety or validated tracking accuracy
 
 ## 1. Control lifecycle and stale data (audit items 1–8)
 
-- [ ] Fail closed on homing timeout.
+- [x] Fail closed on homing timeout when RTDE is configured; stop both arms.
 - [ ] Separate connection, homing, arming, pause and explicit resume.
 - [ ] Expire per-arm/per-joint targets and clear them on tracking loss.
 - [ ] Reject stale feedback and react to controller fault states.

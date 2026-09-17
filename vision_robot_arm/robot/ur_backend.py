@@ -42,6 +42,10 @@ RtdeFactory = Callable[[str, int], RtdeClient | None]
 StatusQuery = Callable[[str, int], Any]
 
 
+class HomingError(RuntimeError):
+    """A requested home position was not confirmed before its deadline."""
+
+
 def encode_servoj(
     joints_deg: dict[str, float],
     duration_s: float,
@@ -115,6 +119,7 @@ class URArm:
         self._feedback: dict[str, Any] = {}
         self._rtde: RtdeClient | None = None
         self._homed = False
+        self._homing_error: str | None = None
         self._ready_at = clock() + config.start_seconds
         self._homing_deadline = self._ready_at + config.start_seconds * HOMING_TIMEOUT_FACTOR
         try:
@@ -131,17 +136,25 @@ class URArm:
     @property
     def homing(self) -> bool:
         """True until the arm reaches the home pose; latched, because a servo always lags."""
+        if self._homing_error is not None:
+            raise HomingError(self._homing_error)
         if self._homed:
             return False
         now = self._clock()
         if now < self._ready_at:
             return True
         actual = self.feedback_joints
-        if now < self._homing_deadline and actual is not None and any(
-            abs(actual[joint] - target) > HOME_TOLERANCE_DEG
-            for joint, target in self._setpoints.joints.items()
-        ):
-            return True
+        if self._rtde is not None:
+            arrived = actual is not None and all(
+                math.isfinite(actual[joint])
+                and abs(actual[joint] - target) <= HOME_TOLERANCE_DEG
+                for joint, target in self._setpoints.joints.items()
+            )
+            if not arrived:
+                if now >= self._homing_deadline:
+                    self._homing_error = f"Homing failed for {self.name}: home position was not confirmed."
+                    raise HomingError(self._homing_error)
+                return True
         self._homed = True
         return False
 
@@ -302,9 +315,16 @@ class URBackend:
         accumulated = self._tracker.accumulated_targets()
         if accumulated is None:
             return
-        for name, arm in self._arms.items():
-            arm.poll_feedback()
-            arm.update(accumulated.arm(name), elapsed)
+        try:
+            # Check every arm before allowing either one to stream a new command.
+            for arm in self._arms.values():
+                arm.poll_feedback()
+                _ = arm.homing
+            for name, arm in self._arms.items():
+                arm.update(accumulated.arm(name), elapsed)
+        except HomingError:
+            self.close()
+            raise
 
     def _catch_up_interval(self, now: float) -> float:
         """Time credited to the ramp. A long pose gap must not buy one huge step."""

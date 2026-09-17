@@ -5,6 +5,7 @@ from vision_robot_arm.robot.config import RobotConfig
 from vision_robot_arm.robot.targets import GRIPPER_CLOSE, GRIPPER_OPEN, ArmTargets, JointTargets
 from vision_robot_arm.robot.ur_backend import (
     URBackend,
+    HomingError,
     encode_gripper,
     encode_movej,
     encode_servoj,
@@ -446,7 +447,7 @@ class SafetyTests(unittest.TestCase):
 
         self.assertEqual(len(connector.sockets["192.168.1.10"].commands(b"servoj(")), 30)
 
-    def test_homing_gives_up_after_its_deadline(self) -> None:
+    def test_homing_timeout_stops_both_arms_without_streaming(self) -> None:
         connector = FakeConnector()
         factory = FakeRtdeFactory()
         backend, clock = self.make(connector, factory)
@@ -455,9 +456,23 @@ class SafetyTests(unittest.TestCase):
         }
 
         clock.now = 99.0
-        backend.send(targets(right={"shoulder": -90.0}))
+        with self.assertRaises(HomingError):
+            backend.send(targets(right={"shoulder": -90.0}))
+        for sock in connector.sockets.values():
+            self.assertEqual(sock.commands(b"servoj("), [])
+            self.assertTrue(sock.closed)
+            self.assertEqual(len(sock.commands(b"stopj(")), 1)
 
-        self.assertEqual(len(connector.sockets["192.168.1.10"].commands(b"servoj(")), 1)
+    def test_missing_homing_feedback_does_not_authorize_motion(self) -> None:
+        connector = FakeConnector()
+        backend, clock = self.make(connector, FakeRtdeFactory())
+        clock.now = 1.5
+        backend.send(targets(right={"shoulder": 0.0}))
+        for sock in connector.sockets.values():
+            self.assertEqual(sock.commands(b"servoj("), [])
+        clock.now = 99.0
+        with self.assertRaises(HomingError):
+            backend.send(targets(right={"shoulder": 0.0}))
 
     def test_lost_feedback_stops_presenting_a_stale_pose(self) -> None:
         connector = FakeConnector()
