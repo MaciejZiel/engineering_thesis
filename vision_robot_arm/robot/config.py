@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 
 from vision_robot_arm.robot.targets import (
     JOINT_ELBOW,
@@ -118,6 +119,27 @@ class RobotConfig:
         return self.limit_for(joint).clamp(UR_HOME_DEG.get(joint, 0.0))
 
     def validate(self) -> None:
+        for flag, value in (
+            ("--robot-print-interval", self.print_interval),
+            ("--robot-send-interval", self.send_interval),
+            ("--robot-max-speed", self.max_speed_deg_s),
+            ("--robot-deadband", self.joint_deadband_deg),
+            ("--robot-start-seconds", self.start_seconds),
+            ("--robot-start-speed", self.start_speed_deg_s),
+            ("--robot-start-accel", self.start_accel_deg_s2),
+            ("--robot-servo-lookahead", self.servo_lookahead_s),
+        ):
+            _validate_finite_number(flag, value)
+        for flag, value in (
+            ("--robot-baud", self.baud_rate),
+            ("--robot-ur-port", self.ur_port),
+            ("--robot-rtde-port", self.rtde_port),
+            ("--robot-dashboard-port", self.dashboard_port),
+            ("--robot-tool-output", self.tool_output),
+            ("--robot-servo-gain", self.servo_gain),
+        ):
+            if type(value) is not int:
+                raise SystemExit(f"{flag} must be an integer")
         if self.backend not in BACKEND_CHOICES:
             choices = ", ".join(BACKEND_CHOICES)
             raise SystemExit(f"--robot-backend must be one of: {choices}")
@@ -166,6 +188,13 @@ class RobotConfig:
             "wrist": UR7E_JOINT_RANGE,
         }
         for name, mapping in (("shoulder", self.shoulder), ("elbow", self.elbow), ("wrist", self.wrist)):
+            for field, value in (
+                ("minimum", mapping.limit.minimum), ("maximum", mapping.limit.maximum),
+                ("offset", mapping.offset_deg), ("sign", mapping.sign),
+            ):
+                _validate_finite_number(f"{name} joint mapping {field}", value)
+            if not isinstance(mapping.source, str) or not mapping.source.strip():
+                raise SystemExit(f"{name} joint mapping source must not be empty")
             if mapping.limit.minimum >= mapping.limit.maximum:
                 raise SystemExit(f"{name} joint limit minimum must be below its maximum")
             if mapping.sign == 0:
@@ -176,3 +205,12 @@ class RobotConfig:
                     f"--robot-{name}-range must stay inside the UR7e limit "
                     f"{allowed.minimum:.0f} {allowed.maximum:.0f}"
                 )
+
+
+def _validate_finite_number(name: str, value: float) -> None:
+    try:
+        valid = type(value) in (int, float) and math.isfinite(value)
+    except OverflowError:
+        valid = False
+    if not valid:
+        raise SystemExit(f"{name} must be a finite number")

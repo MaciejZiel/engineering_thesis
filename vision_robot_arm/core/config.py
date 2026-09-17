@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 from pathlib import Path
 
 from vision_robot_arm.robot.config import RobotConfig
@@ -47,6 +48,28 @@ class AppConfig:
     hand_presence_confidence: float = 0.4
 
     def validate(self) -> None:
+        for name in (
+            "print_interval", "camera_fps", "visibility_threshold", "smoothing_alpha",
+            "min_detection_confidence", "min_pose_presence_confidence",
+            "min_tracking_confidence", "hand_detection_confidence", "hand_presence_confidence",
+        ):
+            value = getattr(self, name)
+            try:
+                finite = type(value) in (int, float) and math.isfinite(value)
+            except OverflowError:
+                finite = False
+            if not finite:
+                raise SystemExit(f"{name} must be a finite number")
+        for name in ("width", "height", "inference_width", "inference_height", "num_poses"):
+            if type(getattr(self, name)) is not int:
+                raise SystemExit(f"{name} must be an integer")
+        if self.width < 0 or self.height < 0:
+            raise SystemExit("--width and --height must be 0 or greater")
+        if not (
+            type(self.camera) is int and self.camera >= 0
+            or isinstance(self.camera, str) and self.camera.lower() == "auto"
+        ):
+            raise SystemExit("--camera must be a non-negative index or 'auto'")
         if self.print_interval <= 0:
             raise SystemExit("--print-interval must be greater than 0")
         if not 1.0 <= self.camera_fps <= 120.0:
