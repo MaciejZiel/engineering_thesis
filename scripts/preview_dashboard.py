@@ -17,7 +17,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from vision_robot_arm.robot.targets import ArmState, RobotState, full_joint_pose
-from vision_robot_arm.robot.visualization import draw_simulation
+from vision_robot_arm.robot.visualization_3d import draw_workspace_3d
 from vision_robot_arm.vision.dashboard import DashboardUi
 from vision_robot_arm.vision.ui_style import ACCENT, MUTED, Painter
 
@@ -66,7 +66,7 @@ def render_previews(output: Path, sizes: list[tuple[int, int]]) -> None:
         False,
     )
     sim = np.zeros((540, 960, 3), np.uint8)
-    draw_simulation(cv2, sim, state, compact=True)
+    draw_workspace_3d(cv2, np, sim, state, None, {})
     for width, height in sizes:
         ui = DashboardUi(cv2, np, "Offline preview")
         ui._canvas_size = (width, height)
