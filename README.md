@@ -192,18 +192,21 @@ must be recaptured when the camera/operator setup changes. Without calibration,
 the existing absolute angle mapping is retained.
 
 Selecting the UR backend in the application no longer connects or moves an arm
-at startup. The hardware button (keyboard **H**) advances one explicit step:
-**Connect → Home (moves the robots) → Enable control**. Homing must be confirmed
-before control can be enabled. **P** pauses motion; resuming requires another
-explicit action. Missing any mapped joint on a configured arm pauses the session.
-Returning into view does not automatically resume control. A fault closes both
-connections and requires restarting the session. The interactive UR session requires
-RTDE feedback; it does not silently continue open-loop if feedback is unavailable.
+at startup. It defaults to **monitor** mode, where the backend has no motion
+methods and only reads RTDE/dashboard telemetry. In tracking mode the hardware
+button (keyboard **H**) advances one explicit step at a time:
+**Connect → capture the stationary current pose (no motion) → enable control**.
+There is no automatic trip to a hard-coded home position. **P** or the red
+**Stop motion** button pauses motion; resuming requires another explicit action.
+Missing any mapped joint on a configured arm pauses the session. Returning into
+view does not automatically resume control. A fault closes both connections and
+requires restarting the session. Interactive UR motion requires fresh RTDE
+position and velocity feedback; it does not silently continue open-loop.
 
 These software checks are not a hardware emergency stop or collision avoidance.
 Do not enable motion without the laboratory's approved workspace and procedures.
-The lower-level backend retains its legacy auto-home option for API compatibility;
-the interactive application explicitly disables it.
+The lower-level backend retains its legacy home method for tests and API
+compatibility; the interactive application does not call it.
 
 The application uses one resizable OpenCV window named **Motion Twin**. The
 camera feed occupies the main area. A graphite sidebar contains a compact
@@ -415,9 +418,10 @@ shoulder, elbow, wrist 1, wrist 2, wrist 3; payload 7.5 kg, reach 850 mm,
 joint range +-360 deg except elbow +-160 deg, max joint speed 180 deg/s).
 The robot side turns every `PoseState` into `JointTargets`: for each of the
 two cobots (`right`, `left`) the UR `shoulder`, `elbow` and `wrist_1` joint
-angles in degrees plus a gripper command, and one lift-mode flag. `base`,
-`wrist_2` and `wrist_3` are held at the UR home pose
-`[0, -90, 0, -90, 0, 0]`. Your right arm drives the right cobot and your left
+angles in degrees plus a gripper command, and one lift-mode flag. In simulation,
+`base`, `wrist_2` and `wrist_3` begin at the preview home pose. On hardware they
+remain at the feedback-confirmed pose captured before control is enabled. Your
+right arm drives the right cobot and your left
 arm the left one. The targets go to a backend selected with
 `--robot-backend`:
 
@@ -444,28 +448,77 @@ the embedded digital-twin panel, so you can test the mapping without hardware:
 python main.py --robot-backend sim --robot-max-speed 60
 ```
 
-### UR7e over URScript
+### Safe first UR7e connection
 
-Put each cobot in **Remote Control** mode on the teach pendant, give the PC a
-route to the controllers, then:
+Do not begin with two-arm tracking. Verify the physical installation, configured
+safety planes/joint limits and accessible teach-pendant emergency stop according
+to the laboratory procedure first. The checks below are application safeguards,
+not safety-rated robot functions.
+
+Start with the read-only monitor. This opens dashboard and RTDE connections but
+cannot send `movej`, `servoj`, `stopj` or tool-output commands:
 
 ```powershell
-python main.py --robot-backend ur --robot-right-host 192.168.1.10 --robot-left-host 192.168.1.11
+python main.py --robot-backend ur --robot-operation monitor --robot-right-host 192.168.1.10
 ```
 
-What happens on start-up, in order:
+Press **H** once to connect. Confirm in **Details** that the expected controller
+IP, software version, joint positions, TCP speed, joint speed, speed scaling and
+safety state are shown. Repeat separately for the other robot. Monitor mode is
+the default when `--robot-operation` is omitted.
+
+Only after the read-only check succeeds, test one joint on exactly one robot.
+Put that controller in **Remote Control** and **REDUCED** safety mode, clear the
+workspace, select a low pendant speed slider and run:
+
+```powershell
+python main.py --robot-backend ur --robot-operation commissioning `
+  --robot-right-host 192.168.1.10 `
+  --robot-commissioning-joint shoulder `
+  --robot-commissioning-speed 2 `
+  --robot-commissioning-excursion 2
+```
+
+Press **H** once to connect and a second time to capture the stationary current
+pose. Neither action commands motion. Then hold the on-screen `−`/`+` button or
+the **[**/**]** key to jog. Releasing it stops refresh; a 150 ms watchdog sends
+`stopj`. The default is limited to 2 deg/s and ±2 degrees from the captured
+origin. Hard validation prevents commissioning above 5 deg/s or ±5 degrees and
+prevents specifying two robot hosts. Press **P**, **H**, or **Stop motion** to
+disarm commissioning.
+
+If direction, joint identity, feedback, stopping or visualization is wrong, stop
+there and fix it before testing the next joint. Repeat with `base`, `elbow`,
+`wrist_1`, `wrist_2` and `wrist_3`, one at a time.
+
+### Vision tracking over URScript
+
+Full tracking is selected explicitly:
+
+```powershell
+python main.py --robot-backend ur --robot-operation tracking `
+  --robot-right-host 192.168.1.10 --robot-left-host 192.168.1.11 `
+  --robot-max-speed 5
+```
+
+This mode is not the first hardware test. It still needs validation of the lab's
+actual base transforms, workspace/collision constraints and final real-time
+command transport before it should control two physical arms around a shared
+table. Start with simulation and recorded motion, then one physical arm at low
+speed, then two arms only under the approved lab procedure.
+
+The hardware session performs these checks in order:
 
 1. **Readiness check** on the dashboard server (`--robot-dashboard-port`,
    default `29999`). Local control, a robot mode other than `RUNNING` or a
    safety stop end the run with a message naming the problem instead of a
-   silently motionless arm. An unreachable dashboard also ends the run:
-   motion is only authorized with an explicitly verified dashboard answer,
-   so skip the whole check with `--no-robot-preflight` if you accept that.
-2. **Homing**: one `movej` to the UR home pose `[0, -90, 0, -90, 0, 0]` at
-   `--robot-start-speed` (default `30` deg/s) and `--robot-start-accel`
-   (default `60` deg/s²). No `servoj` is sent for `--robot-start-seconds`
-   (default `2`), so the arm starts from a known pose.
-3. **Streaming**: one line per cobot every `--robot-send-interval` seconds:
+   silently motionless arm. An unreachable dashboard also ends the run.
+2. **Feedback capture**: fresh RTDE position and velocity are required and every
+   configured arm must be stationary. The actual joint pose becomes the initial
+   setpoint without sending a motion command.
+3. **Explicit enable**: another operator action is required before the first
+   mapped target can be sent.
+4. **Streaming**: one line per cobot every `--robot-send-interval` seconds:
 
 ```text
 servoj([0.0000, -0.7854, 1.5708, -1.5708, 0.0000, 0.0000], 0, 0, 0.050, 0.100, 300)
@@ -484,11 +537,11 @@ limit `180`). A tracking glitch therefore cannot ask the controller for a jump
 of tens of degrees.
 
 **Feedback**: the backend opens an RTDE connection (`--robot-rtde-port`,
-default `30004`) and reads `actual_q`, `robot_mode` and `safety_status`. The
-arm preview and the status lines then show where the robot actually is, with
-its mode and safety status; the grey ghost stays the commanded target. Use
-`--no-robot-feedback` to run open-loop, which falls back to displaying the
-setpoints.
+default `30004`) and reads joint position/velocity, TCP pose/velocity, robot and
+safety state, speed scaling and runtime state. The arm preview and status lines
+then show where the robot actually is; the grey ghost stays the commanded target.
+Monitor mode remains read-only. Commissioning and tracking refuse to start when
+feedback or dashboard preflight is disabled.
 
 **Shutdown** sends `stopj`, so closing the window decelerates the arms instead
 of leaving the last `servoj` running.
@@ -496,8 +549,14 @@ of leaving the last `servoj` running.
 The gripper is driven through a tool digital output
 (`--robot-tool-output`, default `0`; `set_tool_digital_out(0, True)` = close).
 Swap `encode_gripper` in `vision_robot_arm/robot/ur_backend.py` for the URCap
-call of the gripper the lab mounts (for example Robotiq). Start with a low
-`--robot-max-speed` and narrow joint ranges when testing on the real cobots.
+call of the gripper the lab mounts (for example Robotiq). Do not test the gripper
+until its electrical interface and safe output state have been verified.
+
+Protocol and safety references: the official UR documentation describes
+[RTDE](https://docs.universal-robots.com/tutorials/communication-protocol-tutorials/rtde-guide.html),
+the [primary/secondary interfaces](https://docs.universal-robots.com/tutorials/communication-protocol-tutorials/primary-secondary-guide.html),
+[`servoj`](https://www.universal-robots.com/manuals/EN/HTML/SW5_24/Content/prod-scriptmanual/all_scripts/servoj_qavt0-008lookahead_time.htm),
+and the controller's [safety parameter set](https://www.universal-robots.com/manuals/EN/HTML/SW10_6/Content/prod-usr-man/hardware/arm-e-Series/UR5e/H_g5_sections/safetyFunctionsAndinterfaces/safety_parameter_set.htm).
 
 Body angle to UR joint mapping (`vision_robot_arm/robot/config.py`,
 `JointMapping`):
