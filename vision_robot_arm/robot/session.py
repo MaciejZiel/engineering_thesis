@@ -4,7 +4,12 @@ import math
 from typing import Callable
 
 from vision_robot_arm.core.pose_state import PoseState
-from vision_robot_arm.robot.config import OPERATION_MONITOR, RobotConfig
+from vision_robot_arm.robot.config import (
+    OPERATION_COMMISSIONING,
+    OPERATION_MONITOR,
+    OPERATION_TRACKING,
+    RobotConfig,
+)
 from vision_robot_arm.robot.mapping import RobotMapper
 from vision_robot_arm.robot.targets import MAPPED_JOINTS
 
@@ -36,8 +41,12 @@ class HardwareSession:
                     else "connected"
                 )
             elif self.phase == "connected":
-                self._backend.home()
-                self.phase = "homing"
+                if self._config.operation == OPERATION_COMMISSIONING:
+                    self._backend.arm_commissioning()
+                    self.phase = "commissioning"
+                else:
+                    self._backend.home()
+                    self.phase = "homing"
             elif self.phase in ("ready", "paused") and self._usable:
                 if self._backend.ready():
                     self._mapper.reset()
@@ -48,18 +57,22 @@ class HardwareSession:
             self._fail(error)
 
     def pause(self) -> None:
-        if self.phase not in ("active", "homing"):
+        if self.phase not in ("active", "homing", "commissioning"):
             return
         try:
             self._backend.pause()
             # Interrupted homing must be performed again, not counted as complete.
-            self.phase = "connected" if self.phase == "homing" else "paused"
+            self.phase = (
+                "connected"
+                if self.phase in ("homing", "commissioning")
+                else "paused"
+            )
             self._mapper.reset()
         except (Exception, SystemExit) as error:
             self._fail(error)
 
     def update(self, state: PoseState) -> None:
-        if self.phase == "monitoring":
+        if self.phase in ("monitoring", "commissioning"):
             return
         targets = self._mapper.map(state)
         self._usable = all(
@@ -79,9 +92,19 @@ class HardwareSession:
             self._fail(error)
 
     def reset(self) -> None:
+        if self._config.operation != OPERATION_TRACKING:
+            return
         self._usable = False
         self._mapper.reset()
         self.pause()
+
+    def jog(self, direction: int) -> None:
+        if self.phase != "commissioning":
+            return
+        try:
+            self._backend.refresh_jog(direction)
+        except (Exception, SystemExit) as error:
+            self._fail(error)
 
     def robot_state(self):
         if self._backend is None or self.phase == "fault":
@@ -111,6 +134,7 @@ class HardwareSession:
         return {
             "disconnected": "Connect robot",
             "monitoring": "Read-only monitoring",
+            "commissioning": "Hold [ / ] to micro-jog; P disarms",
             "connected": "Home robot (motion)",
             "homing": "Homing — P to pause",
             "ready": "Enable control",

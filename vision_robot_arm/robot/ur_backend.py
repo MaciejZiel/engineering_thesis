@@ -12,7 +12,7 @@ import time
 from typing import Any, Callable
 
 from vision_robot_arm.robot.backend import Clock, TargetTracker
-from vision_robot_arm.robot.config import RobotConfig
+from vision_robot_arm.robot.config import OPERATION_COMMISSIONING, RobotConfig
 from vision_robot_arm.robot.simulation import SimulatedArm
 from vision_robot_arm.robot.targets import (
     GRIPPER_CLOSE,
@@ -36,6 +36,7 @@ MAX_CATCHUP_INTERVALS = 3.0
 HOME_TOLERANCE_DEG = 3.0
 HOMING_TIMEOUT_FACTOR = 5.0
 FEEDBACK_MAX_AGE_S = 0.5
+COMMISSIONING_STATIONARY_DEG_S = 0.5
 JOINT_SHORT_NAMES = {"shoulder": "S", "elbow": "E", "wrist_1": "W1"}
 
 Connector = Callable[[str, int], Any]
@@ -146,6 +147,63 @@ class URArm:
         self._setpoints = SimulatedArm(self._config)
         self._send(encode_movej(self._setpoints.joints, self._config.start_speed_deg_s,
                                 self._config.start_accel_deg_s2))
+
+    def capture_current_as_setpoint(self) -> dict[str, float]:
+        """Adopt feedback without issuing motion; used only by commissioning."""
+        actual = self.feedback_joints
+        if actual is None:
+            raise ControlFault(f"{self.name}: fresh joint feedback is required.")
+        self._setpoints.joints.update(actual)
+        self._setpoints.targets.update(actual)
+        self._home_started = True
+        self._homed = True
+        self._homing_error = None
+        return dict(actual)
+
+    @property
+    def feedback_speeds_deg_s(self) -> dict[str, float] | None:
+        if self.feedback_joints is None:
+            return None
+        actual = self._feedback.get("actual_qd")
+        if not actual or len(actual) != len(JOINT_NAMES) or not all(
+            math.isfinite(value) for value in actual
+        ):
+            return None
+        return {
+            name: math.degrees(actual[index])
+            for index, name in enumerate(JOINT_NAMES)
+        }
+
+    def commissioning_step(
+        self,
+        joint: str,
+        direction: int,
+        origin: dict[str, float],
+        elapsed_s: float,
+    ) -> None:
+        if joint not in JOINT_NAMES or direction not in (-1, 1):
+            raise ControlFault("Invalid commissioning jog request.")
+        lower = max(
+            self._config.limit_for(joint).minimum,
+            origin[joint] - self._config.commissioning_excursion_deg,
+        )
+        upper = min(
+            self._config.limit_for(joint).maximum,
+            origin[joint] + self._config.commissioning_excursion_deg,
+        )
+        requested = self._setpoints.joints[joint] + (
+            direction * self._config.commissioning_speed_deg_s * max(0.0, elapsed_s)
+        )
+        self._setpoints.joints[joint] = max(lower, min(upper, requested))
+        self._setpoints.targets.update(self._setpoints.joints)
+        self._send(
+            encode_servoj(
+                self._setpoints.joints,
+                self._config.send_interval,
+                self._config.servo_lookahead_s,
+                self._config.servo_gain,
+            )
+        )
 
     def pause(self) -> None:
         self._send(encode_stopj())
@@ -334,10 +392,11 @@ class URBackend:
         self._fault: str | None = None
         self._require_feedback = require_feedback
         self._status_query = status_query
+        self._commissioning = config.operation == OPERATION_COMMISSIONING
         if require_feedback and not config.feedback:
             raise ControlFault("Hardware control requires RTDE feedback.")
         if config.preflight:
-            _preflight(config, status_query)
+            _preflight(config, status_query, require_reduced=self._commissioning)
         factory = rtde_factory if config.feedback else None
         self._arms: dict[str, URArm] = {}
         try:
@@ -351,10 +410,18 @@ class URBackend:
         self._tracker = TargetTracker()
         self._next_send_at = 0.0
         self._last_send_at: float | None = None
+        self._commissioning_origins: dict[str, dict[str, float]] = {}
+        self._jog_direction = 0
+        self._jog_deadline = 0.0
+        self._commissioning_last_step: float | None = None
         if auto_home:
             self.home()
 
     def home(self) -> None:
+        if self._commissioning:
+            raise ControlFault(
+                "Commissioning never homes automatically; capture the current pose instead."
+            )
         if self._fault is not None:
             raise ControlFault(self._fault)
         try:
@@ -377,6 +444,93 @@ class URBackend:
             self.close()
             raise
 
+    def arm_commissioning(self) -> None:
+        if not self._commissioning:
+            raise ControlFault("This backend is not in commissioning mode.")
+        if self._fault is not None:
+            raise ControlFault(self._fault)
+        try:
+            _preflight(self._config, self._status_query, require_reduced=True)
+            origins = {}
+            for name, arm in self._arms.items():
+                arm.poll_feedback()
+                self._check_commissioning_health(arm, require_stationary=True)
+                origins[name] = arm.capture_current_as_setpoint()
+            self._commissioning_origins = origins
+            self._jog_direction = 0
+            self._commissioning_last_step = self._clock()
+        except BaseException as error:
+            self._fault = str(error)
+            self.close()
+            raise
+
+    def refresh_jog(self, direction: int) -> None:
+        if not self._commissioning_origins:
+            raise ControlFault("Capture the commissioning origin before jogging.")
+        if direction not in (-1, 1):
+            raise ControlFault("Jog direction must be -1 or +1.")
+        self._jog_direction = direction
+        self._jog_deadline = self._clock() + self._config.commissioning_watchdog_s
+
+    def _commissioning_tick(self) -> None:
+        if not self._commissioning or not self._commissioning_origins:
+            return
+        now = self._clock()
+        if self._jog_direction and now > self._jog_deadline:
+            self.pause()
+            return
+        if not self._jog_direction:
+            return
+        if (
+            self._commissioning_last_step is not None
+            and now - self._commissioning_last_step < self._config.send_interval
+        ):
+            return
+        elapsed = (
+            self._config.send_interval
+            if self._commissioning_last_step is None
+            else min(
+                now - self._commissioning_last_step,
+                self._config.send_interval * MAX_CATCHUP_INTERVALS,
+            )
+        )
+        try:
+            for arm in self._arms.values():
+                arm.poll_feedback()
+                self._check_commissioning_health(arm)
+            for name, arm in self._arms.items():
+                arm.commissioning_step(
+                    self._config.commissioning_joint,
+                    self._jog_direction,
+                    self._commissioning_origins[name],
+                    elapsed,
+                )
+            self._commissioning_last_step = now
+        except BaseException as error:
+            self._fault = str(error)
+            self.close()
+            raise
+
+    def _check_commissioning_health(
+        self, arm: URArm, require_stationary: bool = False
+    ) -> None:
+        arm.check_control_health()
+        if arm._feedback.get("safety_status") != 2:
+            raise ControlFault(
+                f"{arm.name}: commissioning requires controller safety status REDUCED."
+            )
+        speeds = arm.feedback_speeds_deg_s
+        if speeds is None:
+            raise ControlFault(
+                f"{arm.name}: fresh joint velocity feedback is required."
+            )
+        if require_stationary and max(
+            abs(value) for value in speeds.values()
+        ) > COMMISSIONING_STATIONARY_DEG_S:
+            raise ControlFault(
+                f"{arm.name}: robot must be stationary before commissioning."
+            )
+
     def ready(self) -> bool:
         ready = True
         for arm in self._arms.values():
@@ -386,6 +540,8 @@ class URBackend:
         return ready
 
     def pause(self) -> None:
+        self._jog_direction = 0
+        self._jog_deadline = 0.0
         self._tracker = TargetTracker()
         self._last_send_at = None
         self._next_send_at = 0.0
@@ -397,6 +553,8 @@ class URBackend:
             raise
 
     def send(self, targets: JointTargets) -> None:
+        if self._commissioning:
+            raise ControlFault("Vision targets are disabled in commissioning mode.")
         if self._fault is not None:
             raise ControlFault(self._fault)
         if not targets.has_data:
@@ -436,6 +594,7 @@ class URBackend:
     def robot_state(self) -> RobotState | None:
         if not self._arms:
             return None
+        self._commissioning_tick()
         for arm in self._arms.values():
             arm.poll_feedback()
         return RobotState(
@@ -444,14 +603,26 @@ class URBackend:
         )
 
     def status_lines(self) -> list[str]:
-        return [arm.status_line() for arm in self._arms.values()]
+        lines = [arm.status_line() for arm in self._arms.values()]
+        if self._commissioning:
+            state = "armed" if self._commissioning_origins else "not armed"
+            lines.append(
+                f"commissioning {state}: {self._config.commissioning_joint}, "
+                f"{self._config.commissioning_speed_deg_s:g} deg/s, "
+                f"+/-{self._config.commissioning_excursion_deg:g} deg"
+            )
+        return lines
 
     def close(self) -> None:
         for arm in self._arms.values():
             arm.close()
 
 
-def _preflight(config: RobotConfig, status_query: StatusQuery) -> None:
+def _preflight(
+    config: RobotConfig,
+    status_query: StatusQuery,
+    require_reduced: bool = False,
+) -> None:
     for name, host in config.hosts.items():
         status = status_query(host, config.dashboard_port)
         if status is None:
@@ -465,6 +636,11 @@ def _preflight(config: RobotConfig, status_query: StatusQuery) -> None:
                 f"The {name} UR7e at {host} is not ready to run URScript: {problem}.\n"
                 f"Dashboard reports {status.describe()}. "
                 "Start with --no-robot-preflight to skip this check."
+            )
+        if require_reduced and status.safety_status != "REDUCED":
+            raise SystemExit(
+                f"The {name} UR7e must report REDUCED safety status for commissioning. "
+                f"Dashboard reports {status.describe()}."
             )
 
 

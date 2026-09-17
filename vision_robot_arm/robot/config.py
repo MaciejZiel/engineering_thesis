@@ -3,6 +3,7 @@ import math
 
 from vision_robot_arm.robot.targets import (
     JOINT_ELBOW,
+    JOINT_NAMES,
     JOINT_SHOULDER,
     JOINT_WRIST_1,
     UR_HOME_DEG,
@@ -28,6 +29,8 @@ UR_SECONDARY_PORT = 30002
 UR_RTDE_PORT = 30004
 UR_DASHBOARD_PORT = 29999
 UR7E_MAX_JOINT_SPEED_DEG_S = 180.0
+COMMISSIONING_MAX_SPEED_DEG_S = 5.0
+COMMISSIONING_MAX_EXCURSION_DEG = 5.0
 
 
 @dataclass(frozen=True)
@@ -90,6 +93,10 @@ class RobotConfig:
     baud_rate: int = 115200
     send_interval: float = 0.05
     max_speed_deg_s: float = 60.0
+    commissioning_joint: str = JOINT_SHOULDER
+    commissioning_speed_deg_s: float = 2.0
+    commissioning_excursion_deg: float = 2.0
+    commissioning_watchdog_s: float = 0.15
     joint_deadband_deg: float = 1.5
     shoulder: JointMapping = DEFAULT_SHOULDER_MAPPING
     elbow: JointMapping = DEFAULT_ELBOW_MAPPING
@@ -138,6 +145,9 @@ class RobotConfig:
             ("--robot-start-speed", self.start_speed_deg_s),
             ("--robot-start-accel", self.start_accel_deg_s2),
             ("--robot-servo-lookahead", self.servo_lookahead_s),
+            ("--robot-commissioning-speed", self.commissioning_speed_deg_s),
+            ("--robot-commissioning-excursion", self.commissioning_excursion_deg),
+            ("--robot-commissioning-watchdog", self.commissioning_watchdog_s),
         ):
             _validate_finite_number(flag, value)
         for flag, value in (
@@ -156,6 +166,23 @@ class RobotConfig:
         if self.operation not in OPERATION_CHOICES:
             choices = ", ".join(OPERATION_CHOICES)
             raise SystemExit(f"--robot-operation must be one of: {choices}")
+        if self.commissioning_joint not in JOINT_NAMES:
+            raise SystemExit(
+                "--robot-commissioning-joint must be one of: "
+                + ", ".join(JOINT_NAMES)
+            )
+        if not 0 < self.commissioning_speed_deg_s <= COMMISSIONING_MAX_SPEED_DEG_S:
+            raise SystemExit(
+                f"--robot-commissioning-speed must be between 0 and {COMMISSIONING_MAX_SPEED_DEG_S:g} deg/s"
+            )
+        if not 0 < self.commissioning_excursion_deg <= COMMISSIONING_MAX_EXCURSION_DEG:
+            raise SystemExit(
+                f"--robot-commissioning-excursion must be between 0 and {COMMISSIONING_MAX_EXCURSION_DEG:g} degrees"
+            )
+        if not 0.05 <= self.commissioning_watchdog_s <= 0.5:
+            raise SystemExit(
+                "--robot-commissioning-watchdog must be between 0.05 and 0.5 seconds"
+            )
         if self.print_interval <= 0:
             raise SystemExit("--robot-print-interval must be greater than 0")
         if self.send_interval <= 0:
@@ -193,6 +220,18 @@ class RobotConfig:
             raise SystemExit(
                 "--robot-right-host and/or --robot-left-host is required with --robot-backend ur"
             )
+        if self.backend == BACKEND_UR and self.operation == OPERATION_COMMISSIONING:
+            if len(self.hosts) != 1:
+                raise SystemExit("Commissioning requires exactly one UR7e host")
+            if not self.feedback or not self.preflight:
+                raise SystemExit(
+                    "Commissioning requires RTDE feedback and dashboard preflight"
+                )
+        if self.backend == BACKEND_UR and self.operation == OPERATION_TRACKING:
+            if not self.feedback or not self.preflight:
+                raise SystemExit(
+                    "Vision tracking requires RTDE feedback and dashboard preflight"
+                )
         if self.backend == BACKEND_SERIAL and not self.port:
             raise SystemExit("--robot-port is required with --robot-backend serial")
         hardware = {

@@ -2,7 +2,11 @@ import unittest
 from unittest.mock import Mock
 
 from vision_robot_arm.core.pose_state import PoseState
-from vision_robot_arm.robot.config import OPERATION_TRACKING, RobotConfig
+from vision_robot_arm.robot.config import (
+    OPERATION_COMMISSIONING,
+    OPERATION_TRACKING,
+    RobotConfig,
+)
 from vision_robot_arm.robot.session import HardwareSession
 
 
@@ -94,3 +98,44 @@ class HardwareSessionTests(unittest.TestCase):
         self.assertEqual(session.phase, "monitoring")
         backend.home.assert_not_called()
         backend.send.assert_not_called()
+
+    def test_commissioning_captures_current_pose_instead_of_homing(self):
+        backend = Mock()
+        session = HardwareSession(
+            RobotConfig(
+                backend="ur",
+                operation=OPERATION_COMMISSIONING,
+                right_host="test",
+            ),
+            Mock(return_value=backend),
+        )
+
+        session.advance()
+        session.advance()
+
+        self.assertEqual(session.phase, "commissioning")
+        backend.arm_commissioning.assert_called_once()
+        backend.home.assert_not_called()
+
+        session.jog(-1)
+        backend.refresh_jog.assert_called_once_with(-1)
+        session.update(pose())
+        backend.send.assert_not_called()
+
+    def test_commissioning_reset_from_missing_pose_does_not_disarm(self):
+        backend = Mock()
+        session = HardwareSession(
+            RobotConfig(
+                backend="ur",
+                operation=OPERATION_COMMISSIONING,
+                right_host="test",
+            ),
+            Mock(return_value=backend),
+        )
+        session.advance()
+        session.advance()
+
+        session.reset()
+
+        self.assertEqual(session.phase, "commissioning")
+        backend.pause.assert_not_called()

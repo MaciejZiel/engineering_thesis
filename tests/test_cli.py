@@ -70,6 +70,46 @@ class CliRobotOptionsTests(unittest.TestCase):
 
         parse_args(["--robot-backend", "ur", "--robot-left-host", "10.0.0.5"]).robot.validate()
 
+    def test_ur_defaults_to_motionless_monitor_operation(self) -> None:
+        robot = parse_args(
+            ["--robot-backend", "ur", "--robot-right-host", "10.0.0.2"]
+        ).robot
+
+        self.assertEqual(robot.operation, "monitor")
+
+    def test_commissioning_options_are_conservative_and_configurable(self) -> None:
+        robot = parse_args(
+            [
+                "--robot-backend", "ur",
+                "--robot-operation", "commissioning",
+                "--robot-right-host", "10.0.0.2",
+                "--robot-commissioning-joint", "elbow",
+                "--robot-commissioning-speed", "1.5",
+                "--robot-commissioning-excursion", "1",
+                "--robot-commissioning-watchdog", "0.1",
+            ]
+        ).robot
+
+        robot.validate()
+        self.assertEqual(robot.commissioning_joint, "elbow")
+        self.assertEqual(robot.commissioning_speed_deg_s, 1.5)
+        self.assertEqual(robot.commissioning_excursion_deg, 1.0)
+        self.assertEqual(robot.commissioning_watchdog_s, 0.1)
+
+    def test_commissioning_rejects_two_robots_or_disabled_safety_checks(self) -> None:
+        invalid = (
+            ["--robot-right-host", "a", "--robot-left-host", "b"],
+            ["--robot-right-host", "a", "--no-robot-feedback"],
+            ["--robot-right-host", "a", "--no-robot-preflight"],
+        )
+        for extra in invalid:
+            with self.subTest(extra=extra):
+                robot = parse_args(
+                    ["--robot-backend", "ur", "--robot-operation", "commissioning", *extra]
+                ).robot
+                with self.assertRaises(SystemExit):
+                    robot.validate()
+
     def test_serial_backend_without_port_fails_validation(self) -> None:
         config = parse_args(["--robot-backend", "serial"])
 

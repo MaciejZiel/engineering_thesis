@@ -14,6 +14,8 @@ from vision_robot_arm.robot.config import (
     BACKEND_DEBUG,
     BACKEND_NONE,
     BACKEND_SIM,
+    COMMISSIONING_MAX_EXCURSION_DEG,
+    COMMISSIONING_MAX_SPEED_DEG_S,
     DEFAULT_ELBOW_MAPPING,
     DEFAULT_SHOULDER_MAPPING,
     DEFAULT_WRIST_MAPPING,
@@ -27,6 +29,7 @@ from vision_robot_arm.robot.config import (
     JointMapping,
     RobotConfig,
 )
+from vision_robot_arm.robot.targets import JOINT_NAMES
 from vision_robot_arm.vision.camera import (
     BACKEND_CHOICES as CAMERA_BACKEND_CHOICES,
     FORMAT_CHOICES as CAMERA_FORMAT_CHOICES,
@@ -253,6 +256,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="UR mode: read-only monitor (default), commissioning, or vision tracking.",
     )
     robot.add_argument(
+        "--robot-commissioning-joint",
+        choices=JOINT_NAMES,
+        default="shoulder",
+        help="Single joint enabled in commissioning mode. Default: shoulder.",
+    )
+    robot.add_argument(
+        "--robot-commissioning-speed",
+        type=float,
+        default=2.0,
+        help=f"Commissioning speed in deg/s, at most {COMMISSIONING_MAX_SPEED_DEG_S:g}. Default: 2.",
+    )
+    robot.add_argument(
+        "--robot-commissioning-excursion",
+        type=float,
+        default=2.0,
+        help=f"Maximum offset from captured position in degrees, at most {COMMISSIONING_MAX_EXCURSION_DEG:g}. Default: 2.",
+    )
+    robot.add_argument(
+        "--robot-commissioning-watchdog",
+        type=float,
+        default=0.15,
+        help="Stop motion when jog refresh stops for this many seconds. Default: 0.15.",
+    )
+    robot.add_argument(
         "--robot-right-host",
         default=None,
         help="IP address of the UR7e driven by your right arm (--robot-backend ur).",
@@ -426,6 +453,10 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         baud_rate=args.robot_baud,
         send_interval=args.robot_send_interval,
         max_speed_deg_s=args.robot_max_speed,
+        commissioning_joint=args.robot_commissioning_joint,
+        commissioning_speed_deg_s=args.robot_commissioning_speed,
+        commissioning_excursion_deg=args.robot_commissioning_excursion,
+        commissioning_watchdog_s=args.robot_commissioning_watchdog,
         joint_deadband_deg=args.robot_deadband,
         shoulder=_with_limit(DEFAULT_SHOULDER_MAPPING, args.robot_shoulder_range),
         elbow=_with_limit(DEFAULT_ELBOW_MAPPING, args.robot_elbow_range),

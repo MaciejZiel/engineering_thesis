@@ -1,7 +1,7 @@
 import math
 import unittest
 
-from vision_robot_arm.robot.config import RobotConfig
+from vision_robot_arm.robot.config import OPERATION_COMMISSIONING, RobotConfig
 from vision_robot_arm.robot.targets import GRIPPER_CLOSE, GRIPPER_OPEN, ArmTargets, JointTargets
 from vision_robot_arm.robot.ur_backend import (
     URBackend,
@@ -88,6 +88,10 @@ def failing_connector(host: str, port: int) -> None:
 
 def ready_status(host: str, port: int) -> DashboardStatus:
     return DashboardStatus("RUNNING", "NORMAL", True)
+
+
+def reduced_status(host: str, port: int) -> DashboardStatus:
+    return DashboardStatus("RUNNING", "REDUCED", True)
 
 
 def no_status(host: str, port: int) -> None:
@@ -653,6 +657,105 @@ class PreflightTests(unittest.TestCase):
         URBackend(self.config(), connector=connector, rtde_factory=None, status_query=ready_status)
 
         self.assertIn("10.0.0.2", connector.sockets)
+
+
+class CommissioningTests(unittest.TestCase):
+    def make(self):
+        connector = FakeConnector()
+        factory = FakeRtdeFactory()
+        clock = FakeClock()
+        config = RobotConfig(
+            backend="ur",
+            operation=OPERATION_COMMISSIONING,
+            right_host="10.0.0.2",
+            send_interval=0.05,
+            commissioning_speed_deg_s=2.0,
+            commissioning_excursion_deg=2.0,
+            commissioning_watchdog_s=0.15,
+        )
+        backend = URBackend(
+            config,
+            connector=connector,
+            rtde_factory=factory,
+            status_query=reduced_status,
+            clock=clock,
+            require_feedback=True,
+        )
+        factory.clients["10.0.0.2"].sample = {
+            "actual_q": (
+                0.0,
+                math.radians(-40.0),
+                math.radians(20.0),
+                math.radians(-80.0),
+                0.0,
+                0.0,
+            ),
+            "actual_qd": (0.0,) * 6,
+            "robot_mode": 7,
+            "safety_status": 2,
+        }
+        return backend, connector.sockets["10.0.0.2"], clock
+
+    def test_arming_captures_feedback_without_sending_motion(self) -> None:
+        backend, socket, _ = self.make()
+
+        backend.arm_commissioning()
+
+        self.assertEqual(socket.sent, [])
+        self.assertAlmostEqual(
+            backend.robot_state().arm("right").targets["shoulder"], -40.0
+        )
+
+    def test_jog_is_slow_bounded_and_stops_when_refresh_expires(self) -> None:
+        backend, socket, clock = self.make()
+        backend.arm_commissioning()
+        backend.refresh_jog(1)
+
+        clock.now = 0.05
+        backend.robot_state()
+
+        commands = socket.commands(b"servoj(")
+        self.assertEqual(len(commands), 1)
+        shoulder = math.degrees(float(commands[0].split(b"[")[1].split(b",")[1]))
+        self.assertAlmostEqual(shoulder, -39.9, delta=0.01)
+        self.assertEqual(socket.commands(b"movej("), [])
+
+        clock.now = 0.16
+        backend.robot_state()
+        self.assertEqual(len(socket.commands(b"stopj(")), 1)
+
+    def test_normal_safety_mode_is_refused_before_command_socket_opens(self) -> None:
+        connector = FakeConnector()
+        config = RobotConfig(
+            backend="ur",
+            operation=OPERATION_COMMISSIONING,
+            right_host="10.0.0.2",
+        )
+
+        with self.assertRaisesRegex(SystemExit, "REDUCED"):
+            URBackend(
+                config,
+                connector=connector,
+                rtde_factory=FakeRtdeFactory(),
+                status_query=ready_status,
+                require_feedback=True,
+            )
+
+        self.assertEqual(connector.sockets, {})
+
+    def test_moving_robot_cannot_be_armed(self) -> None:
+        backend, _, _ = self.make()
+        backend._arms["right"]._rtde.sample["actual_qd"] = (
+            0.0,
+            math.radians(1.0),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        )
+
+        with self.assertRaisesRegex(ControlFault, "stationary"):
+            backend.arm_commissioning()
 
 
 if __name__ == "__main__":

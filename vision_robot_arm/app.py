@@ -451,6 +451,10 @@ def run_app(config: AppConfig) -> int:
                     robot_controller.advance()
                 if key == ord("p"):
                     robot_controller.pause()
+                if key == ord("["):
+                    robot_controller.jog(-1)
+                elif key == ord("]"):
+                    robot_controller.jog(1)
             if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
                 return 0
             if key in (ord("q"), 27) or action == ACTION_QUIT:
