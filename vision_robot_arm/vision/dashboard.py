@@ -31,6 +31,7 @@ ACTION_CONTROL = "control"
 ACTION_JOG_NEGATIVE = "jog_negative"
 ACTION_JOG_POSITIVE = "jog_positive"
 ACTION_STOP = "stop"
+ACTION_VIEW = "view"
 
 
 @dataclass(frozen=True)
@@ -174,6 +175,7 @@ class DashboardUi:
         self._pressed: str | None = None
         self._focus: str | None = None
         self._details = False
+        self._workspace_focus = False
 
     @property
     def fullscreen(self) -> bool:
@@ -218,6 +220,14 @@ class DashboardUi:
         if button is None or not button.enabled or not button.rect.contains(*self._pointer):
             return None
         return self._pressed
+
+    @property
+    def workspace_focus(self) -> bool:
+        return self._workspace_focus
+
+    def toggle_workspace_focus(self) -> bool:
+        self._workspace_focus = not self._workspace_focus
+        return self._workspace_focus
 
     def toggle_fullscreen(self) -> bool:
         self._fullscreen = not self._fullscreen
@@ -314,10 +324,20 @@ class DashboardUi:
                 align="right",
                 size=13,
             )
-        self._camera(p, layout.camera, camera_frame, source_label, fps, person_detected)
-        self._preview(
-            p, layout.preview, simulation_frame, robot_label, robot_state_available
-        )
+        if self._workspace_focus:
+            self._preview(
+                p, layout.camera, simulation_frame, robot_label, robot_state_available
+            )
+            self._camera(
+                p, layout.preview, camera_frame, source_label, fps, person_detected
+            )
+        else:
+            self._camera(
+                p, layout.camera, camera_frame, source_label, fps, person_detected
+            )
+            self._preview(
+                p, layout.preview, simulation_frame, robot_label, robot_state_available
+            )
         self._status(
             p,
             layout.status,
@@ -655,6 +675,15 @@ class DashboardUi:
                 True,
                 False,
             ),
+            (
+                ACTION_VIEW,
+                "Camera focus" if self._workspace_focus else "3D focus",
+                "V",
+                145,
+                self._workspace_focus,
+                True,
+                False,
+            ),
             (ACTION_QUIT, "Quit", "Esc", 90, False, True, False),
             )
         widths = [p.px(d[3]) for d in definitions]
@@ -663,7 +692,13 @@ class DashboardUi:
             definitions
         ):
             if not commissioning_joint and i == 2:
-                x = max(x, rect.right - pad - sum(widths[2:]) - gap * 2)
+                x = max(
+                    x,
+                    rect.right
+                    - pad
+                    - sum(widths[2:])
+                    - gap * max(0, len(widths) - 3),
+                )
             button = DashboardButton(
                 action,
                 label,
@@ -689,6 +724,7 @@ class DashboardUi:
             ACTION_FULLSCREEN,
             ACTION_QUIT,
             ACTION_DETAILS,
+            ACTION_VIEW,
         ):
             fill, border = BACKGROUND if not compact else SURFACE, None
         if button.action == ACTION_STOP:
@@ -744,7 +780,11 @@ class DashboardUi:
     def simulation_target_size(self) -> tuple[int, int]:
         """Pixel size of the arm preview area, so the simulation renders without rescaling."""
         width, height = self._canvas_size or (1280, 720)
-        target = preview_target(dashboard_layout(width, height))
+        layout = dashboard_layout(width, height)
+        rect = layout.camera if self._workspace_focus else layout.preview
+        target = preview_target_rect(
+            rect, lambda value: max(1, round(value * layout.scale))
+        )
         return max(2, target.width), max(2, target.height)
 
     def _place_image(self, canvas: Any, image: Any, target: Rect) -> None:

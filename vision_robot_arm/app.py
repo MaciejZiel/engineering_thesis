@@ -23,6 +23,7 @@ from vision_robot_arm.vision.dashboard import (
     ACTION_QUIT,
     ACTION_RECORD,
     ACTION_STOP,
+    ACTION_VIEW,
     DashboardUi,
     cycle_output_mode,
 )
@@ -483,6 +484,8 @@ def run_app(config: AppConfig) -> int:
                 return 0
             if key == ord("f") or action == ACTION_FULLSCREEN:
                 dashboard.toggle_fullscreen()
+            if key == ord("v") or action == ACTION_VIEW:
+                dashboard.toggle_workspace_focus()
             if (key == ord("c") or action == ACTION_CALIBRATE) and can_calibrate:
                 robot_controller.reset()
                 sides = tuple(config.robot.hosts) or ("left", "right")

@@ -11,6 +11,7 @@ from vision_robot_arm.vision.dashboard import (
     ACTION_JOG_POSITIVE,
     ACTION_RECORD,
     ACTION_STOP,
+    ACTION_VIEW,
     DashboardUi,
     Rect,
     backend_label,
@@ -159,6 +160,18 @@ class DashboardInteractionTests(unittest.TestCase):
         self.assertEqual(backend_label("sim"), "Simulation")
         self.assertEqual(backend_label("ur"), "URScript output")
         self.assertEqual(backend_label("off"), "Preview only")
+
+    def test_workspace_focus_enlarges_3d_render_target_and_can_be_toggled(self) -> None:
+        compact = self.ui.simulation_target_size()
+
+        self.click(ACTION_VIEW)
+        self.assertEqual(self.ui.consume_action(), ACTION_VIEW)
+        self.ui.toggle_workspace_focus()
+        expanded = self.ui.simulation_target_size()
+
+        self.assertTrue(self.ui.workspace_focus)
+        self.assertGreater(expanded[0], compact[0])
+        self.assertGreater(expanded[1], compact[1])
 
     def test_commissioning_jog_is_active_only_while_pointer_is_held_inside(self) -> None:
         self.ui.render(
