@@ -133,6 +133,28 @@ and the wrist angle falls back to the pose model (elbow-wrist-index), which is
 unsigned: the robot wrist can then only bend one way, and `angle_*_wrist` in a
 recording means something different from a run with hand tracking on.
 
+### 3D tracking data
+
+Robot-driving joint angles require MediaPipe world landmarks in the live
+application. Shoulders and elbows use pose-world 3D vectors; wrist flexion uses
+the metric hand-world direction and its palm hinge axis. There is no silent 2D
+fallback for control when world output is missing. Image landmarks remain in use
+for visibility checks, hand-to-arm association and the camera overlay.
+
+Hand world landmarks have a hand-local origin. For recording and future 3D
+visualization, each hand is translated so its wrist coincides with the pose-world
+wrist. The stored frame is named `pose_wrist_anchored_m`; it preserves the metric
+hand shape without pretending that the hand model provides an independent global
+position. CSV recordings include image and anchored-world coordinates for all 21
+landmarks on both hands plus an angle-source column. A held wrist measurement is
+explicitly marked `hand_world_3d_held`.
+
+Pose-world coordinates are body-relative model estimates, not camera-space depth.
+They support 3D joint orientation, including motion toward and away from the
+camera, but cannot measure the operator's absolute distance from the robots. That
+later requires registered depth from the target RGB-D camera and calibration into
+the robot/table coordinate system.
+
 ## Dashboard UI
 
 ### Hardware control lifecycle

@@ -28,15 +28,23 @@ def _finger_states(hand: list[Any], aspect_ratio: float) -> tuple[str | None, ..
         return ()
     states = []
     for base in (5, 9, 13, 17):
-        mcp, pip, dip, tip = hand[base:base+4]
-        pip_angle = calculate_angle(mcp, pip, dip, aspect_ratio=aspect_ratio, use_depth=True)
-        dip_angle = calculate_angle(pip, dip, tip, aspect_ratio=aspect_ratio, use_depth=True)
+        mcp, pip, dip, tip = hand[base : base + 4]
+        pip_angle = calculate_angle(
+            mcp, pip, dip, aspect_ratio=aspect_ratio, use_depth=True
+        )
+        dip_angle = calculate_angle(
+            pip, dip, tip, aspect_ratio=aspect_ratio, use_depth=True
+        )
         if pip_angle is None or dip_angle is None:
             states.append(None)
             continue
         tip_distance = _norm(_vector(hand[0], tip, aspect_ratio))
         pip_distance = _norm(_vector(hand[0], pip, aspect_ratio))
-        if pip_angle >= 155 and dip_angle >= 145 and tip_distance > pip_distance * EXTENDED_RATIO:
+        if (
+            pip_angle >= 155
+            and dip_angle >= 145
+            and tip_distance > pip_distance * EXTENDED_RATIO
+        ):
             states.append(HAND_OPEN)
         elif pip_angle < 135 or tip_distance < pip_distance * 1.03:
             states.append(HAND_FIST)
@@ -68,6 +76,31 @@ def assign_hand_sides(
     min_visibility: float = 0.55,
     ambiguity_margin: float = 0.02,
 ) -> dict[str, list[Any]]:
+    return {
+        side: hands[index]
+        for side, index in assign_hand_indices(
+            hands,
+            pose_landmarks,
+            indices,
+            max_distance,
+            aspect_ratio=aspect_ratio,
+            min_visibility=min_visibility,
+            ambiguity_margin=ambiguity_margin,
+        ).items()
+    }
+
+
+def assign_hand_indices(
+    hands: list[list[Any]],
+    pose_landmarks: list[Any],
+    indices: dict[str, int],
+    max_distance: float = MAX_WRIST_DISTANCE,
+    *,
+    aspect_ratio: float = 1.0,
+    min_visibility: float = 0.55,
+    ambiguity_margin: float = 0.02,
+) -> dict[str, int]:
+    """Match detections once so image and world landmarks keep the same identity."""
     costs = {}
     for hand_number, hand in enumerate(hands):
         if not hand or not _finite(hand[0]):
@@ -84,7 +117,9 @@ def assign_hand_sides(
             wrist = pose_landmarks[wrist_index]
             if not is_reliable(wrist, min_visibility):
                 continue
-            distance = math.hypot((hand[0].x-wrist.x)*aspect_ratio, hand[0].y-wrist.y)
+            distance = math.hypot(
+                (hand[0].x - wrist.x) * aspect_ratio, hand[0].y - wrist.y
+            )
             if distance <= allowed:
                 costs[side, hand_number] = distance
     candidates = []
@@ -103,11 +138,55 @@ def assign_hand_sides(
     # Do not send a gesture to the wrong gripper on an arbitrary tie-break.
     ambiguous = set()
     for other_count, other_cost, other_pairs in candidates[1:]:
-        if other_count != count or other_cost-cost >= ambiguity_margin:
+        if other_count != count or other_cost - cost >= ambiguity_margin:
             break
         other = dict(other_pairs)
         ambiguous.update(side for side, i in pairs if other.get(side) != i)
-    return {side: hands[i] for side, i in pairs if side not in ambiguous}
+    return {side: i for side, i in pairs if side not in ambiguous}
+
+
+def anchor_hand_world_landmarks(
+    hand_world_by_side: dict[str, list[Any]],
+    pose_world_landmarks: list[Any] | None,
+    indices: dict[str, int],
+) -> dict[str, list[LandmarkPoint]]:
+    """Place hand-local metric landmarks at the pose model's metric wrist.
+
+    MediaPipe returns the hand shape in a metric coordinate system centered on the
+    hand. Translation is therefore taken from the pose wrist while every hand offset
+    remains relative to the hand model's own wrist. This produces one body-relative
+    3D scene without mixing normalized image depth with metres.
+    """
+    if pose_world_landmarks is None:
+        return {}
+    anchored: dict[str, list[LandmarkPoint]] = {}
+    for side, hand in hand_world_by_side.items():
+        pose_index = indices.get(f"{side.upper()}_WRIST")
+        if (
+            pose_index is None
+            or not 0 <= pose_index < len(pose_world_landmarks)
+            or len(hand) <= HAND_WRIST
+            or not _finite(hand[HAND_WRIST])
+            or not _finite(pose_world_landmarks[pose_index])
+        ):
+            continue
+        pose_wrist = pose_world_landmarks[pose_index]
+        hand_wrist = hand[HAND_WRIST]
+        points = []
+        for point in hand:
+            if not _finite(point):
+                points = []
+                break
+            points.append(
+                LandmarkPoint(
+                    x=float(pose_wrist.x) + float(point.x) - float(hand_wrist.x),
+                    y=float(pose_wrist.y) + float(point.y) - float(hand_wrist.y),
+                    z=float(pose_wrist.z) + float(point.z) - float(hand_wrist.z),
+                )
+            )
+        if points:
+            anchored[side] = points
+    return anchored
 
 
 def detect_hand_gestures(
@@ -119,8 +198,13 @@ def detect_hand_gestures(
     min_visibility: float = 0.55,
 ) -> tuple[str, ...]:
     return gestures_from_sides(
-        assign_hand_sides(hands, pose_landmarks, indices,
-                          aspect_ratio=aspect_ratio, min_visibility=min_visibility),
+        assign_hand_sides(
+            hands,
+            pose_landmarks,
+            indices,
+            aspect_ratio=aspect_ratio,
+            min_visibility=min_visibility,
+        ),
         aspect_ratio=aspect_ratio,
     )
 
@@ -171,7 +255,9 @@ def refine_pose_wrists(
         if index is None or not 0 <= index < len(refined) or len(hand) <= HAND_WRIST:
             continue
         pose_wrist, hand_wrist = refined[index], hand[HAND_WRIST]
-        if not all(math.isfinite(float(getattr(hand_wrist, axis))) for axis in ("x", "y")):
+        if not all(
+            math.isfinite(float(getattr(hand_wrist, axis))) for axis in ("x", "y")
+        ):
             continue
         refined[index] = LandmarkPoint(
             x=float(hand_wrist.x),
@@ -197,8 +283,13 @@ def hand_wrist_angles(
     moved the reported angle by tens of degrees for no real motion.
     """
     return wrist_angles_from_sides(
-        assign_hand_sides(hands, pose_landmarks, indices,
-                          aspect_ratio=aspect_ratio, min_visibility=min_visibility),
+        assign_hand_sides(
+            hands,
+            pose_landmarks,
+            indices,
+            aspect_ratio=aspect_ratio,
+            min_visibility=min_visibility,
+        ),
         pose_landmarks,
         indices,
         aspect_ratio,
@@ -225,15 +316,79 @@ def wrist_angles_from_sides(
             continue
         if max(elbow_index, wrist_index) >= len(pose_landmarks):
             continue
-        if not all(is_reliable(pose_landmarks[i], min_visibility) for i in (elbow_index, wrist_index)):
+        if not all(
+            is_reliable(pose_landmarks[i], min_visibility)
+            for i in (elbow_index, wrist_index)
+        ):
             continue
-        forearm = _image_vector(pose_landmarks[elbow_index], pose_landmarks[wrist_index], aspect_ratio)
-        hand_direction = _image_vector(hand[HAND_WRIST], hand[HAND_MIDDLE_MCP], aspect_ratio)
+        forearm = _image_vector(
+            pose_landmarks[elbow_index], pose_landmarks[wrist_index], aspect_ratio
+        )
+        hand_direction = _image_vector(
+            hand[HAND_WRIST], hand[HAND_MIDDLE_MCP], aspect_ratio
+        )
         deviation = signed_wrist_deviation(forearm, hand_direction)
         if deviation is None:
             continue
         angles[f"{side}_wrist"] = STRAIGHT_WRIST_DEG - deviation * SIDE_ROTATION[side]
     return angles
+
+
+def wrist_angles_3d(
+    hand_world_by_side: dict[str, list[Any]],
+    pose_landmarks: list[Any],
+    pose_world_landmarks: list[Any] | None,
+    indices: dict[str, int],
+    *,
+    min_visibility: float = 0.55,
+) -> dict[str, float]:
+    """Metric 3D wrist flexion around the hand's index-to-pinky hinge axis."""
+    if pose_world_landmarks is None:
+        return {}
+    angles: dict[str, float] = {}
+    for side, hand in hand_world_by_side.items():
+        elbow_index = indices.get(f"{side.upper()}_ELBOW")
+        wrist_index = indices.get(f"{side.upper()}_WRIST")
+        if (
+            elbow_index is None
+            or wrist_index is None
+            or max(elbow_index, wrist_index) >= len(pose_landmarks)
+            or max(elbow_index, wrist_index) >= len(pose_world_landmarks)
+            or len(hand) <= 17
+            or not all(
+                is_reliable(pose_landmarks[index], min_visibility)
+                for index in (elbow_index, wrist_index)
+            )
+            or not all(_finite(hand[index]) for index in (0, 5, 9, 17))
+        ):
+            continue
+        forearm = _vector3(
+            pose_world_landmarks[elbow_index], pose_world_landmarks[wrist_index]
+        )
+        hand_direction = _vector3(hand[0], hand[9])
+        hinge = _vector3(hand[5], hand[17])
+        deviation = signed_angle_around_axis(forearm, hand_direction, hinge)
+        if deviation is not None:
+            angles[f"{side}_wrist"] = STRAIGHT_WRIST_DEG - deviation
+    return angles
+
+
+def signed_angle_around_axis(
+    first: Vector, second: Vector, axis: Vector
+) -> float | None:
+    """Signed angle after projecting both vectors onto a plane normal to axis."""
+    unit_axis = _unit(axis)
+    if unit_axis is None:
+        return None
+    first_projected = _reject(first, unit_axis)
+    second_projected = _reject(second, unit_axis)
+    first_unit, second_unit = _unit(first_projected), _unit(second_projected)
+    if first_unit is None or second_unit is None:
+        return None
+    sine = _dot(unit_axis, _cross(first_unit, second_unit))
+    cosine = _dot(first_unit, second_unit)
+    angle = math.degrees(math.atan2(sine, max(-1.0, min(1.0, cosine))))
+    return max(-MAX_WRIST_DEVIATION_DEG, min(MAX_WRIST_DEVIATION_DEG, angle))
 
 
 def signed_wrist_deviation(forearm: Vector, hand_direction: Vector) -> float | None:
@@ -245,7 +400,9 @@ def signed_wrist_deviation(forearm: Vector, hand_direction: Vector) -> float | N
     """
     forearm_x, forearm_y = forearm[0], forearm[1]
     hand_x, hand_y = hand_direction[0], hand_direction[1]
-    if not all(math.isfinite(value) for value in (forearm_x, forearm_y, hand_x, hand_y)):
+    if not all(
+        math.isfinite(value) for value in (forearm_x, forearm_y, hand_x, hand_y)
+    ):
         return None
     if math.hypot(forearm_x, forearm_y) < MIN_PROJECTION:
         return None
@@ -266,11 +423,14 @@ class WristAngleHold:
     allowed to travel at most MAX_WRIST_RATE_DEG_S and catches up over a few frames.
     """
 
-    def __init__(self, max_age_ms: int = 500, max_rate_deg_s: float = MAX_WRIST_RATE_DEG_S) -> None:
+    def __init__(
+        self, max_age_ms: int = 500, max_rate_deg_s: float = MAX_WRIST_RATE_DEG_S
+    ) -> None:
         self._max_age_ms = max_age_ms
         self._max_rate_deg_s = max_rate_deg_s
         self._last: dict[str, tuple[float, int]] = {}
         self._timestamp_ms: int | None = None
+        self.held_names: frozenset[str] = frozenset()
 
     def update(self, angles: dict[str, float], timestamp_ms: int) -> dict[str, float]:
         if self._timestamp_ms is not None and timestamp_ms <= self._timestamp_ms:
@@ -278,13 +438,17 @@ class WristAngleHold:
         self._timestamp_ms = timestamp_ms
         for name, value in angles.items():
             if math.isfinite(value):
-                self._last[name] = (self._rate_limited(name, value, timestamp_ms), timestamp_ms)
+                self._last[name] = (
+                    self._rate_limited(name, value, timestamp_ms),
+                    timestamp_ms,
+                )
         merged: dict[str, float] = {}
         for name, (value, seen_at) in list(self._last.items()):
             if timestamp_ms - seen_at <= self._max_age_ms:
                 merged[name] = value
             else:
                 del self._last[name]
+        self.held_names = frozenset(merged) - frozenset(angles)
         return merged
 
     def _rate_limited(self, name: str, value: float, timestamp_ms: int) -> float:
@@ -300,6 +464,7 @@ class WristAngleHold:
     def reset(self) -> None:
         self._last.clear()
         self._timestamp_ms = None
+        self.held_names = frozenset()
 
 
 class HandGestureFilter:
@@ -326,7 +491,9 @@ class HandGestureFilter:
         self._last_timestamp = timestamp_ms
         output = []
         for side in SIDES:
-            observed = [g for g in gestures if g in (f"{side}_hand_open", f"{side}_fist")]
+            observed = [
+                g for g in gestures if g in (f"{side}_hand_open", f"{side}_fist")
+            ]
             if len(observed) != 1:
                 self._pending.pop(side, None)
                 self._stable.pop(side, None)
@@ -336,8 +503,11 @@ class HandGestureFilter:
             if previous is None or previous[0] != gesture:
                 self._pending[side] = (gesture, timestamp_ms, 1)
             else:
-                self._pending[side] = (gesture, previous[1], previous[2]+1)
-                if timestamp_ms-previous[1] >= self.settle_ms and previous[2]+1 >= 2:
+                self._pending[side] = (gesture, previous[1], previous[2] + 1)
+                if (
+                    timestamp_ms - previous[1] >= self.settle_ms
+                    and previous[2] + 1 >= 2
+                ):
                     self._stable[side] = gesture
             # Suppress an unconfirmed transition, rather than repeat an obsolete command.
             if self._stable.get(side) == gesture:
@@ -352,7 +522,9 @@ class HandGestureFilter:
 
 
 def _finite(point: Any) -> bool:
-    return all(math.isfinite(float(getattr(point, axis, 0.0))) for axis in ("x", "y", "z"))
+    return all(
+        math.isfinite(float(getattr(point, axis, 0.0))) for axis in ("x", "y", "z")
+    )
 
 
 def _image_vector(start: Any, end: Any, aspect_ratio: float) -> Vector:
@@ -368,7 +540,43 @@ def _vector(start: Any, end: Any, aspect_ratio: float) -> Vector:
     return (
         (float(end.x) - float(start.x)) * aspect_ratio,
         float(end.y) - float(start.y),
-        (float(getattr(end, "z", 0.0)) - float(getattr(start, "z", 0.0))) * aspect_ratio,
+        (float(getattr(end, "z", 0.0)) - float(getattr(start, "z", 0.0)))
+        * aspect_ratio,
+    )
+
+
+def _vector3(start: Any, end: Any) -> Vector:
+    return (
+        float(end.x) - float(start.x),
+        float(end.y) - float(start.y),
+        float(end.z) - float(start.z),
+    )
+
+
+def _dot(first: Vector, second: Vector) -> float:
+    return sum(a * b for a, b in zip(first, second))
+
+
+def _cross(first: Vector, second: Vector) -> Vector:
+    return (
+        first[1] * second[2] - first[2] * second[1],
+        first[2] * second[0] - first[0] * second[2],
+        first[0] * second[1] - first[1] * second[0],
+    )
+
+
+def _unit(vector: Vector) -> Vector | None:
+    length = _norm(vector)
+    if not math.isfinite(length) or length < 1e-8:
+        return None
+    return tuple(component / length for component in vector)
+
+
+def _reject(vector: Vector, axis: Vector) -> Vector:
+    parallel = _dot(vector, axis)
+    return tuple(
+        component - parallel * axis_component
+        for component, axis_component in zip(vector, axis)
     )
 
 

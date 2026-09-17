@@ -1,25 +1,25 @@
-import time
 import math
+import time
 
 from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE, AppConfig
 from vision_robot_arm.core.display import enable_high_dpi_awareness
 from vision_robot_arm.core.pose_state import LandmarkPoint, mirror_landmarks
 from vision_robot_arm.core.runtime import load_runtime_dependencies
 from vision_robot_arm.robot.controller import RobotController
-from vision_robot_arm.robot.session import HardwareSession
 from vision_robot_arm.robot.factory import create_robot_controller
+from vision_robot_arm.robot.session import HardwareSession
 from vision_robot_arm.robot.visualization import draw_simulation
+from vision_robot_arm.vision.arm_pose import arm_elevation_angles
 from vision_robot_arm.vision.dashboard import (
     ACTION_CALIBRATE,
+    ACTION_CONTROL,
     ACTION_FULLSCREEN,
     ACTION_MODE,
     ACTION_QUIT,
     ACTION_RECORD,
-    ACTION_CONTROL,
     DashboardUi,
     cycle_output_mode,
 )
-from vision_robot_arm.vision.arm_pose import arm_elevation_angles
 from vision_robot_arm.vision.drawing import (
     draw_hands,
     draw_joint_angle_labels,
@@ -29,13 +29,17 @@ from vision_robot_arm.vision.drawing import (
 from vision_robot_arm.vision.hand_gestures import (
     HandGestureFilter,
     WristAngleHold,
-    assign_hand_sides,
+    anchor_hand_world_landmarks,
+    assign_hand_indices,
     gestures_from_sides,
     refine_pose_wrists,
-    wrist_angles_from_sides,
+    wrist_angles_3d,
 )
 from vision_robot_arm.vision.hand_tracker import HandTracker
-from vision_robot_arm.vision.landmarks import build_landmark_indices, build_landmark_names
+from vision_robot_arm.vision.landmarks import (
+    build_landmark_indices,
+    build_landmark_names,
+)
 from vision_robot_arm.vision.output import emit_console_data
 from vision_robot_arm.vision.pose_tracker import PoseTracker
 from vision_robot_arm.vision.recording import CsvPoseRecorder
@@ -91,6 +95,7 @@ def run_app(config: AppConfig) -> int:
         wrist_hold = WristAngleHold()
         gesture_filter = HandGestureFilter()
         hand_smoothers: dict[str, LandmarkSmoother] = {}
+        hand_world_smoothers: dict[str, LandmarkSmoother] = {}
         if config.hands:
             hand_tracker = HandTracker(deps, config)
         recorder = CsvPoseRecorder(config.recording_dir)
@@ -109,14 +114,20 @@ def run_app(config: AppConfig) -> int:
         timestamp_offset_ms = 0
         dashboard = DashboardUi(cv2, deps.np, WINDOW_NAME)
         dashboard.open()
-        simulation_canvas = _simulation_canvas(deps.np, dashboard.simulation_target_size())
+        simulation_canvas = _simulation_canvas(
+            deps.np, dashboard.simulation_target_size()
+        )
         last_frame_at = time.monotonic()
         display_fps = 0.0
 
         print(_source_started_message(config))
-        print("Keys: 1/2/3 console, c calibrate, r record, f fullscreen, d details, Tab/Enter navigate, q/Esc quit.")
+        print(
+            "Keys: 1/2/3 console, c calibrate, r record, f fullscreen, d details, Tab/Enter navigate, q/Esc quit."
+        )
         if config.test_mode:
-            print(f"Test mode: joint angle labels and embedded robot simulation ({config.robot.backend}).")
+            print(
+                f"Test mode: joint angle labels and embedded robot simulation ({config.robot.backend})."
+            )
 
         rewind_attempts = 0
         session_message: str | None = None
@@ -143,6 +154,7 @@ def run_app(config: AppConfig) -> int:
                 wrist_hold.reset()
                 gesture_filter.reset()
                 hand_smoothers.clear()
+                hand_world_smoothers.clear()
                 continue
             rewind_attempts = 0
 
@@ -161,48 +173,85 @@ def run_app(config: AppConfig) -> int:
             frame_aspect_ratio = frame.shape[1] / max(1, frame.shape[0])
             hand_gestures: tuple[str, ...] = ()
             extra_angles: dict[str, float] = {}
+            extra_angle_sources: dict[str, str] = {}
             hands_by_side: dict[str, list] = {}
+            hand_world_by_side: dict[str, list] = {}
             pose_landmarks = detection.landmarks
             if hand_tracker is not None and pose_landmarks:
-                hands = hand_tracker.detect(rgb_frame, timestamp_ms)
+                hand_detection = hand_tracker.detect_frame(rgb_frame, timestamp_ms)
+                hand_indices = assign_hand_indices(
+                    hand_detection.landmarks,
+                    pose_landmarks,
+                    indices,
+                    aspect_ratio=frame_aspect_ratio,
+                    min_visibility=config.visibility_threshold,
+                )
+                image_hands = {
+                    side: hand_detection.landmarks[index]
+                    for side, index in hand_indices.items()
+                    if index < len(hand_detection.landmarks)
+                }
+                local_world_hands = {
+                    side: hand_detection.world_landmarks[index]
+                    for side, index in hand_indices.items()
+                    if index < len(hand_detection.world_landmarks)
+                }
                 hands_by_side = _smooth_hands(
-                    assign_hand_sides(
-                        hands,
-                        pose_landmarks,
-                        indices,
-                        aspect_ratio=frame_aspect_ratio,
-                        min_visibility=config.visibility_threshold,
-                    ),
+                    image_hands,
                     hand_smoothers,
                     config.smoothing_alpha,
                     timestamp_ms,
                 )
+                hand_world_by_side = _smooth_hands(
+                    anchor_hand_world_landmarks(
+                        local_world_hands, detection.world_landmarks, indices
+                    ),
+                    hand_world_smoothers,
+                    config.smoothing_alpha,
+                    timestamp_ms,
+                )
                 # Everything downstream hinges on the wrist, so correct it first.
-                pose_landmarks = refine_pose_wrists(pose_landmarks, hands_by_side, indices)
+                pose_landmarks = refine_pose_wrists(
+                    pose_landmarks, hands_by_side, indices
+                )
                 hand_gestures = gesture_filter.update(
                     gestures_from_sides(hands_by_side, aspect_ratio=frame_aspect_ratio),
                     timestamp_ms,
                 )
                 extra_angles.update(
                     wrist_hold.update(
-                        wrist_angles_from_sides(
-                            hands_by_side,
+                        wrist_angles_3d(
+                            local_world_hands,
                             pose_landmarks,
+                            detection.world_landmarks,
                             indices,
-                            frame_aspect_ratio,
                             min_visibility=config.visibility_threshold,
                         ),
                         timestamp_ms,
                     )
                 )
+                extra_angle_sources.update(
+                    {
+                        name: (
+                            "hand_world_3d_held"
+                            if name in wrist_hold.held_names
+                            else "hand_world_3d"
+                        )
+                        for name in extra_angles
+                        if name.endswith("_wrist")
+                    }
+                )
             if pose_landmarks:
-                extra_angles.update(
-                    arm_elevation_angles(
-                        pose_landmarks,
-                        indices,
-                        config.visibility_threshold,
-                        frame_aspect_ratio,
-                    )
+                elevation_angles = arm_elevation_angles(
+                    pose_landmarks,
+                    indices,
+                    config.visibility_threshold,
+                    frame_aspect_ratio,
+                    world_landmarks=detection.world_landmarks,
+                )
+                extra_angles.update(elevation_angles)
+                extra_angle_sources.update(
+                    {name: "pose_world_3d" for name in elevation_angles}
                 )
             if mirrored:
                 frame = cv2.flip(frame, 1)
@@ -218,6 +267,10 @@ def run_app(config: AppConfig) -> int:
                     extra_angles=extra_angles,
                     aspect_ratio=frame_aspect_ratio,
                     hand_tracking_enabled=hand_tracker is not None,
+                    hand_landmarks=hands_by_side,
+                    hand_world_landmarks=hand_world_by_side,
+                    world_only=True,
+                    extra_angle_sources=extra_angle_sources,
                 )
                 display_landmarks = (
                     mirror_landmarks(current_state.landmarks)
@@ -277,17 +330,25 @@ def run_app(config: AppConfig) -> int:
                 wrist_hold.reset()
                 gesture_filter.reset()
                 hand_smoothers.clear()
+                hand_world_smoothers.clear()
 
             now = time.monotonic()
             frame_elapsed = now - last_frame_at
             if frame_elapsed > 0:
                 instant_fps = 1.0 / frame_elapsed
-                display_fps = instant_fps if display_fps == 0.0 else 0.9 * display_fps + 0.1 * instant_fps
+                display_fps = (
+                    instant_fps
+                    if display_fps == 0.0
+                    else 0.9 * display_fps + 0.1 * instant_fps
+                )
             last_frame_at = now
 
             robot_state = robot_controller.robot_state()
             simulation_size = dashboard.simulation_target_size()
-            if (simulation_canvas.shape[1], simulation_canvas.shape[0]) != simulation_size:
+            if (
+                simulation_canvas.shape[1],
+                simulation_canvas.shape[0],
+            ) != simulation_size:
                 simulation_canvas = _simulation_canvas(deps.np, simulation_size)
             draw_simulation(cv2, simulation_canvas, robot_state, compact=True)
             can_calibrate = current_state is not None and any(
@@ -302,23 +363,34 @@ def run_app(config: AppConfig) -> int:
                 recording=recorder.is_recording,
                 robot_label=config.robot.backend if config.robot.enabled else "off",
                 gestures=current_state.gestures if current_state else (),
-                status_lines=tuple(robot_controller.status_lines()) + (
-                    (recorder.last_error,) if recorder.last_error else ()
-                ),
+                status_lines=tuple(robot_controller.status_lines())
+                + ((recorder.last_error,) if recorder.last_error else ()),
                 tracking_quality=tracking_quality,
                 fps=display_fps,
                 source_label=_source_label(config),
                 robot_state_available=robot_state is not None,
                 can_calibrate=can_calibrate,
-                control_label=(robot_controller.action_label
-                               if isinstance(robot_controller, HardwareSession) else None),
-                alert=(getattr(robot_controller, "error", None) or recorder.last_error or session_message),
+                control_label=(
+                    robot_controller.action_label
+                    if isinstance(robot_controller, HardwareSession)
+                    else None
+                ),
+                alert=(
+                    getattr(robot_controller, "error", None)
+                    or recorder.last_error
+                    or session_message
+                ),
             )
             cv2.imshow(WINDOW_NAME, dashboard_frame)
 
-            key = cv2.waitKey(_remaining_frame_delay_ms(
-                wait_delay_ms, time.monotonic() - frame_started_at
-            )) & 0xFF
+            key = (
+                cv2.waitKey(
+                    _remaining_frame_delay_ms(
+                        wait_delay_ms, time.monotonic() - frame_started_at
+                    )
+                )
+                & 0xFF
+            )
             dashboard.sync_window_size()
             dashboard.handle_key(key)
             action = dashboard.consume_action()
@@ -336,11 +408,17 @@ def run_app(config: AppConfig) -> int:
             if (key == ord("c") or action == ACTION_CALIBRATE) and can_calibrate:
                 robot_controller.reset()
                 sides = tuple(config.robot.hosts) or ("left", "right")
-                required = tuple(f"{side}_{source}" for side in sides
-                                 for source in ("shoulder_elevation", "elbow", "wrist"))
+                required = tuple(
+                    f"{side}_{source}"
+                    for side in sides
+                    for source in ("shoulder_elevation", "elbow", "wrist")
+                )
                 count = state_builder.capture_calibration(current_state, required)
-                session_message = (f"Calibration captured from {count} angles."
-                                   if count else "Hold all arm joints steady and visible for 0.8 seconds, then retry calibration.")
+                session_message = (
+                    f"Calibration captured from {count} angles."
+                    if count
+                    else "Hold all arm joints steady and visible for 0.8 seconds, then retry calibration."
+                )
                 print(session_message)
             if key in (ord("k"), ord("l"), ord("x")):
                 robot_controller.reset()
@@ -354,7 +432,9 @@ def run_app(config: AppConfig) -> int:
                         session_message = "Calibration loaded. Check the preview before enabling control."
                     else:
                         state_builder.reset_calibration()
-                        session_message = "Calibration reset. Absolute mapping restored."
+                        session_message = (
+                            "Calibration reset. Absolute mapping restored."
+                        )
                 except (OSError, ValueError) as error:
                     session_message = f"Calibration failed: {error}"
                 print(session_message)
@@ -366,7 +446,11 @@ def run_app(config: AppConfig) -> int:
                     print(f"Recording started: {path}")
                 else:
                     print(f"Recording stopped: {path}")
-            mode = cycle_output_mode(mode) if action == ACTION_MODE else update_mode_from_key(key, mode)
+            mode = (
+                cycle_output_mode(mode)
+                if action == ACTION_MODE
+                else update_mode_from_key(key, mode)
+            )
     finally:
         _release_all(
             ("robot", None if robot_controller is None else robot_controller.close),

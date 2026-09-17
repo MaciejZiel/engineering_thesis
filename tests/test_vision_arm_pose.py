@@ -1,5 +1,5 @@
-from dataclasses import dataclass
 import unittest
+from dataclasses import dataclass
 
 from vision_robot_arm.vision.arm_pose import (
     IMAGE_DOWN,
@@ -40,6 +40,29 @@ def pose(left_elbow: P, right_elbow: P, hips_visible: bool = False) -> list[P]:
 
 
 class ElevationTests(unittest.TestCase):
+    def test_world_depth_motion_is_measured_as_3d_elevation(self) -> None:
+        image = pose(P(0.4, 0.6), P(0.6, 0.6), hips_visible=True)
+        world = [
+            P(-0.2, 0, 0),
+            P(0.2, 0, 0),
+            P(-0.2, 0, 0.4),
+            P(0.2, 0, -0.4),
+            P(-0.2, 0.6, 0),
+            P(0.2, 0.6, 0),
+        ]
+        angles = arm_elevation_angles(image, INDICES, world_landmarks=world)
+        self.assertAlmostEqual(angles["left_shoulder_elevation"], 90.0)
+        self.assertAlmostEqual(angles["right_shoulder_elevation"], 90.0)
+
+    def test_world_elevation_does_not_fake_a_torso_axis_when_hips_are_missing(
+        self,
+    ) -> None:
+        image = pose(P(0.4, 0.6), P(0.6, 0.6), hips_visible=False)
+        world = pose(P(0.4, 0.6), P(0.6, 0.6), hips_visible=True)
+        self.assertEqual(
+            arm_elevation_angles(image, INDICES, world_landmarks=world), {}
+        )
+
     def test_hanging_arm_is_zero_degrees(self) -> None:
         landmarks = pose(P(0.4, 0.6), P(0.6, 0.6))
 
@@ -67,7 +90,9 @@ class ElevationTests(unittest.TestCase):
     def test_works_without_visible_hips(self) -> None:
         landmarks = pose(P(0.4, 0.15), P(0.6, 0.15), hips_visible=False)
 
-        self.assertIn("left_shoulder_elevation", arm_elevation_angles(landmarks, INDICES))
+        self.assertIn(
+            "left_shoulder_elevation", arm_elevation_angles(landmarks, INDICES)
+        )
 
     def test_unreliable_elbow_is_skipped(self) -> None:
         landmarks = pose(P(0.4, 0.15, visibility=0.1), P(0.6, 0.15))
@@ -91,7 +116,14 @@ class ElevationTests(unittest.TestCase):
         self.assertIn("right_shoulder_elevation", angles)
 
     def test_a_distant_person_keeps_a_smaller_noise_floor(self) -> None:
-        far = [P(0.48, 0.4), P(0.52, 0.4), P(0.48, 0.45), P(0.52, 0.45), P(0.5, 0.5), P(0.5, 0.5)]
+        far = [
+            P(0.48, 0.4),
+            P(0.52, 0.4),
+            P(0.48, 0.45),
+            P(0.52, 0.45),
+            P(0.5, 0.5),
+            P(0.5, 0.5),
+        ]
 
         angles = arm_elevation_angles(far, INDICES)
 
@@ -100,8 +132,12 @@ class ElevationTests(unittest.TestCase):
     def test_wide_frames_stretch_the_arm_toward_horizontal(self) -> None:
         landmarks = pose(P(0.3, 0.3), P(0.6, 0.4))
 
-        square = arm_elevation_angles(landmarks, INDICES, aspect_ratio=1.0)["left_shoulder_elevation"]
-        wide = arm_elevation_angles(landmarks, INDICES, aspect_ratio=2.0)["left_shoulder_elevation"]
+        square = arm_elevation_angles(landmarks, INDICES, aspect_ratio=1.0)[
+            "left_shoulder_elevation"
+        ]
+        wide = arm_elevation_angles(landmarks, INDICES, aspect_ratio=2.0)[
+            "left_shoulder_elevation"
+        ]
 
         self.assertAlmostEqual(square, 135.0)
         self.assertLess(wide, square)
@@ -110,7 +146,9 @@ class ElevationTests(unittest.TestCase):
 
 class TorsoDownTests(unittest.TestCase):
     def test_uses_image_down_without_hips(self) -> None:
-        self.assertEqual(torso_down_vector(pose(P(0.4, 0.6), P(0.6, 0.6)), INDICES), IMAGE_DOWN)
+        self.assertEqual(
+            torso_down_vector(pose(P(0.4, 0.6), P(0.6, 0.6)), INDICES), IMAGE_DOWN
+        )
 
     def test_leaning_torso_tilts_the_reference(self) -> None:
         landmarks = pose(P(0.4, 0.6), P(0.6, 0.6), hips_visible=True)

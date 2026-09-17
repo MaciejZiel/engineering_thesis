@@ -1,17 +1,21 @@
-from dataclasses import dataclass
 import math
 import unittest
+from dataclasses import dataclass
 
 from vision_robot_arm.vision.hand_gestures import (
+    HandGestureFilter,
+    WristAngleHold,
+    anchor_hand_world_landmarks,
+    assign_hand_indices,
     assign_hand_sides,
     classify_hand,
     count_extended_fingers,
-    HandGestureFilter,
     detect_hand_gestures,
     hand_wrist_angles,
     refine_pose_wrists,
+    signed_angle_around_axis,
     signed_wrist_deviation,
-    WristAngleHold,
+    wrist_angles_3d,
 )
 
 
@@ -27,7 +31,9 @@ EXTENDED_FINGER = ((0.0, 0.07), (0.0, 0.10), (0.0, 0.13), (0.0, 0.16))
 CURLED_FINGER = ((0.0, 0.07), (0.012, 0.088), (0.02, 0.075), (0.015, 0.06))
 
 
-def make_hand(wrist: tuple[float, float], extended: tuple[bool, bool, bool, bool]) -> list[P]:
+def make_hand(
+    wrist: tuple[float, float], extended: tuple[bool, bool, bool, bool]
+) -> list[P]:
     """Synthetic hand: straight fingers point up, curled fingers fold back toward the palm."""
     hand = [P(*wrist) for _ in range(21)]
     for thumb_index, step in enumerate((1, 2, 3, 4), start=1):
@@ -68,6 +74,14 @@ class FingerCountTests(unittest.TestCase):
 
 
 class HandSideAssignmentTests(unittest.TestCase):
+    def test_indices_preserve_image_and_world_detection_alignment(self) -> None:
+        left_hand = make_hand((0.32, 0.62), (True, True, True, True))
+        right_hand = make_hand((0.69, 0.58), (False, False, False, False))
+        self.assertEqual(
+            assign_hand_indices([right_hand, left_hand], POSE, POSE_INDICES),
+            {"left": 1, "right": 0},
+        )
+
     def test_hands_are_matched_to_nearest_pose_wrist(self) -> None:
         left_hand = make_hand((0.32, 0.62), (True, True, True, True))
         right_hand = make_hand((0.69, 0.58), (False, False, False, False))
@@ -92,7 +106,9 @@ class HandSideAssignmentTests(unittest.TestCase):
     def test_hand_equally_close_to_both_wrists_is_ambiguous(self) -> None:
         hand = make_hand((0.5, 0.6), (True, True, True, True))
 
-        self.assertEqual(assign_hand_sides([hand], POSE, POSE_INDICES, max_distance=0.5), {})
+        self.assertEqual(
+            assign_hand_sides([hand], POSE, POSE_INDICES, max_distance=0.5), {}
+        )
 
 
 class RefinePoseWristsTests(unittest.TestCase):
@@ -136,6 +152,47 @@ class RefinePoseWristsTests(unittest.TestCase):
 
 
 class HandWristAngleTests(unittest.TestCase):
+    def test_metric_wrist_angle_sees_depth_bends_in_both_directions(self) -> None:
+        image_pose = [P(0.3, 0.6), P(0.7, 0.6), P(0.3, 0.9), P(0.7, 0.9)]
+        world_pose = [P(0, 1, 0), P(0, 1, 0), P(0, 0, 0), P(0, 0, 0)]
+
+        def hand(depth: float) -> list[P]:
+            points = [P(0, 0, 0) for _ in range(21)]
+            points[5], points[17] = P(-0.03, 0, 0), P(0.03, 0, 0)
+            points[9] = P(0, 0, depth)
+            return points
+
+        toward = wrist_angles_3d(
+            {"right": hand(0.08)}, image_pose, world_pose, POSE_INDICES
+        )["right_wrist"]
+        away = wrist_angles_3d(
+            {"right": hand(-0.08)}, image_pose, world_pose, POSE_INDICES
+        )["right_wrist"]
+
+        self.assertAlmostEqual(toward, 90.0)
+        self.assertAlmostEqual(away, 270.0)
+
+    def test_signed_3d_angle_is_invariant_to_camera_plane_rotation(self) -> None:
+        self.assertAlmostEqual(
+            signed_angle_around_axis((0, 1, 0), (0, 0, 1), (1, 0, 0)), 90
+        )
+        self.assertAlmostEqual(
+            signed_angle_around_axis((-1, 0, 0), (0, 0, 1), (0, 1, 0)), 90
+        )
+
+    def test_hand_world_points_are_anchored_to_the_pose_wrist_in_metres(self) -> None:
+        hand = [P(0.01, 0.02, 0.03), P(0.04, 0.06, 0.08)]
+        pose_world = [P(0.3, 0.4, 0.5)]
+        anchored = anchor_hand_world_landmarks(
+            {"left": hand}, pose_world, {"LEFT_WRIST": 0}
+        )["left"]
+        self.assertAlmostEqual(anchored[0].x, 0.3)
+        self.assertAlmostEqual(anchored[0].y, 0.4)
+        self.assertAlmostEqual(anchored[0].z, 0.5)
+        self.assertAlmostEqual(anchored[1].x, 0.33)
+        self.assertAlmostEqual(anchored[1].y, 0.44)
+        self.assertAlmostEqual(anchored[1].z, 0.55)
+
     def test_straight_hand_gives_180_degrees(self) -> None:
         hand = make_hand((0.7, 0.6), (True, True, True, True))
         hand[9] = P(0.7, 0.4)
@@ -153,7 +210,9 @@ class HandWristAngleTests(unittest.TestCase):
 
         self.assertAlmostEqual(abs(angles["left_wrist"] - 180.0), 90.0)
 
-    def test_both_bend_directions_are_distinguished_for_a_vertical_forearm(self) -> None:
+    def test_both_bend_directions_are_distinguished_for_a_vertical_forearm(
+        self,
+    ) -> None:
         """The arm hanging down or raised is the common case; the sign used to vanish there."""
         vertical = [P(0.3, 0.6), P(0.7, 0.6), P(0.3, 0.3), P(0.7, 0.3)]
         toward_the_body = make_hand((0.3, 0.6), (True, True, True, True))
@@ -161,8 +220,12 @@ class HandWristAngleTests(unittest.TestCase):
         away_from_the_body = make_hand((0.3, 0.6), (True, True, True, True))
         away_from_the_body[9] = P(0.2, 0.75)
 
-        one = hand_wrist_angles([toward_the_body], vertical, POSE_INDICES, aspect_ratio=1.0)["left_wrist"]
-        other = hand_wrist_angles([away_from_the_body], vertical, POSE_INDICES, aspect_ratio=1.0)["left_wrist"]
+        one = hand_wrist_angles(
+            [toward_the_body], vertical, POSE_INDICES, aspect_ratio=1.0
+        )["left_wrist"]
+        other = hand_wrist_angles(
+            [away_from_the_body], vertical, POSE_INDICES, aspect_ratio=1.0
+        )["left_wrist"]
 
         self.assertNotAlmostEqual(one, other)
         self.assertAlmostEqual(one + other, 360.0, places=3)
@@ -186,7 +249,9 @@ class HandWristAngleTests(unittest.TestCase):
         hand = make_hand((0.7, 0.6), (True, True, True, True))
         hand[9] = P(0.7, 0.6, -0.2)
 
-        self.assertEqual(hand_wrist_angles([hand], POSE, POSE_INDICES, aspect_ratio=1.0), {})
+        self.assertEqual(
+            hand_wrist_angles([hand], POSE, POSE_INDICES, aspect_ratio=1.0), {}
+        )
 
     def test_pose_depth_no_longer_moves_the_reported_angle(self) -> None:
         """Pose z and hand z use different origins; mixing them swung the joint by tens of degrees."""
@@ -195,17 +260,34 @@ class HandWristAngleTests(unittest.TestCase):
         hand = make_hand((0.3, 0.6), (True, True, True, True))
         hand[9] = P(0.4, 0.7)
 
-        without_depth = hand_wrist_angles([hand], flat, POSE_INDICES, aspect_ratio=1.0)["left_wrist"]
-        with_depth = hand_wrist_angles([hand], deep, POSE_INDICES, aspect_ratio=1.0)["left_wrist"]
+        without_depth = hand_wrist_angles([hand], flat, POSE_INDICES, aspect_ratio=1.0)[
+            "left_wrist"
+        ]
+        with_depth = hand_wrist_angles([hand], deep, POSE_INDICES, aspect_ratio=1.0)[
+            "left_wrist"
+        ]
 
         self.assertAlmostEqual(without_depth, with_depth)
 
     def test_bend_direction_is_signed_whatever_the_forearm_direction(self) -> None:
-        for forearm in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, -1.0, 0.0), (0.7, -0.7, 0.0)):
+        for forearm in (
+            (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (0.0, -1.0, 0.0),
+            (0.7, -0.7, 0.0),
+        ):
             with self.subTest(forearm=forearm):
                 angle = math.atan2(forearm[1], forearm[0])
-                one = (math.cos(angle - math.radians(30)), math.sin(angle - math.radians(30)), 0.0)
-                other = (math.cos(angle + math.radians(30)), math.sin(angle + math.radians(30)), 0.0)
+                one = (
+                    math.cos(angle - math.radians(30)),
+                    math.sin(angle - math.radians(30)),
+                    0.0,
+                )
+                other = (
+                    math.cos(angle + math.radians(30)),
+                    math.sin(angle + math.radians(30)),
+                    0.0,
+                )
 
                 self.assertAlmostEqual(signed_wrist_deviation(forearm, one), 30.0)
                 self.assertAlmostEqual(signed_wrist_deviation(forearm, other), -30.0)
@@ -225,14 +307,18 @@ class HandWristAngleTests(unittest.TestCase):
         hand = make_hand((0.7, 0.6), (True, True, True, True))
         hand[9] = P(0.9, 0.8)
 
-        angles = hand_wrist_angles([hand], horizontal_forearm_pose, POSE_INDICES, aspect_ratio=1.0)
+        angles = hand_wrist_angles(
+            [hand], horizontal_forearm_pose, POSE_INDICES, aspect_ratio=1.0
+        )
 
         self.assertAlmostEqual(angles["right_wrist"], 135.0)
 
     def test_missing_elbow_index_is_skipped(self) -> None:
         hand = make_hand((0.7, 0.6), (True, True, True, True))
 
-        angles = hand_wrist_angles([hand], POSE[:2], {"LEFT_WRIST": 0, "RIGHT_WRIST": 1})
+        angles = hand_wrist_angles(
+            [hand], POSE[:2], {"LEFT_WRIST": 0, "RIGHT_WRIST": 1}
+        )
 
         self.assertEqual(angles, {})
 
@@ -241,9 +327,13 @@ class WristAngleHoldTests(unittest.TestCase):
     def test_holds_recent_value_and_forgets_old_one(self) -> None:
         hold = WristAngleHold(max_age_ms=500)
 
-        self.assertEqual(hold.update({"right_wrist": 150.0}, 1000), {"right_wrist": 150.0})
+        self.assertEqual(
+            hold.update({"right_wrist": 150.0}, 1000), {"right_wrist": 150.0}
+        )
         self.assertEqual(hold.update({}, 1400), {"right_wrist": 150.0})
+        self.assertEqual(hold.held_names, frozenset({"right_wrist"}))
         self.assertEqual(hold.update({}, 1600), {})
+        self.assertEqual(hold.held_names, frozenset())
 
     def test_an_impossible_jump_is_slewed_instead_of_followed(self) -> None:
         """A foreshortened hand can flip the measured angle; no wrist moves 150 deg in 33 ms."""
@@ -258,14 +348,18 @@ class WristAngleHoldTests(unittest.TestCase):
         hold = WristAngleHold(max_rate_deg_s=240.0)
         hold.update({"left_wrist": 150.0}, 1000)
 
-        self.assertAlmostEqual(hold.update({"left_wrist": 155.0}, 1033)["left_wrist"], 155.0)
+        self.assertAlmostEqual(
+            hold.update({"left_wrist": 155.0}, 1033)["left_wrist"], 155.0
+        )
 
     def test_the_first_value_after_a_reset_is_taken_as_it_is(self) -> None:
         hold = WristAngleHold(max_rate_deg_s=240.0)
         hold.update({"left_wrist": 90.0}, 1000)
         hold.reset()
 
-        self.assertAlmostEqual(hold.update({"left_wrist": 240.0}, 1033)["left_wrist"], 240.0)
+        self.assertAlmostEqual(
+            hold.update({"left_wrist": 240.0}, 1033)["left_wrist"], 240.0
+        )
 
     def test_new_value_replaces_held_one(self) -> None:
         hold = WristAngleHold(max_age_ms=500)

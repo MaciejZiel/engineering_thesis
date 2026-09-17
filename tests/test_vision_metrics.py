@@ -1,13 +1,17 @@
-from dataclasses import dataclass
 import csv
-from pathlib import Path
 import tempfile
 import unittest
+from dataclasses import dataclass
+from pathlib import Path
 
 from vision_robot_arm.core.pose_state import LandmarkPoint, PoseState
 from vision_robot_arm.vision.calibration import PoseCalibration
 from vision_robot_arm.vision.gestures import detect_gestures
-from vision_robot_arm.vision.metrics import ANGLE_DEFINITIONS, calculate_angle, calculate_angles
+from vision_robot_arm.vision.metrics import (
+    ANGLE_DEFINITIONS,
+    calculate_angle,
+    calculate_angles,
+)
 from vision_robot_arm.vision.recording import CsvPoseRecorder
 from vision_robot_arm.vision.smoothing import LowPassValueFilter
 
@@ -54,8 +58,13 @@ class MetricsTests(unittest.TestCase):
 
 class AngleDefinitionTests(unittest.TestCase):
     def test_wrist_angles_use_elbow_wrist_and_index(self) -> None:
-        self.assertEqual(ANGLE_DEFINITIONS["right_wrist"], ("RIGHT_ELBOW", "RIGHT_WRIST", "RIGHT_INDEX"))
-        self.assertEqual(ANGLE_DEFINITIONS["left_wrist"], ("LEFT_ELBOW", "LEFT_WRIST", "LEFT_INDEX"))
+        self.assertEqual(
+            ANGLE_DEFINITIONS["right_wrist"],
+            ("RIGHT_ELBOW", "RIGHT_WRIST", "RIGHT_INDEX"),
+        )
+        self.assertEqual(
+            ANGLE_DEFINITIONS["left_wrist"], ("LEFT_ELBOW", "LEFT_WRIST", "LEFT_INDEX")
+        )
 
 
 class SmoothingTests(unittest.TestCase):
@@ -133,6 +142,35 @@ class RecordingTests(unittest.TestCase):
         self.assertEqual(rows[0]["angle_left_shoulder_elevation"], "120.5")
         self.assertEqual(rows[0]["angle_right_shoulder_elevation"], "")
 
+    def test_csv_records_3d_hands_coordinate_frames_and_angle_sources(self) -> None:
+        point = LandmarkPoint(0.1, 0.2, -0.3)
+        world = LandmarkPoint(0.4, 0.5, -0.6)
+        state = PoseState(
+            1,
+            [],
+            [world],
+            {},
+            {"left_wrist": 170.0},
+            {},
+            (),
+            False,
+            hand_landmarks={"left": (point,)},
+            hand_world_landmarks={"left": (world,)},
+            angle_sources={"left_wrist": "hand_world_3d"},
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            recorder = CsvPoseRecorder(Path(temp_dir))
+            path = recorder.start({0: "nose"})
+            recorder.write_state(state, {0: "nose"})
+            recorder.stop()
+            with path.open(newline="", encoding="utf-8") as csv_file:
+                row = next(csv.DictReader(csv_file))
+        self.assertEqual(row["source_left_wrist"], "hand_world_3d")
+        self.assertEqual(row["pose_world_frame"], "body_relative_m")
+        self.assertEqual(row["hand_world_frame"], "pose_wrist_anchored_m")
+        self.assertEqual(row["left_hand_wrist_z"], "-0.3")
+        self.assertEqual(row["left_hand_wrist_world_z"], "-0.6")
+
 
 class GestureTests(unittest.TestCase):
     def test_detects_hand_up_and_bent_elbow(self) -> None:
@@ -164,7 +202,9 @@ class GestureTests(unittest.TestCase):
         self.assertIn("left_elbow_bent", gestures)
         self.assertNotIn("right_elbow_bent", gestures)
 
-    def test_arm_side_fires_when_the_arm_is_extended_not_when_it_is_crossed(self) -> None:
+    def test_arm_side_fires_when_the_arm_is_extended_not_when_it_is_crossed(
+        self,
+    ) -> None:
         """Detection runs on the un-mirrored frame: the person's left is at larger image x."""
         indices = {
             "LEFT_SHOULDER": 0,

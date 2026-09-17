@@ -5,12 +5,34 @@ from pathlib import Path
 from typing import TextIO
 from uuid import uuid4
 
+from vision_robot_arm.core.pose_state import PoseState
 from vision_robot_arm.vision.arm_pose import ELEVATION_ANGLE_NAMES
 from vision_robot_arm.vision.metrics import ANGLE_DEFINITIONS
-from vision_robot_arm.core.pose_state import PoseState
-
 
 RECORDED_ANGLES = (*ANGLE_DEFINITIONS, *ELEVATION_ANGLE_NAMES)
+HAND_LANDMARK_NAMES = (
+    "wrist",
+    "thumb_cmc",
+    "thumb_mcp",
+    "thumb_ip",
+    "thumb_tip",
+    "index_mcp",
+    "index_pip",
+    "index_dip",
+    "index_tip",
+    "middle_mcp",
+    "middle_pip",
+    "middle_dip",
+    "middle_tip",
+    "ring_mcp",
+    "ring_pip",
+    "ring_dip",
+    "ring_tip",
+    "pinky_mcp",
+    "pinky_pip",
+    "pinky_dip",
+    "pinky_tip",
+)
 
 
 class CsvPoseRecorder:
@@ -36,7 +58,9 @@ class CsvPoseRecorder:
 
         self._output_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        self._path = self._output_dir / f"pose_recording_{timestamp}_{uuid4().hex[:8]}.csv"
+        self._path = (
+            self._output_dir / f"pose_recording_{timestamp}_{uuid4().hex[:8]}.csv"
+        )
         self.last_error = None
         try:
             self._file = self._path.open("x", newline="", encoding="utf-8")
@@ -88,11 +112,16 @@ class CsvPoseRecorder:
             "timestamp_ms": state.timestamp_ms,
             "calibrated": state.calibrated,
             "gestures": "|".join(state.gestures),
+            "pose_world_frame": "body_relative_m" if state.world_landmarks else "",
+            "hand_world_frame": "pose_wrist_anchored_m"
+            if state.hand_world_landmarks
+            else "",
         }
 
         for name in RECORDED_ANGLES:
             row[f"angle_{name}"] = _value_or_blank(state.angles.get(name))
             row[f"relative_{name}"] = _value_or_blank(state.relative_angles.get(name))
+            row[f"source_{name}"] = state.angle_sources.get(name, "")
 
         for index, landmark in enumerate(state.landmarks):
             name = landmark_names.get(index, str(index))
@@ -108,6 +137,22 @@ class CsvPoseRecorder:
                 row[f"{name}_world_y"] = landmark.y
                 row[f"{name}_world_z"] = landmark.z
 
+        for side in ("left", "right"):
+            image_hand = state.hand_landmarks.get(side, ())
+            world_hand = state.hand_world_landmarks.get(side, ())
+            for index, name in enumerate(HAND_LANDMARK_NAMES):
+                prefix = f"{side}_hand_{name}"
+                if index < len(image_hand):
+                    point = image_hand[index]
+                    row[f"{prefix}_x"] = point.x
+                    row[f"{prefix}_y"] = point.y
+                    row[f"{prefix}_z"] = point.z
+                if index < len(world_hand):
+                    point = world_hand[index]
+                    row[f"{prefix}_world_x"] = point.x
+                    row[f"{prefix}_world_y"] = point.y
+                    row[f"{prefix}_world_z"] = point.z
+
         try:
             self._writer.writerow(row)
             now = time.monotonic()
@@ -119,10 +164,17 @@ class CsvPoseRecorder:
             self._abort()
 
     def _build_fieldnames(self, landmark_names: dict[int, str]) -> list[str]:
-        fieldnames = ["timestamp_ms", "calibrated", "gestures"]
+        fieldnames = [
+            "timestamp_ms",
+            "calibrated",
+            "gestures",
+            "pose_world_frame",
+            "hand_world_frame",
+        ]
         for name in RECORDED_ANGLES:
             fieldnames.append(f"angle_{name}")
             fieldnames.append(f"relative_{name}")
+            fieldnames.append(f"source_{name}")
 
         for index in sorted(landmark_names):
             name = landmark_names[index]
@@ -137,6 +189,13 @@ class CsvPoseRecorder:
                     f"{name}_world_z",
                 ]
             )
+        for side in ("left", "right"):
+            for name in HAND_LANDMARK_NAMES:
+                prefix = f"{side}_hand_{name}"
+                fieldnames.extend(
+                    f"{prefix}_{suffix}"
+                    for suffix in ("x", "y", "z", "world_x", "world_y", "world_z")
+                )
         return fieldnames
 
 

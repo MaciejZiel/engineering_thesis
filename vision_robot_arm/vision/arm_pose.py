@@ -20,7 +20,7 @@ IMAGE_DOWN = (0.0, 1.0)
 MIN_ARM_LENGTH = 0.04
 MIN_ARM_LENGTH_PER_SHOULDER_WIDTH = 0.25
 
-Vector = tuple[float, float]
+Vector = tuple[float, ...]
 
 
 def arm_elevation_angles(
@@ -28,12 +28,21 @@ def arm_elevation_angles(
     indices: dict[str, int],
     min_visibility: float = 0.55,
     aspect_ratio: float = 1.0,
+    world_landmarks: list[Any] | None = None,
 ) -> dict[str, float]:
+    if world_landmarks is not None:
+        return _world_arm_elevation_angles(
+            landmarks, world_landmarks, indices, min_visibility
+        )
     down = torso_down_vector(landmarks, indices, min_visibility, aspect_ratio)
-    minimum_length = _minimum_arm_length(landmarks, indices, min_visibility, aspect_ratio)
+    minimum_length = _minimum_arm_length(
+        landmarks, indices, min_visibility, aspect_ratio
+    )
     angles: dict[str, float] = {}
     for side in SIDES:
-        shoulder = _point(landmarks, indices, f"{side.upper()}_SHOULDER", min_visibility)
+        shoulder = _point(
+            landmarks, indices, f"{side.upper()}_SHOULDER", min_visibility
+        )
         elbow = _point(landmarks, indices, f"{side.upper()}_ELBOW", min_visibility)
         if shoulder is None or elbow is None:
             continue
@@ -41,6 +50,41 @@ def arm_elevation_angles(
         if _norm(arm) < minimum_length:
             continue
         elevation = vector_angle(arm, down)
+        if elevation is not None:
+            angles[f"{side}_{ELEVATION_SUFFIX}"] = elevation
+    return angles
+
+
+def _world_arm_elevation_angles(
+    image_landmarks: list[Any],
+    world_landmarks: list[Any],
+    indices: dict[str, int],
+    min_visibility: float,
+) -> dict[str, float]:
+    """3D arm elevation relative to the torso; never substitute an image-plane axis."""
+    names = ("LEFT_SHOULDER", "RIGHT_SHOULDER", "LEFT_HIP", "RIGHT_HIP")
+    image_points = [
+        _point(image_landmarks, indices, name, min_visibility) for name in names
+    ]
+    world_points = [_world_point(world_landmarks, indices, name) for name in names]
+    if any(point is None for point in (*image_points, *world_points)):
+        return {}
+    left_shoulder, right_shoulder, left_hip, right_hip = world_points
+    shoulder_center = _midpoint3(left_shoulder, right_shoulder)
+    hip_center = _midpoint3(left_hip, right_hip)
+    down = _vector3(shoulder_center, hip_center)
+    angles = {}
+    for side in SIDES:
+        shoulder_name, elbow_name = f"{side.upper()}_SHOULDER", f"{side.upper()}_ELBOW"
+        if _point(image_landmarks, indices, shoulder_name, min_visibility) is None:
+            continue
+        if _point(image_landmarks, indices, elbow_name, min_visibility) is None:
+            continue
+        shoulder = _world_point(world_landmarks, indices, shoulder_name)
+        elbow = _world_point(world_landmarks, indices, elbow_name)
+        if shoulder is None or elbow is None:
+            continue
+        elevation = vector_angle(_vector3(shoulder, elbow), down)
         if elevation is not None:
             angles[f"{side}_{ELEVATION_SUFFIX}"] = elevation
     return angles
@@ -77,7 +121,10 @@ def torso_down_vector(
     left_shoulder, right_shoulder, left_hip, right_hip = corners
     shoulder_center = _midpoint(left_shoulder, right_shoulder)
     hip_center = _midpoint(left_hip, right_hip)
-    down = ((hip_center[0] - shoulder_center[0]) * aspect_ratio, hip_center[1] - shoulder_center[1])
+    down = (
+        (hip_center[0] - shoulder_center[0]) * aspect_ratio,
+        hip_center[1] - shoulder_center[1],
+    )
     return IMAGE_DOWN if _norm(down) < 1e-6 else down
 
 
@@ -87,7 +134,7 @@ def vector_angle(first: Vector, second: Vector) -> float | None:
         return None
     if not all(math.isfinite(value) for value in (*first, *second)):
         return None
-    cosine = (first[0] * second[0] + first[1] * second[1]) / (first_length * second_length)
+    cosine = sum(a * b for a, b in zip(first, second)) / (first_length * second_length)
     return math.degrees(math.acos(max(-1.0, min(1.0, cosine))))
 
 
@@ -105,12 +152,51 @@ def _point(
 
 
 def _vector(start: Any, end: Any, aspect_ratio: float) -> Vector:
-    return ((float(end.x) - float(start.x)) * aspect_ratio, float(end.y) - float(start.y))
+    return (
+        (float(end.x) - float(start.x)) * aspect_ratio,
+        float(end.y) - float(start.y),
+    )
 
 
 def _midpoint(first: Any, second: Any) -> Vector:
-    return ((float(first.x) + float(second.x)) / 2.0, (float(first.y) + float(second.y)) / 2.0)
+    return (
+        (float(first.x) + float(second.x)) / 2.0,
+        (float(first.y) + float(second.y)) / 2.0,
+    )
 
 
 def _norm(vector: Vector) -> float:
-    return math.hypot(vector[0], vector[1])
+    return math.sqrt(sum(component * component for component in vector))
+
+
+def _world_point(
+    landmarks: list[Any], indices: dict[str, int], name: str
+) -> Any | None:
+    index = indices.get(name)
+    if index is None or not 0 <= index < len(landmarks):
+        return None
+    point = landmarks[index]
+    return (
+        point
+        if all(math.isfinite(float(getattr(point, axis))) for axis in ("x", "y", "z"))
+        else None
+    )
+
+
+def _midpoint3(first: Any, second: Any) -> tuple[float, float, float]:
+    return tuple(
+        (float(getattr(first, axis)) + float(getattr(second, axis))) / 2.0
+        for axis in ("x", "y", "z")
+    )
+
+
+def _vector3(start: Any, end: Any) -> tuple[float, float, float]:
+    def coordinate(point: Any, axis: str, index: int) -> float:
+        return (
+            float(getattr(point, axis)) if hasattr(point, axis) else float(point[index])
+        )
+
+    return tuple(
+        coordinate(end, axis, index) - coordinate(start, axis, index)
+        for index, axis in enumerate(("x", "y", "z"))
+    )

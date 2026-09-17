@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -26,7 +26,9 @@ def _visibility_or_default(landmark: Any) -> float:
 
 def mirror_landmarks(landmarks: list[LandmarkPoint]) -> list[LandmarkPoint]:
     return [
-        LandmarkPoint(x=1.0 - point.x, y=point.y, z=point.z, visibility=point.visibility)
+        LandmarkPoint(
+            x=1.0 - point.x, y=point.y, z=point.z, visibility=point.visibility
+        )
         for point in landmarks
     ]
 
@@ -41,6 +43,11 @@ class PoseState:
     relative_angles: dict[str, float | None]
     gestures: tuple[str, ...]
     calibrated: bool
+    hand_landmarks: dict[str, tuple[LandmarkPoint, ...]] = field(default_factory=dict)
+    hand_world_landmarks: dict[str, tuple[LandmarkPoint, ...]] = field(
+        default_factory=dict
+    )
+    angle_sources: dict[str, str] = field(default_factory=dict)
 
     @property
     def display_angles(self) -> dict[str, float | None]:
