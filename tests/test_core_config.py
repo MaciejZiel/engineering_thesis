@@ -30,6 +30,11 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 AppConfig(camera_fps=value).validate()
 
+    def test_inference_dimensions_must_be_positive(self) -> None:
+        for values in ({"inference_width": 0}, {"inference_height": -1}):
+            with self.assertRaises(SystemExit):
+                AppConfig(**values).validate()
+
     def test_config_rejects_missing_video_file(self) -> None:
         config = AppConfig(video_path=Path("does_not_exist.mp4"))
 

@@ -8,6 +8,7 @@ from vision_robot_arm.app import (
     _frame_timestamp_ms,
     _release_all,
     _remaining_frame_delay_ms,
+    _resize_for_inference,
     configure_camera,
 )
 from vision_robot_arm.core.config import AppConfig
@@ -37,6 +38,18 @@ class FakeCv2:
 
 
 class FitFrameTests(unittest.TestCase):
+    def test_inference_uses_a_smaller_copy_without_changing_the_preview(self) -> None:
+        cv2 = FakeCv2()
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        inference = _resize_for_inference(cv2, frame, AppConfig())
+        self.assertEqual(inference.shape[:2], (540, 960))
+        self.assertEqual(frame.shape[:2], (1080, 1920))
+
+    def test_inference_resize_preserves_non_widescreen_aspect_ratio(self) -> None:
+        frame = np.zeros((1200, 1600, 3), dtype=np.uint8)
+        inference = _resize_for_inference(FakeCv2(), frame, AppConfig())
+        self.assertEqual(inference.shape[:2], (540, 720))
+
     def test_video_wait_only_uses_the_remaining_frame_budget(self):
         self.assertEqual(_remaining_frame_delay_ms(40, 0.025), 15)
         self.assertEqual(_remaining_frame_delay_ms(40, 0.1), 1)

@@ -1,5 +1,6 @@
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE, AppConfig
@@ -91,6 +92,7 @@ def run_app(config: AppConfig) -> int:
     hand_tracker: HandTracker | None = None
     recorder: CsvPoseRecorder | None = None
     robot_controller: RobotController | None = None
+    inference_pool: ThreadPoolExecutor | None = None
 
     try:
         if not capture.isOpened():
@@ -114,6 +116,9 @@ def run_app(config: AppConfig) -> int:
         hand_world_smoothers: dict[str, LandmarkSmoother] = {}
         if config.hands:
             hand_tracker = HandTracker(deps, config)
+            inference_pool = ThreadPoolExecutor(
+                max_workers=2, thread_name_prefix="tracking"
+            )
         recorder = CsvPoseRecorder(config.recording_dir)
         robot_controller = create_robot_controller(config.robot)
         state_builder = PoseStateBuilder(
@@ -175,7 +180,8 @@ def run_app(config: AppConfig) -> int:
             rewind_attempts = 0
 
             frame = _fit_frame(cv2, frame, config)
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            inference_frame = _resize_for_inference(cv2, frame, config)
+            rgb_frame = cv2.cvtColor(inference_frame, cv2.COLOR_BGR2RGB)
             timestamp_ms = _frame_timestamp_ms(
                 cv2,
                 capture,
@@ -185,7 +191,18 @@ def run_app(config: AppConfig) -> int:
                 timestamp_offset_ms,
             )
             last_timestamp_ms = timestamp_ms
-            detection = tracker.detect(rgb_frame, timestamp_ms)
+            if hand_tracker is not None and inference_pool is not None:
+                pose_future = inference_pool.submit(
+                    tracker.detect, rgb_frame, timestamp_ms
+                )
+                hand_future = inference_pool.submit(
+                    hand_tracker.detect_frame, rgb_frame, timestamp_ms
+                )
+                detection = pose_future.result()
+                hand_detection = hand_future.result()
+            else:
+                detection = tracker.detect(rgb_frame, timestamp_ms)
+                hand_detection = None
             frame_aspect_ratio = frame.shape[1] / max(1, frame.shape[0])
             hand_gestures: tuple[str, ...] = ()
             extra_angles: dict[str, float] = {}
@@ -194,7 +211,8 @@ def run_app(config: AppConfig) -> int:
             hand_world_by_side: dict[str, list] = {}
             pose_landmarks = detection.landmarks
             if hand_tracker is not None and pose_landmarks:
-                hand_detection = hand_tracker.detect_frame(rgb_frame, timestamp_ms)
+                if hand_detection is None:
+                    raise RuntimeError("Hand tracking result is missing.")
                 hand_indices = assign_hand_indices(
                     hand_detection.landmarks,
                     pose_landmarks,
@@ -471,6 +489,12 @@ def run_app(config: AppConfig) -> int:
         _release_all(
             ("robot", None if robot_controller is None else robot_controller.close),
             ("recording", None if recorder is None else recorder.stop),
+            (
+                "tracking workers",
+                None
+                if inference_pool is None
+                else lambda: inference_pool.shutdown(wait=True, cancel_futures=True),
+            ),
             ("hand tracker", None if hand_tracker is None else hand_tracker.close),
             ("pose tracker", None if tracker is None else tracker.close),
             ("camera", capture.release),
@@ -563,6 +587,16 @@ def _fit_frame(cv2: object, frame: object, config: AppConfig) -> object:
     scale = min(config.width / width, config.height / height, 1.0)
     if scale >= 1.0:
         return frame
+    target = (max(1, round(width * scale)), max(1, round(height * scale)))
+    return cv2.resize(frame, target, interpolation=cv2.INTER_AREA)
+
+
+def _resize_for_inference(cv2: object, frame: object, config: AppConfig) -> object:
+    """Keep the high-resolution preview while giving both models a smaller, equal frame."""
+    height, width = frame.shape[:2]
+    if width <= config.inference_width and height <= config.inference_height:
+        return frame
+    scale = min(config.inference_width / width, config.inference_height / height)
     target = (max(1, round(width * scale)), max(1, round(height * scale)))
     return cv2.resize(frame, target, interpolation=cv2.INTER_AREA)
 

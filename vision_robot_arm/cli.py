@@ -78,6 +78,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Preferred camera frame rate; resolution is reduced first to preserve it. Default: 30.",
     )
     parser.add_argument(
+        "--inference-width",
+        type=int,
+        default=960,
+        help="Maximum image width used by the tracking models. Default: 960.",
+    )
+    parser.add_argument(
+        "--inference-height",
+        type=int,
+        default=540,
+        help="Maximum image height used by the tracking models. Default: 540.",
+    )
+    parser.add_argument(
         "--no-mirror",
         dest="mirror",
         action="store_false",
@@ -368,6 +380,8 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         width=args.width,
         height=args.height,
         camera_fps=args.fps,
+        inference_width=args.inference_width,
+        inference_height=args.inference_height,
         mirror=args.mirror,
         print_interval=args.print_interval,
         visibility_threshold=args.visibility_threshold,
