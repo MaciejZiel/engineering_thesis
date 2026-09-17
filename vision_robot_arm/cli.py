@@ -194,6 +194,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable hand tracking (open hand / fist gestures for the gripper).",
     )
     parser.add_argument(
+        "--hand-tracking-interval",
+        type=int,
+        default=2,
+        help="Run the heavier hand model every N frames and reuse its result between runs. Default: 2.",
+    )
+    parser.add_argument(
         "--num-poses",
         type=int,
         default=1,
@@ -483,6 +489,7 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         model_path=args.model,
         hand_model_path=args.hand_model,
         hands=args.hands,
+        hand_tracking_interval=args.hand_tracking_interval,
         num_poses=args.num_poses,
         min_detection_confidence=args.min_detection_confidence,
         hand_detection_confidence=args.hand_detection_confidence,

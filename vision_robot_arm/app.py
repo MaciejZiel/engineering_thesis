@@ -150,6 +150,8 @@ def run_app(config: AppConfig) -> int:
         )
         last_frame_at = time.monotonic()
         display_fps = 0.0
+        frame_number = 0
+        last_hand_detection = None
 
         print(_source_started_message(config))
         print(
@@ -186,8 +188,10 @@ def run_app(config: AppConfig) -> int:
                 gesture_filter.reset()
                 hand_smoothers.clear()
                 hand_world_smoothers.clear()
+                last_hand_detection = None
                 continue
             rewind_attempts = 0
+            frame_number += 1
 
             frame = _fit_frame(cv2, frame, config)
             inference_frame = _resize_for_inference(cv2, frame, config)
@@ -202,14 +206,22 @@ def run_app(config: AppConfig) -> int:
             )
             last_timestamp_ms = timestamp_ms
             if hand_tracker is not None and inference_pool is not None:
-                pose_future = inference_pool.submit(
-                    tracker.detect, rgb_frame, timestamp_ms
+                run_hands = (
+                    last_hand_detection is None
+                    or frame_number % config.hand_tracking_interval == 0
                 )
-                hand_future = inference_pool.submit(
-                    hand_tracker.detect_frame, rgb_frame, timestamp_ms
-                )
-                detection = pose_future.result()
-                hand_detection = hand_future.result()
+                if run_hands:
+                    pose_future = inference_pool.submit(
+                        tracker.detect, rgb_frame, timestamp_ms
+                    )
+                    hand_future = inference_pool.submit(
+                        hand_tracker.detect_frame, rgb_frame, timestamp_ms
+                    )
+                    detection = pose_future.result()
+                    last_hand_detection = hand_future.result()
+                else:
+                    detection = tracker.detect(rgb_frame, timestamp_ms)
+                hand_detection = last_hand_detection
             else:
                 detection = tracker.detect(rgb_frame, timestamp_ms)
                 hand_detection = None

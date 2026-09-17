@@ -36,6 +36,7 @@ class AppConfig:
     model_path: Path = DEFAULT_MODEL_PATH
     hand_model_path: Path = DEFAULT_HAND_MODEL_PATH
     hands: bool = True
+    hand_tracking_interval: int = 2
     video_path: Path | None = None
     loop_video: bool = False
     robot: RobotConfig = RobotConfig()
@@ -60,7 +61,14 @@ class AppConfig:
                 finite = False
             if not finite:
                 raise SystemExit(f"{name} must be a finite number")
-        for name in ("width", "height", "inference_width", "inference_height", "num_poses"):
+        for name in (
+            "width",
+            "height",
+            "inference_width",
+            "inference_height",
+            "num_poses",
+            "hand_tracking_interval",
+        ):
             if type(getattr(self, name)) is not int:
                 raise SystemExit(f"{name} must be an integer")
         if self.width < 0 or self.height < 0:
@@ -96,6 +104,8 @@ class AppConfig:
             raise SystemExit("--smoothing-alpha must be greater than 0 and at most 1")
         if self.num_poses <= 0:
             raise SystemExit("--num-poses must be greater than 0")
+        if not 1 <= self.hand_tracking_interval <= 6:
+            raise SystemExit("--hand-tracking-interval must be between 1 and 6")
         for flag, value in (
             ("--min-detection-confidence", self.min_detection_confidence),
             ("--min-pose-presence-confidence", self.min_pose_presence_confidence),

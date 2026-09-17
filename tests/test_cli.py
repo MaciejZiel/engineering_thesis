@@ -126,6 +126,7 @@ class CliRobotOptionsTests(unittest.TestCase):
         self.assertTrue(parse_args([]).hands)
         self.assertFalse(parse_args(["--no-hands"]).hands)
         self.assertEqual(parse_args(["--hand-model", "x.task"]).hand_model_path.name, "x.task")
+        self.assertEqual(parse_args(["--hand-tracking-interval", "3"]).hand_tracking_interval, 3)
 
     def test_test_mode_keeps_explicit_backend(self) -> None:
         config = parse_args(["--test-mode", "--robot-backend", "debug"])

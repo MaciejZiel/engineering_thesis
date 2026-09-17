@@ -35,6 +35,11 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 AppConfig(**values).validate()
 
+    def test_hand_tracking_interval_is_bounded(self) -> None:
+        for value in (0, 7, 1.5):
+            with self.subTest(value=value), self.assertRaises(SystemExit):
+                AppConfig(hand_tracking_interval=value).validate()
+
     def test_config_rejects_missing_video_file(self) -> None:
         config = AppConfig(video_path=Path("does_not_exist.mp4"))
 
