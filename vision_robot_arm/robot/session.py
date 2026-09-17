@@ -45,8 +45,8 @@ class HardwareSession:
                     self._backend.arm_commissioning()
                     self.phase = "commissioning"
                 else:
-                    self._backend.home()
-                    self.phase = "homing"
+                    self._backend.arm_tracking()
+                    self.phase = "ready"
             elif self.phase in ("ready", "paused") and self._usable:
                 if self._backend.ready():
                     self._mapper.reset()
@@ -137,7 +137,7 @@ class HardwareSession:
             "disconnected": "Connect robot",
             "monitoring": "Read-only monitoring",
             "commissioning": "Disarm commissioning",
-            "connected": "Home robot (motion)",
+            "connected": "Capture current pose (no motion)",
             "homing": "Homing — P to pause",
             "ready": "Enable control",
             "active": "Pause control",

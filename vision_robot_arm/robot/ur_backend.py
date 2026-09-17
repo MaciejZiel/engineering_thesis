@@ -2,8 +2,9 @@
 
 Streaming raw mapped angles at a moving person would make the controller chase steps
 of tens of degrees. Every arm therefore owns a setpoint generator that ramps toward the
-mapped pose at `--robot-max-speed`, starts from a known home pose, and decelerates on
-shutdown. Feedback comes from RTDE, so the on-screen twin shows the robot, not the wish.
+mapped pose at `--robot-max-speed`, starts from a feedback-confirmed current pose, and
+decelerates on shutdown. Feedback comes from RTDE, so the on-screen twin shows the
+robot, not the wish.
 """
 
 import math
@@ -149,7 +150,7 @@ class URArm:
                                 self._config.start_accel_deg_s2))
 
     def capture_current_as_setpoint(self) -> dict[str, float]:
-        """Adopt feedback without issuing motion; used only by commissioning."""
+        """Adopt fresh feedback as the control origin without issuing motion."""
         actual = self.feedback_joints
         if actual is None:
             raise ControlFault(f"{self.name}: fresh joint feedback is required.")
@@ -459,6 +460,36 @@ class URBackend:
             self._commissioning_origins = origins
             self._jog_direction = 0
             self._commissioning_last_step = self._clock()
+        except BaseException as error:
+            self._fault = str(error)
+            self.close()
+            raise
+
+    def arm_tracking(self) -> None:
+        """Capture a stationary RTDE pose; never move merely because control connected."""
+        if self._commissioning:
+            raise ControlFault("Commissioning cannot be armed for vision tracking.")
+        if self._fault is not None:
+            raise ControlFault(self._fault)
+        try:
+            if self._config.preflight:
+                _preflight(self._config, self._status_query)
+            arms = tuple(self._arms.values())
+            for arm in arms:
+                arm.poll_feedback()
+                arm.check_control_health()
+                speeds = arm.feedback_speeds_deg_s
+                if arm.feedback_joints is None or speeds is None:
+                    raise ControlFault(
+                        f"{arm.name}: fresh position and velocity feedback is required."
+                    )
+                if max(abs(value) for value in speeds.values()) > COMMISSIONING_STATIONARY_DEG_S:
+                    raise ControlFault(
+                        f"{arm.name}: robot must be stationary before tracking is armed."
+                    )
+            # Validate every arm first, then atomically adopt both current poses.
+            for arm in arms:
+                arm.capture_current_as_setpoint()
         except BaseException as error:
             self._fault = str(error)
             self.close()

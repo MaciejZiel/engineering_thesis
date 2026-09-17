@@ -40,17 +40,16 @@ class HardwareSessionTests(unittest.TestCase):
         self.factory.assert_not_called()
         self.assertEqual(self.session.phase, "disconnected")
 
-    def test_connect_home_and_arm_require_separate_actions(self):
+    def test_connect_capture_and_arm_require_separate_actions_without_homing(self):
         self.session.advance()
+        self.backend.arm_tracking.assert_not_called()
+        self.session.advance()
+        self.backend.arm_tracking.assert_called_once()
         self.backend.home.assert_not_called()
-        self.session.advance()
-        self.backend.home.assert_called_once()
-        self.session.update(pose())
-        self.assertEqual(self.session.phase, "homing")
-        self.backend.ready.return_value = True
         self.session.update(pose())
         self.assertEqual(self.session.phase, "ready")
         self.backend.send.assert_not_called()
+        self.backend.ready.return_value = True
         self.session.advance()
         self.session.update(pose())
         self.backend.send.assert_called_once()
@@ -77,12 +76,13 @@ class HardwareSessionTests(unittest.TestCase):
         self.session.advance()
         self.assertEqual(self.session.phase, "fault")
 
-    def test_tracking_loss_during_homing_requires_new_home_action(self):
+    def test_tracking_loss_before_activation_does_not_authorize_motion(self):
         self.session.advance()
         self.session.advance()
         self.session.reset()
-        self.assertEqual(self.session.phase, "connected")
-        self.backend.pause.assert_called_once()
+        self.assertEqual(self.session.phase, "ready")
+        self.backend.pause.assert_not_called()
+        self.backend.send.assert_not_called()
 
     def test_monitor_mode_connects_without_calling_any_motion_method(self):
         backend = Mock()

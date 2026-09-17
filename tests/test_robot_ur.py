@@ -1,7 +1,11 @@
 import math
 import unittest
 
-from vision_robot_arm.robot.config import OPERATION_COMMISSIONING, RobotConfig
+from vision_robot_arm.robot.config import (
+    OPERATION_COMMISSIONING,
+    OPERATION_TRACKING,
+    RobotConfig,
+)
 from vision_robot_arm.robot.targets import GRIPPER_CLOSE, GRIPPER_OPEN, ArmTargets, JointTargets
 from vision_robot_arm.robot.ur_backend import (
     URBackend,
@@ -756,6 +760,50 @@ class CommissioningTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ControlFault, "stationary"):
             backend.arm_commissioning()
+
+
+class TrackingArmingTests(unittest.TestCase):
+    def make(self, velocity: float = 0.0):
+        connector = FakeConnector()
+        factory = FakeRtdeFactory()
+        config = RobotConfig(
+            backend="ur",
+            operation=OPERATION_TRACKING,
+            right_host="10.0.0.2",
+        )
+        backend = URBackend(
+            config,
+            connector=connector,
+            rtde_factory=factory,
+            status_query=ready_status,
+            require_feedback=True,
+        )
+        factory.clients["10.0.0.2"].sample = {
+            "actual_q": (0.0, math.radians(-37.0), 0.0, 0.0, 0.0, 0.0),
+            "actual_qd": (0.0, math.radians(velocity), 0.0, 0.0, 0.0, 0.0),
+            "robot_mode": 7,
+            "safety_status": 1,
+        }
+        return backend, connector.sockets["10.0.0.2"]
+
+    def test_arming_tracking_captures_feedback_without_motion(self) -> None:
+        backend, socket = self.make()
+
+        backend.arm_tracking()
+
+        self.assertEqual(socket.sent, [])
+        self.assertAlmostEqual(
+            backend.robot_state().arm("right").targets["shoulder"], -37.0
+        )
+        self.assertTrue(backend.ready())
+
+    def test_moving_robot_cannot_be_armed_for_tracking(self) -> None:
+        backend, socket = self.make(velocity=1.0)
+
+        with self.assertRaisesRegex(ControlFault, "stationary"):
+            backend.arm_tracking()
+
+        self.assertEqual(socket.commands(b"movej("), [])
 
 
 if __name__ == "__main__":
