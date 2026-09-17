@@ -17,23 +17,6 @@ class RobotBackend(Protocol):
     def send(self, targets: JointTargets) -> None:
         ...
 
-    def commanded_gripper(self, arm: str) -> str | None:
-        """The latest gripper command for this arm, or None if none was ever given."""
-        return self._grippers[arm] if arm in self._commanded else None
-
-    def accumulated_targets(self) -> JointTargets | None:
-        """Everything seen so far as one frame, for protocols that send state, not events."""
-        if self.last_targets is None:
-            return None
-        return JointTargets(
-            timestamp_ms=self.last_targets.timestamp_ms,
-            arms={
-                arm: ArmTargets(joints=dict(joints), gripper=self.commanded_gripper(arm))
-                for arm, joints in self._joints.items()
-            },
-            lift_mode=self._lift_mode,
-        )
-
     def robot_state(self) -> RobotState | None:
         ...
 
@@ -110,20 +93,11 @@ class DebugBackend:
 
     def commanded_gripper(self, arm: str) -> str | None:
         """The latest gripper command for this arm, or None if none was ever given."""
-        return self._grippers[arm] if arm in self._commanded else None
+        return self._tracker.commanded_gripper(arm)
 
     def accumulated_targets(self) -> JointTargets | None:
         """Everything seen so far as one frame, for protocols that send state, not events."""
-        if self.last_targets is None:
-            return None
-        return JointTargets(
-            timestamp_ms=self.last_targets.timestamp_ms,
-            arms={
-                arm: ArmTargets(joints=dict(joints), gripper=self.commanded_gripper(arm))
-                for arm, joints in self._joints.items()
-            },
-            lift_mode=self._lift_mode,
-        )
+        return self._tracker.accumulated_targets()
 
     def robot_state(self) -> RobotState | None:
         return self._tracker.robot_state()

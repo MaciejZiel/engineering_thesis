@@ -76,6 +76,17 @@ class FactoryTests(unittest.TestCase):
 
 
 class DebugBackendTests(unittest.TestCase):
+    def test_debug_helpers_delegate_to_the_target_tracker(self) -> None:
+        backend = DebugBackend(print_interval=1.0)
+        self.assertIsNone(backend.accumulated_targets())
+        self.assertIsNone(backend.commanded_gripper("right"))
+        with contextlib.redirect_stdout(io.StringIO()):
+            backend.send(JointTargets(timestamp_ms=1, arms={
+                "right": ArmTargets(joints={"elbow": 90.0}, gripper="close")
+            }))
+        self.assertEqual(backend.commanded_gripper("right"), "close")
+        self.assertEqual(backend.accumulated_targets().arm("right").joints, {"elbow": 90.0})
+
     def test_prints_are_rate_limited(self) -> None:
         clock = FakeClock()
         backend = DebugBackend(print_interval=1.0, clock=clock)
