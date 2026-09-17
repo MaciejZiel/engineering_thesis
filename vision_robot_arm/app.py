@@ -17,9 +17,12 @@ from vision_robot_arm.vision.dashboard import (
     ACTION_CALIBRATE,
     ACTION_CONTROL,
     ACTION_FULLSCREEN,
+    ACTION_JOG_NEGATIVE,
+    ACTION_JOG_POSITIVE,
     ACTION_MODE,
     ACTION_QUIT,
     ACTION_RECORD,
+    ACTION_STOP,
     DashboardUi,
     cycle_output_mode,
 )
@@ -427,6 +430,12 @@ def run_app(config: AppConfig) -> int:
                     if isinstance(robot_controller, HardwareSession)
                     else None
                 ),
+                commissioning_joint=(
+                    config.robot.commissioning_joint
+                    if isinstance(robot_controller, HardwareSession)
+                    and robot_controller.phase == "commissioning"
+                    else None
+                ),
                 alert=(
                     getattr(robot_controller, "error", None)
                     or recorder.last_error
@@ -449,11 +458,12 @@ def run_app(config: AppConfig) -> int:
             if isinstance(robot_controller, HardwareSession):
                 if key == ord("h") or action == ACTION_CONTROL:
                     robot_controller.advance()
-                if key == ord("p"):
+                if key == ord("p") or action == ACTION_STOP:
                     robot_controller.pause()
-                if key == ord("["):
+                held_action = dashboard.held_action
+                if key == ord("[") or held_action == ACTION_JOG_NEGATIVE:
                     robot_controller.jog(-1)
-                elif key == ord("]"):
+                elif key == ord("]") or held_action == ACTION_JOG_POSITIVE:
                     robot_controller.jog(1)
             if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
                 return 0

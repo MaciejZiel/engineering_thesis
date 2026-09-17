@@ -139,3 +139,21 @@ class HardwareSessionTests(unittest.TestCase):
 
         self.assertEqual(session.phase, "commissioning")
         backend.pause.assert_not_called()
+
+    def test_commissioning_control_action_disarms_motion(self):
+        backend = Mock()
+        session = HardwareSession(
+            RobotConfig(
+                backend="ur",
+                operation=OPERATION_COMMISSIONING,
+                right_host="test",
+            ),
+            Mock(return_value=backend),
+        )
+        session.advance()
+        session.advance()
+
+        session.advance()
+
+        backend.pause.assert_called_once()
+        self.assertEqual(session.phase, "connected")

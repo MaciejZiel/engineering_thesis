@@ -7,7 +7,10 @@ from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE
 from vision_robot_arm.vision.dashboard import (
     ACTION_CALIBRATE,
     ACTION_DETAILS,
+    ACTION_JOG_NEGATIVE,
+    ACTION_JOG_POSITIVE,
     ACTION_RECORD,
+    ACTION_STOP,
     DashboardUi,
     Rect,
     backend_label,
@@ -156,6 +159,36 @@ class DashboardInteractionTests(unittest.TestCase):
         self.assertEqual(backend_label("sim"), "Simulation")
         self.assertEqual(backend_label("ur"), "URScript output")
         self.assertEqual(backend_label("off"), "Preview only")
+
+    def test_commissioning_jog_is_active_only_while_pointer_is_held_inside(self) -> None:
+        self.ui.render(
+            self.camera,
+            self.camera,
+            mode="angles",
+            person_detected=True,
+            calibrated=False,
+            recording=False,
+            robot_label="ur",
+            gestures=(),
+            status_lines=(),
+            tracking_quality=0.8,
+            fps=30,
+            source_label="CAM 0",
+            control_label="Disarm commissioning",
+            commissioning_joint="shoulder",
+        )
+        actions = {button.action for button in self.ui.buttons}
+        self.assertTrue(
+            {ACTION_JOG_NEGATIVE, ACTION_JOG_POSITIVE, ACTION_STOP}.issubset(actions)
+        )
+
+        x, y = self.point(ACTION_JOG_NEGATIVE)
+        self.ui._on_mouse(cv2.EVENT_LBUTTONDOWN, x, y, 0, None)
+        self.assertEqual(self.ui.held_action, ACTION_JOG_NEGATIVE)
+        self.ui._on_mouse(cv2.EVENT_MOUSEMOVE, 0, 0, 0, None)
+        self.assertIsNone(self.ui.held_action)
+        self.ui._on_mouse(cv2.EVENT_LBUTTONUP, 0, 0, 0, None)
+        self.assertIsNone(self.ui.consume_action())
 
 
 class TypographyTests(unittest.TestCase):

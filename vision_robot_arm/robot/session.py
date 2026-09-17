@@ -53,6 +53,8 @@ class HardwareSession:
                     self.phase = "active"
             elif self.phase == "active":
                 self.pause()
+            elif self.phase == "commissioning":
+                self.pause()
         except (Exception, SystemExit) as error:
             self._fail(error)
 
@@ -134,7 +136,7 @@ class HardwareSession:
         return {
             "disconnected": "Connect robot",
             "monitoring": "Read-only monitoring",
-            "commissioning": "Hold [ / ] to micro-jog; P disarms",
+            "commissioning": "Disarm commissioning",
             "connected": "Home robot (motion)",
             "homing": "Homing — P to pause",
             "ready": "Enable control",

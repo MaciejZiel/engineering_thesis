@@ -28,6 +28,9 @@ ACTION_QUIT = "quit"
 ACTION_RECORD = "record"
 ACTION_DETAILS = "details"
 ACTION_CONTROL = "control"
+ACTION_JOG_NEGATIVE = "jog_negative"
+ACTION_JOG_POSITIVE = "jog_positive"
+ACTION_STOP = "stop"
 
 
 @dataclass(frozen=True)
@@ -203,6 +206,19 @@ class DashboardUi:
         action, self._pending_action = self._pending_action, None
         return action
 
+    @property
+    def held_action(self) -> str | None:
+        """Return a motion action only while its enabled button remains held."""
+        if self._pressed not in (ACTION_JOG_NEGATIVE, ACTION_JOG_POSITIVE):
+            return None
+        button = next(
+            (candidate for candidate in self._buttons if candidate.action == self._pressed),
+            None,
+        )
+        if button is None or not button.enabled or not button.rect.contains(*self._pointer):
+            return None
+        return self._pressed
+
     def toggle_fullscreen(self) -> bool:
         self._fullscreen = not self._fullscreen
         value = (
@@ -260,6 +276,7 @@ class DashboardUi:
         robot_state_available: bool = True,
         can_calibrate: bool | None = None,
         control_label: str | None = None,
+        commissioning_joint: str | None = None,
         alert: str | None = None,
     ) -> Any:
         camera_height, camera_width = camera_frame.shape[:2]
@@ -317,7 +334,14 @@ class DashboardUi:
             else person_detected and can_calibrate
         )
         self._footer(
-            p, layout, mode, recording, calibration_ready, calibrated, control_label
+            p,
+            layout,
+            mode,
+            recording,
+            calibration_ready,
+            calibrated,
+            control_label,
+            commissioning_joint,
         )
         return canvas
 
@@ -544,6 +568,7 @@ class DashboardUi:
         detected: bool,
         calibrated: bool,
         control_label: str | None = None,
+        commissioning_joint: str | None = None,
     ) -> None:
         rect, pad = layout.footer, layout.margin
         p.line((pad, rect.y), (rect.right - pad, rect.y))
@@ -566,7 +591,34 @@ class DashboardUi:
             align="right",
         )
         top, height, gap = rect.y + p.px(39), p.px(43), p.px(10)
-        definitions = (
+        if commissioning_joint:
+            label = commissioning_joint.replace("_", " ").title()
+            hint = f"Hold a jog button to move {label}; releasing it stops motion."
+            p.text(
+                hint,
+                pad,
+                rect.y + p.px(14),
+                size=12,
+                color=MUTED,
+                width=hint_width,
+            )
+            definitions = (
+                (ACTION_JOG_NEGATIVE, f"{label}  −", "[", 180, False, True, False),
+                (ACTION_JOG_POSITIVE, f"{label}  +", "]", 180, False, True, False),
+                (ACTION_STOP, "Stop motion", "P", 165, False, True, False),
+                (
+                    ACTION_CONTROL,
+                    control_label or "Disarm",
+                    "H",
+                    190,
+                    False,
+                    True,
+                    True,
+                ),
+                (ACTION_QUIT, "Quit", "Esc", 90, False, True, False),
+            )
+        else:
+            definitions = (
             (
                 ACTION_CALIBRATE,
                 "Recalibrate" if calibrated else "Calibrate",
@@ -604,13 +656,13 @@ class DashboardUi:
                 False,
             ),
             (ACTION_QUIT, "Quit", "Esc", 90, False, True, False),
-        )
+            )
         widths = [p.px(d[3]) for d in definitions]
         x = pad
         for i, (action, label, shortcut, _, active, enabled, primary) in enumerate(
             definitions
         ):
-            if i == 2:
+            if not commissioning_joint and i == 2:
                 x = max(x, rect.right - pad - sum(widths[2:]) - gap * 2)
             button = DashboardButton(
                 action,
@@ -639,6 +691,8 @@ class DashboardUi:
             ACTION_DETAILS,
         ):
             fill, border = BACKGROUND if not compact else SURFACE, None
+        if button.action == ACTION_STOP:
+            fill, ink, border = RED, (255, 255, 255), None
         if hover:
             fill = HOVER
         if button.primary and button.enabled:
