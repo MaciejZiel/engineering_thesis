@@ -54,14 +54,14 @@ class ElevationTests(unittest.TestCase):
         self.assertAlmostEqual(angles["left_shoulder_elevation"], 90.0)
         self.assertAlmostEqual(angles["right_shoulder_elevation"], 90.0)
 
-    def test_world_elevation_does_not_fake_a_torso_axis_when_hips_are_missing(
+    def test_world_elevation_uses_camera_vertical_when_hips_are_missing(
         self,
     ) -> None:
         image = pose(P(0.4, 0.6), P(0.6, 0.6), hips_visible=False)
         world = pose(P(0.4, 0.6), P(0.6, 0.6), hips_visible=True)
-        self.assertEqual(
-            arm_elevation_angles(image, INDICES, world_landmarks=world), {}
-        )
+        angles = arm_elevation_angles(image, INDICES, world_landmarks=world)
+        self.assertIn("left_shoulder_elevation", angles)
+        self.assertIn("right_shoulder_elevation", angles)
 
     def test_hanging_arm_is_zero_degrees(self) -> None:
         landmarks = pose(P(0.4, 0.6), P(0.6, 0.6))

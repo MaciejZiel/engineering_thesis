@@ -7,10 +7,12 @@ from vision_robot_arm.core.config import ANGLE_MODE, BOTH_MODE, LANDMARK_MODE, A
 from vision_robot_arm.core.display import enable_high_dpi_awareness
 from vision_robot_arm.core.pose_state import LandmarkPoint, mirror_landmarks
 from vision_robot_arm.core.runtime import load_runtime_dependencies
-from vision_robot_arm.robot.controller import RobotController
+from vision_robot_arm.robot.controller import MappedRobotController, RobotController
 from vision_robot_arm.robot.factory import create_robot_controller
+from vision_robot_arm.robot.mapping import RobotMapper
 from vision_robot_arm.robot.session import HardwareSession
-from vision_robot_arm.robot.visualization import draw_simulation
+from vision_robot_arm.robot.simulation import SimulationBackend
+from vision_robot_arm.robot.visualization_3d import draw_workspace_3d
 from vision_robot_arm.vision.arm_pose import arm_elevation_angles
 from vision_robot_arm.vision.dashboard import (
     ACTION_CALIBRATE,
@@ -92,6 +94,7 @@ def run_app(config: AppConfig) -> int:
     hand_tracker: HandTracker | None = None
     recorder: CsvPoseRecorder | None = None
     robot_controller: RobotController | None = None
+    preview_controller: RobotController | None = None
     inference_pool: ThreadPoolExecutor | None = None
 
     try:
@@ -121,6 +124,9 @@ def run_app(config: AppConfig) -> int:
             )
         recorder = CsvPoseRecorder(config.recording_dir)
         robot_controller = create_robot_controller(config.robot)
+        preview_controller = MappedRobotController(
+            RobotMapper(config.robot), SimulationBackend(config.robot)
+        )
         state_builder = PoseStateBuilder(
             indices=indices,
             min_visibility=config.visibility_threshold,
@@ -345,6 +351,7 @@ def run_app(config: AppConfig) -> int:
                     )
 
                 recorder.write_state(current_state, names)
+                preview_controller.update(current_state)
                 robot_controller.update(current_state)
 
                 now = time.monotonic()
@@ -361,6 +368,7 @@ def run_app(config: AppConfig) -> int:
             else:
                 state_builder.reset_tracking()
                 robot_controller.reset()
+                preview_controller.reset()
                 wrist_hold.reset()
                 gesture_filter.reset()
                 hand_smoothers.clear()
@@ -378,13 +386,21 @@ def run_app(config: AppConfig) -> int:
             last_frame_at = now
 
             robot_state = robot_controller.robot_state()
+            preview_state = robot_state or preview_controller.robot_state()
             simulation_size = dashboard.simulation_target_size()
             if (
                 simulation_canvas.shape[1],
                 simulation_canvas.shape[0],
             ) != simulation_size:
                 simulation_canvas = _simulation_canvas(deps.np, simulation_size)
-            draw_simulation(cv2, simulation_canvas, robot_state, compact=True)
+            draw_workspace_3d(
+                cv2,
+                deps.np,
+                simulation_canvas,
+                preview_state,
+                current_state,
+                indices,
+            )
             can_calibrate = current_state is not None and any(
                 value is not None for value in current_state.angles.values()
             )
@@ -402,7 +418,7 @@ def run_app(config: AppConfig) -> int:
                 tracking_quality=tracking_quality,
                 fps=display_fps,
                 source_label=_source_label(config),
-                robot_state_available=robot_state is not None,
+                robot_state_available=True,
                 can_calibrate=can_calibrate,
                 control_label=(
                     robot_controller.action_label

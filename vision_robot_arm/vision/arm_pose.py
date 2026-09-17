@@ -67,12 +67,23 @@ def _world_arm_elevation_angles(
         _point(image_landmarks, indices, name, min_visibility) for name in names
     ]
     world_points = [_world_point(world_landmarks, indices, name) for name in names]
-    if any(point is None for point in (*image_points, *world_points)):
+    shoulders_valid = all(
+        point is not None for point in (*image_points[:2], *world_points[:2])
+    )
+    if not shoulders_valid:
         return {}
-    left_shoulder, right_shoulder, left_hip, right_hip = world_points
-    shoulder_center = _midpoint3(left_shoulder, right_shoulder)
-    hip_center = _midpoint3(left_hip, right_hip)
-    down = _vector3(shoulder_center, hip_center)
+    hips_valid = all(
+        point is not None for point in (*image_points[2:], *world_points[2:])
+    )
+    if hips_valid:
+        left_shoulder, right_shoulder, left_hip, right_hip = world_points
+        shoulder_center = _midpoint3(left_shoulder, right_shoulder)
+        hip_center = _midpoint3(left_hip, right_hip)
+        down = _vector3(shoulder_center, hip_center)
+    else:
+        # World Y is the camera-aligned vertical axis. This keeps depth in the arm
+        # vector instead of falling back to a 2D angle when hips leave a desk frame.
+        down = (0.0, 1.0, 0.0)
     angles = {}
     for side in SIDES:
         shoulder_name, elbow_name = f"{side.upper()}_SHOULDER", f"{side.upper()}_ELBOW"

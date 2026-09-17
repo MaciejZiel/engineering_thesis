@@ -75,11 +75,15 @@ class DashboardLayout:
 def preview_target_rect(rect: Rect, px: Any) -> Rect:
     """Area inside the arm preview panel that shows the simulation image."""
     pad = px(20)
-    return Rect(rect.x + pad, rect.y + px(82), rect.width - 2 * pad, rect.height - px(127))
+    return Rect(
+        rect.x + pad, rect.y + px(82), rect.width - 2 * pad, rect.height - px(127)
+    )
 
 
 def preview_target(layout: DashboardLayout) -> Rect:
-    return preview_target_rect(layout.preview, lambda value: max(1, round(value * layout.scale)))
+    return preview_target_rect(
+        layout.preview, lambda value: max(1, round(value * layout.scale))
+    )
 
 
 def dashboard_layout(width: int, height: int) -> DashboardLayout:
@@ -275,8 +279,14 @@ class DashboardUi:
             if person_detected
             else "Step into view with your shoulders and hands visible."
         )
-        p.text(alert or subtitle, x, top + p.px(36), color=RED if alert else MUTED,
-               size=14, width=width - 2 * x)
+        p.text(
+            alert or subtitle,
+            x,
+            top + p.px(36),
+            color=RED if alert else MUTED,
+            size=14,
+            width=width - 2 * x,
+        )
         if recording:
             p.dot(width - x - p.px(125), top + p.px(12), RED)
             p.text(
@@ -306,7 +316,9 @@ class DashboardUi:
             if can_calibrate is None
             else person_detected and can_calibrate
         )
-        self._footer(p, layout, mode, recording, calibration_ready, calibrated, control_label)
+        self._footer(
+            p, layout, mode, recording, calibration_ready, calibrated, control_label
+        )
         return canvas
 
     def _header(self, p: Painter, layout: DashboardLayout, robot: str) -> None:
@@ -396,33 +408,17 @@ class DashboardUi:
     ) -> None:
         p.box(rect)
         pad = p.px(20)
-        p.text("Arm preview", rect.x + pad, rect.y + p.px(19), size=16, strong=True)
+        p.text("3D workspace", rect.x + pad, rect.y + p.px(19), size=16, strong=True)
         p.text(
-            "2 × UR7e",
+            "2 × UR7e · XYZ",
             rect.right - pad,
             rect.y + p.px(22),
             size=12,
             color=MUTED,
             align="right",
         )
-        p.text(
-            "Left arm",
-            rect.x + rect.width // 4,
-            rect.y + p.px(58),
-            size=12,
-            color=MUTED,
-            align="center",
-        )
-        p.text(
-            "Right arm",
-            rect.x + 3 * rect.width // 4,
-            rect.y + p.px(58),
-            size=12,
-            color=MUTED,
-            align="center",
-        )
         target = preview_target_rect(rect, p.px)
-        if available and robot not in ("off", "none"):
+        if available:
             self._place_image(p.canvas, simulation, target)
         else:
             p.text(
@@ -589,9 +585,15 @@ class DashboardUi:
                 True,
                 False,
             ),
-            (ACTION_CONTROL if control_label else ACTION_MODE,
-             control_label or f"Console: {mode}", "H" if control_label else "1–3",
-             178, False, True, bool(control_label)),
+            (
+                ACTION_CONTROL if control_label else ACTION_MODE,
+                control_label or f"Console: {mode}",
+                "H" if control_label else "1–3",
+                178,
+                False,
+                True,
+                bool(control_label),
+            ),
             (
                 ACTION_FULLSCREEN,
                 "Exit full screen" if self._fullscreen else "Full screen",
