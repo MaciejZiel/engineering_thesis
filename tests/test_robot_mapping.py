@@ -130,10 +130,18 @@ class RobotMapperTests(unittest.TestCase):
     def test_hand_gestures_control_each_gripper(self) -> None:
         mapper = RobotMapper(RobotConfig())
 
-        targets = mapper.map(make_state({}, gestures=("right_fist", "left_hand_open")))
+        for _ in range(3):
+            targets = mapper.map(make_state({}, gestures=("right_fist", "left_hand_open")))
 
         self.assertEqual(targets.arm("right").gripper, GRIPPER_CLOSE)
         self.assertEqual(targets.arm("left").gripper, GRIPPER_OPEN)
+
+    def test_one_noisy_hand_frame_does_not_command_the_gripper(self) -> None:
+        mapper = RobotMapper(RobotConfig(gripper_gesture_frames=3))
+
+        targets = mapper.map(make_state({}, gestures=("right_fist",)))
+
+        self.assertIsNone(targets.arm("right").gripper)
 
     def test_no_hand_gesture_keeps_gripper_undefined(self) -> None:
         mapper = RobotMapper(RobotConfig())

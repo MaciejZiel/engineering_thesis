@@ -294,6 +294,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional JSONL file for targets, setpoints and RTDE feedback.",
     )
     robot.add_argument(
+        "--robot-gripper-gesture-frames",
+        type=int,
+        default=3,
+        help="Consecutive open/fist results required before a gripper command. Default: 3.",
+    )
+    robot.add_argument(
         "--robot-commissioning-speed",
         type=float,
         default=30.0,
@@ -467,6 +473,7 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         tracking_excursion_deg=args.robot_tracking_excursion,
         tracking_acceleration_deg_s2=args.robot_tracking_acceleration,
         telemetry_log_path=args.robot_telemetry_log,
+        gripper_gesture_frames=args.robot_gripper_gesture_frames,
         commissioning_joint=args.robot_commissioning_joint,
         commissioning_speed_deg_s=args.robot_commissioning_speed,
         commissioning_excursion_deg=args.robot_commissioning_excursion,
