@@ -94,12 +94,16 @@ class HardwareSessionTests(unittest.TestCase):
         self.assertEqual(session.phase, "active")
         self.assertEqual(backend.send.call_args.args[0], valid_target)
         backend.pause.assert_not_called()
+        backend.note_tracking_event.assert_any_call("tracking_gap_held", 0.0)
 
         now[0] += 0.11
         session.tracking_lost()
 
         self.assertEqual(session.phase, "paused")
         backend.pause.assert_called_once()
+        event, elapsed = backend.note_tracking_event.call_args.args
+        self.assertEqual(event, "tracking_gap_stopped")
+        self.assertAlmostEqual(elapsed, 0.41)
 
     def test_fault_is_latched_and_closes_backend(self):
         self.prepare()

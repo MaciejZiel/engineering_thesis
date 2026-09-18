@@ -424,6 +424,7 @@ class URBackend:
         self._commissioning = config.operation == OPERATION_COMMISSIONING
         self._telemetry = None
         self._next_telemetry_at = 0.0
+        self._next_tracking_event_at = 0.0
         if require_feedback and not config.feedback:
             raise ControlFault("Hardware control requires RTDE feedback.")
         if config.preflight:
@@ -741,6 +742,14 @@ class URBackend:
             return
         record = {"time_unix_s": time.time(), "event": event, **fields}
         self._telemetry.write(json.dumps(record, separators=(",", ":")) + "\n")
+
+    def note_tracking_event(self, event: str, elapsed_s: float) -> None:
+        """Record camera gaps without flooding the JSONL file every video frame."""
+        now = self._clock()
+        if event == "tracking_gap_held" and now < self._next_tracking_event_at:
+            return
+        self._next_tracking_event_at = now + 0.1
+        self._write_telemetry(event, gap_elapsed_s=round(elapsed_s, 4))
 
     def robot_state(self) -> RobotState | None:
         if not self._arms:

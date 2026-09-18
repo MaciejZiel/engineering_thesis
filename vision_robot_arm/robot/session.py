@@ -92,6 +92,8 @@ class HardwareSession:
                 if not self._usable:
                     self.tracking_lost()
                 else:
+                    if self._tracking_lost_at is not None:
+                        self._note_tracking("tracking_recovered", self._clock() - self._tracking_lost_at)
                     self._tracking_lost_at = None
                     self._last_targets = targets
                     self._backend.send(targets)
@@ -114,16 +116,24 @@ class HardwareSession:
         now = self._clock()
         if self._tracking_lost_at is None:
             self._tracking_lost_at = now
+        elapsed = now - self._tracking_lost_at
         if (
             self._last_targets is not None
-            and now - self._tracking_lost_at <= self._config.tracking_loss_grace_s
+            and elapsed <= self._config.tracking_loss_grace_s
         ):
+            self._note_tracking("tracking_gap_held", elapsed)
             try:
                 self._backend.send(self._last_targets)
             except (Exception, SystemExit) as error:
                 self._fail(error)
             return
+        self._note_tracking("tracking_gap_stopped", elapsed)
         self.pause()
+
+    def _note_tracking(self, event: str, elapsed_s: float) -> None:
+        callback = getattr(self._backend, "note_tracking_event", None)
+        if callback is not None:
+            callback(event, elapsed_s)
 
     def jog(self, direction: int) -> None:
         if self.phase != "commissioning":
