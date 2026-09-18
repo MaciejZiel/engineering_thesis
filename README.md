@@ -176,7 +176,14 @@ explicitly marked `hand_world_3d_held`.
 
 One window holds everything. The camera takes the left side; the sidebar holds
 two 3D views side by side, `3D workspace` for the cobots and `Body tracking`
-for the operator, with the session panel underneath. Drawing the person over
+for the operator, with the session panel underneath.
+
+The workspace panel is split into a plan and an elevation, labelled `TOP` and
+`FRONT`. A single perspective view cannot answer both how far an arm reaches
+across the table and how high it holds the tool, because depth and height
+trade off against each other in the same pixels; two orthogonal views each
+answer one question. Both are drawn from far back, so they are nearly
+orthographic and equal lengths stay equal wherever they sit in the frame. Drawing the person over
 the cobots in one panel tangled both, and stacking the two views full width
 left each of them a letterboxed strip, so they share a row instead.
 

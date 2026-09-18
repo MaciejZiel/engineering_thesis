@@ -107,6 +107,13 @@ class Camera3D:
 
 
 BODY_CAMERA = Camera3D(position=(1.25, -3.60, 0.30), target=(0.0, 0.0, -0.14))
+# Far back is nearly orthographic, which is what makes a plan and an elevation
+# readable: equal lengths stay equal wherever they sit in the frame.
+TOP_CAMERA = Camera3D(position=(0.0, -0.25, 6.0), target=(0.0, -0.25, 0.0), margin=0.07)
+FRONT_CAMERA = Camera3D(
+    position=(0.0, -6.0, 0.55), target=(0.0, 0.0, 0.55), margin=0.07
+)
+VIEW_LABEL_COLOR: Color = (132, 126, 119)
 
 
 @dataclass(frozen=True)
@@ -149,6 +156,57 @@ def draw_workspace_3d(
     _draw_joint_markers(cv2, canvas, project, robot_state, scale)
     _draw_tcp_targets(cv2, canvas, project, robot_state, scale)
     _draw_axis_gizmo(cv2, canvas, camera, width, height, scale, mirrored)
+
+
+def draw_workspace_views(
+    cv2: Any,
+    np: Any,
+    canvas: Any,
+    robot_state: RobotState | None,
+    pose_state: PoseState | None,
+    indices: dict[str, int],
+    mirrored: bool = False,
+) -> None:
+    """A plan and an elevation, stacked.
+
+    One perspective view cannot say both how far an arm reaches across the table
+    and how high it is holding the tool: depth and height trade off against each
+    other in the same pixels. Two orthogonal views each answer one question.
+    """
+    height, width = canvas.shape[:2]
+    split = height // 2
+    if split < 8 or width < 8:
+        draw_workspace_3d(
+            cv2, np, canvas, robot_state, pose_state, indices, mirrored=mirrored
+        )
+        return
+    for top, bottom, camera, label in (
+        (0, split, TOP_CAMERA, "TOP"),
+        (split, height, FRONT_CAMERA, "FRONT"),
+    ):
+        view = canvas[top:bottom]
+        draw_workspace_3d(
+            cv2, np, view, robot_state, pose_state, indices, camera, mirrored
+        )
+        _draw_view_label(cv2, view, label, width, bottom - top)
+    cv2.line(canvas, (0, split), (width, split), BACKGROUND, 3, cv2.LINE_AA)
+    cv2.line(canvas, (0, split), (width, split), GRID_MAJOR, 1, cv2.LINE_AA)
+
+
+def _draw_view_label(
+    cv2: Any, canvas: Any, label: str, width: int, height: int
+) -> None:
+    scale = max(0.3, min(0.46, min(width, height) / 420))
+    cv2.putText(
+        canvas,
+        label,
+        (6, max(12, round(height * 0.11))),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        scale,
+        VIEW_LABEL_COLOR,
+        1,
+        cv2.LINE_AA,
+    )
 
 
 def draw_body_3d(
@@ -503,7 +561,7 @@ def _screen_basis(
     camera: Camera3D, flip: float = 1.0
 ) -> tuple[tuple[float, float], ...]:
     forward = _unit(tuple(t - p for t, p in zip(camera.target, camera.position)))
-    right = _unit(_cross(forward, (0.0, 0.0, 1.0)))
+    right = _unit(_cross(forward, _reference_axis(forward)))
     up = _cross(right, forward)
     return tuple(
         (_dot((axis[0] * flip, axis[1], axis[2]), right),
@@ -574,6 +632,13 @@ def _body_to_scene(point: Any) -> Point3:
     return (float(point.x), float(point.y), float(point.z))
 
 
+def _reference_axis(forward: Point3) -> Point3:
+    """World up, unless the camera looks straight along it, as a top view does."""
+    if abs(_dot(forward, (0.0, 0.0, 1.0))) > 0.999:
+        return (0.0, 1.0, 0.0)
+    return (0.0, 0.0, 1.0)
+
+
 def _cross(a: Point3, b: Point3) -> Point3:
     return (
         a[1] * b[2] - a[2] * b[1],
@@ -603,7 +668,8 @@ def _projector(
     target = np.asarray(camera.target, dtype=float)
     forward = target - position
     forward /= np.linalg.norm(forward)
-    right = np.cross(forward, np.asarray((0.0, 0.0, 1.0)))
+    reference = np.asarray(_reference_axis(tuple(forward)), dtype=float)
+    right = np.cross(forward, reference)
     right /= np.linalg.norm(right)
     up = np.cross(right, forward)
 

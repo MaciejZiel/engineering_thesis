@@ -17,7 +17,10 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from vision_robot_arm.robot.targets import ArmState, RobotState, full_joint_pose
-from vision_robot_arm.robot.visualization_3d import draw_body_3d, draw_workspace_3d
+from vision_robot_arm.robot.visualization_3d import (
+    draw_body_3d,
+    draw_workspace_views,
+)
 from vision_robot_arm.core.pose_state import LandmarkPoint, PoseState
 from vision_robot_arm.vision.dashboard import DashboardUi
 from vision_robot_arm.vision.ui_style import ACCENT, MUTED, Painter
@@ -93,7 +96,7 @@ def render_previews(output: Path, sizes: list[tuple[int, int]]) -> None:
         # rendering once and letting the dashboard downscale hides every detail flaw.
         panel_width, panel_height = ui.simulation_target_size()
         sim = np.zeros((panel_height, panel_width, 3), np.uint8)
-        draw_workspace_3d(cv2, np, sim, state, None, {}, mirrored=True)
+        draw_workspace_views(cv2, np, sim, state, None, {}, mirrored=True)
         body_width, body_height = ui.body_target_size()
         body = np.zeros((body_height, body_width, 3), np.uint8)
         draw_body_3d(cv2, np, body, sample_body(), BODY_INDICES, mirrored=True)

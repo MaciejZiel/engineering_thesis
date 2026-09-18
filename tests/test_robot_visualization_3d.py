@@ -25,6 +25,9 @@ from vision_robot_arm.robot.visualization_3d import (
     _projector,
     draw_body_3d,
     draw_workspace_3d,
+    draw_workspace_views,
+    FRONT_CAMERA,
+    TOP_CAMERA,
 )
 from vision_robot_arm.robot.targets import ArmState, RobotState, full_joint_pose
 
@@ -329,3 +332,53 @@ class ArmOutlineTests(unittest.TestCase):
         short = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.1))
 
         self.assertEqual(_arm_outline(short), short)
+
+
+class OrthogonalViewTests(unittest.TestCase):
+    """One perspective could not show reach across the table and tool height at once."""
+
+    def test_the_plan_view_ignores_height_and_the_elevation_reads_it(self) -> None:
+        floor, raised = (0.3, -0.2, 0.0), (0.3, -0.2, 0.8)
+
+        top = _projector(np, 300, 200, TOP_CAMERA)
+        front = _projector(np, 300, 200, FRONT_CAMERA)
+
+        self.assertLess(abs(top(floor)[1] - top(raised)[1]), 4)
+        self.assertGreater(abs(front(floor)[1] - front(raised)[1]), 40)
+
+    def test_the_elevation_ignores_depth_and_the_plan_reads_it(self) -> None:
+        near, far = (0.3, -0.7, 0.4), (0.3, 0.1, 0.4)
+
+        top = _projector(np, 300, 200, TOP_CAMERA)
+        front = _projector(np, 300, 200, FRONT_CAMERA)
+
+        self.assertGreater(abs(top(near)[1] - top(far)[1]), 40)
+        self.assertLess(abs(front(near)[1] - front(far)[1]), 4)
+
+    def test_looking_straight_down_does_not_divide_by_a_zero_axis(self) -> None:
+        """World up is useless as a reference when the camera looks along it."""
+        project = _projector(np, 300, 200, TOP_CAMERA)
+
+        self.assertIsNotNone(project((0.0, 0.0, 0.5)))
+
+    def test_both_views_are_drawn_into_their_own_half(self) -> None:
+        canvas = np.zeros((394, 262, 3), dtype=np.uint8)
+
+        draw_workspace_views(cv2, np, canvas, arm_state(-70, 55), None, {})
+
+        upper, lower = canvas[:190], canvas[204:]
+        background = np.asarray(BACKGROUND, dtype=np.uint8)
+        for half in (upper, lower):
+            with self.subTest(half=half.shape):
+                self.assertGreater(
+                    np.count_nonzero(np.any(half != background, axis=2)), 400
+                )
+        self.assertFalse(np.array_equal(upper, lower[: upper.shape[0]]))
+
+    def test_a_canvas_too_small_to_split_still_draws_one_view(self) -> None:
+        canvas = np.zeros((12, 60, 3), dtype=np.uint8)
+
+        draw_workspace_views(cv2, np, canvas, arm_state(-70, 55), None, {})
+
+        background = np.asarray(BACKGROUND, dtype=np.uint8)
+        self.assertGreater(np.count_nonzero(np.any(canvas != background, axis=2)), 0)

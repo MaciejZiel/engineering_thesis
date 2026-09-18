@@ -11,7 +11,10 @@ from vision_robot_arm.robot.factory import create_robot_controller
 from vision_robot_arm.robot.mapping import RobotMapper
 from vision_robot_arm.robot.session import HardwareSession
 from vision_robot_arm.robot.simulation import SimulationBackend
-from vision_robot_arm.robot.visualization_3d import draw_body_3d, draw_workspace_3d
+from vision_robot_arm.robot.visualization_3d import (
+    draw_body_3d,
+    draw_workspace_views,
+)
 from vision_robot_arm.vision.skeleton import (
     SkeletonCalibrator,
     SkeletonError,
@@ -445,7 +448,7 @@ def run_app(config: AppConfig) -> int:
                 simulation_canvas.shape[0],
             ) != simulation_size:
                 simulation_canvas = _simulation_canvas(deps.np, simulation_size)
-            draw_workspace_3d(
+            draw_workspace_views(
                 cv2,
                 deps.np,
                 simulation_canvas,
