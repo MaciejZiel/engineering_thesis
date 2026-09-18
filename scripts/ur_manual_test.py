@@ -49,8 +49,8 @@ class ManualTestWindow:
 
     def _configure_window(self) -> None:
         self.root.title("Motion Twin · UR7e Multi-Joint Control")
-        self.root.geometry("1180x760")
-        self.root.minsize(1040, 680)
+        self.root.geometry("1400x860")
+        self.root.minsize(1370, 800)
         self.root.configure(background=BG)
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         style = ttk.Style(self.root)
