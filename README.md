@@ -536,6 +536,35 @@ safety planes/joint limits and accessible teach-pendant emergency stop according
 to the laboratory procedure first. The checks below are application safeguards,
 not safety-rated robot functions.
 
+For a camera-free connection and single-joint test, use the standalone manual
+test window. It does not load MediaPipe, open a camera, or accept pose targets:
+
+```powershell
+.venv\Scripts\python scripts\ur_manual_test.py --host 192.168.1.10 --side right
+```
+
+The window deliberately tests one robot at a time. Select the joint, speed and
+maximum excursion before connecting. The controls then require three separate
+actions:
+
+1. **Connect read-only** opens Dashboard and RTDE monitoring without a motion
+   command.
+2. **Prepare manual control** verifies Remote Control and **REDUCED** safety
+   status, then opens the commissioning channel without moving the arm.
+3. **Capture current pose & arm** requires fresh, stationary RTDE feedback and
+   adopts that position as the limited test origin without moving the arm.
+
+Only then can the `-` or `+` button be held to jog the selected joint. Releasing
+the button sends `stopj` immediately; the existing 150 ms watchdog remains
+active. The application enforces at most 5 deg/s and +/-5 degrees from the
+captured origin, with conservative defaults of 1 deg/s and +/-1 degree. Press
+**Escape** or **STOP AND DISCONNECT** to stop, disarm and close the connection.
+Change the IP, side, joint or limits only while disconnected.
+
+Test the two arms in separate runs. If the displayed joint values, direction,
+stopping response or selected robot identity is wrong, disconnect and resolve
+that issue before testing another joint.
+
 Start with the read-only monitor. This opens dashboard and RTDE connections but
 cannot send `movej`, `servoj`, `stopj` or tool-output commands:
 
