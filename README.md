@@ -558,8 +558,9 @@ actions:
 
 Only then can the `-` or `+` button be held to jog the selected joint. Releasing
 the button sends `stopj` immediately; the existing 150 ms watchdog remains
-active. The application enforces at most 5 deg/s and +/-5 degrees from the
+active. The application accepts at most 30 deg/s and +/-80 degrees from the
 captured origin, with first-connection defaults of 0.5 deg/s and +/-0.5 degree.
+Any value above 5 deg/s or +/-5 degrees requires REDUCED safety mode.
 The laboratory robot address `10.20.3.20` is prefilled but remains editable. Press
 **Escape** or **STOP AND DISCONNECT** to stop, disarm and close the connection.
 Change the IP, side, joint or limits only while disconnected.

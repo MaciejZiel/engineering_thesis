@@ -181,7 +181,7 @@ class ManualTestWindow:
             grid,
             textvariable=self.speed,
             from_=0.1,
-            to=5.0,
+            to=30.0,
             increment=0.1,
             format="%.1f",
         )
@@ -195,8 +195,8 @@ class ManualTestWindow:
             grid,
             textvariable=self.excursion,
             from_=0.1,
-            to=5.0,
-            increment=0.1,
+            to=80.0,
+            increment=1.0,
             format="%.1f",
         )
         excursion.grid(row=4, column=1, sticky="ew", pady=7)

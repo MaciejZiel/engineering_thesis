@@ -16,6 +16,8 @@ from vision_robot_arm.robot.ur_backend import URBackend
 from vision_robot_arm.robot.ur_monitor import URMonitorBackend
 
 BackendFactory = Callable[[RobotConfig], object]
+NORMAL_MODE_MAX_SPEED_DEG_S = 5.0
+NORMAL_MODE_MAX_EXCURSION_DEG = 5.0
 
 
 @dataclass(frozen=True)
@@ -45,7 +47,10 @@ class ManualTestSettings:
             # The standalone laboratory jogger may run in the controller's
             # NORMAL state. Its one-joint, low-speed and bounded-motion guards
             # remain independent from the safety-mode check used elsewhere.
-            commissioning_require_reduced=False,
+            commissioning_require_reduced=(
+                self.speed_deg_s > NORMAL_MODE_MAX_SPEED_DEG_S
+                or self.excursion_deg > NORMAL_MODE_MAX_EXCURSION_DEG
+            ),
             send_interval=0.05,
             **kwargs,
         )

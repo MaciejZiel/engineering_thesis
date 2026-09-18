@@ -13,7 +13,11 @@ import time
 from typing import Any, Callable
 
 from vision_robot_arm.robot.backend import Clock, TargetTracker
-from vision_robot_arm.robot.config import OPERATION_COMMISSIONING, RobotConfig
+from vision_robot_arm.robot.config import (
+    COMMISSIONING_MAX_SPEED_DEG_S,
+    OPERATION_COMMISSIONING,
+    RobotConfig,
+)
 from vision_robot_arm.robot.simulation import SimulatedArm
 from vision_robot_arm.robot.targets import (
     GRIPPER_CLOSE,
@@ -425,8 +429,19 @@ class URBackend:
         self._jog_deadline = self._clock() + self._config.commissioning_watchdog_s
 
     def set_commissioning_speed(self, speed_deg_s: float) -> None:
-        if not math.isfinite(speed_deg_s) or not 0 < speed_deg_s <= 5.0:
-            raise ControlFault("Commissioning speed must be between 0 and 5 deg/s.")
+        if (
+            not math.isfinite(speed_deg_s)
+            or not 0 < speed_deg_s <= COMMISSIONING_MAX_SPEED_DEG_S
+        ):
+            raise ControlFault(
+                "Commissioning speed must be between 0 and "
+                f"{COMMISSIONING_MAX_SPEED_DEG_S:g} deg/s."
+            )
+        if speed_deg_s > 5.0 and not self._config.commissioning_require_reduced:
+            raise ControlFault(
+                "Speeds above 5 deg/s require REDUCED mode; disconnect, set the "
+                "speed first, and reconnect so the safety preflight can verify it."
+            )
         self._commissioning_speed_deg_s = speed_deg_s
 
     def _commissioning_tick(self) -> None:

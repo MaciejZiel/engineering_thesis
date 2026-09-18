@@ -39,14 +39,21 @@ class ManualTestSettingsTests(unittest.TestCase):
     def test_rejects_empty_host_and_out_of_range_motion(self):
         with self.assertRaisesRegex(ValueError, "IP"):
             ManualTestSettings(host=" ").config(OPERATION_MONITOR)
-        with self.assertRaisesRegex(ValueError, "between 0 and 5"):
-            ManualTestSettings(host="robot", speed_deg_s=6).config(
+        with self.assertRaisesRegex(ValueError, "between 0 and 30"):
+            ManualTestSettings(host="robot", speed_deg_s=31).config(
                 OPERATION_COMMISSIONING
             )
-        with self.assertRaisesRegex(ValueError, "between 0 and 5"):
-            ManualTestSettings(host="robot", excursion_deg=6).config(
+        with self.assertRaisesRegex(ValueError, "between 0 and 80"):
+            ManualTestSettings(host="robot", excursion_deg=81).config(
                 OPERATION_COMMISSIONING
             )
+
+    def test_large_manual_motion_requires_reduced_safety_mode(self):
+        config = ManualTestSettings(
+            host="robot", speed_deg_s=30, excursion_deg=80
+        ).config(OPERATION_COMMISSIONING)
+
+        self.assertTrue(config.commissioning_require_reduced)
 
 
 class ManualArmTestSessionTests(unittest.TestCase):
