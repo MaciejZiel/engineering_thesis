@@ -87,6 +87,8 @@ def update_mode_from_key(key: int, current_mode: str) -> str:
 
 
 def run_app(config: AppConfig, *, web=None) -> int:
+    if web is not None and config.robot.backend not in ("none", "sim", "debug"):
+        raise ValueError("The web presentation currently supports simulation only.")
     enable_high_dpi_awareness()
     deps = load_runtime_dependencies()
     cv2 = deps.cv2
@@ -484,9 +486,6 @@ def run_app(config: AppConfig, *, web=None) -> int:
                     body_canvas = _simulation_canvas(deps.np, body_size)
                 draw_body_3d(
                     cv2, deps.np, body_canvas, current_state, indices, mirrored=mirrored
-                )
-                can_calibrate = current_state is not None and any(
-                    value is not None for value in current_state.angles.values()
                 )
                 dashboard_frame = dashboard.render(
                     frame,

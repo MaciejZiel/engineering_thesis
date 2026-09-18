@@ -53,7 +53,7 @@ def main():
 
     worker_thread = threading.Thread(target=worker, daemon=True, name="tracking")
     worker_thread.start()
-    root = Path(__file__).resolve().parents[2].parent / "frontend" / "dist"
+    root = Path(__file__).resolve().parents[2] / "frontend" / "dist"
     print(f"Motion Twin: http://127.0.0.1:{args.port} ({'demo' if bridge.demo else 'camera + simulation'})")
     try:
         uvicorn.run(create_app(bridge, root), host="127.0.0.1", port=args.port, log_level="warning")
