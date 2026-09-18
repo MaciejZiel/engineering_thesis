@@ -71,6 +71,7 @@ class ManualArmTestSession:
         self.phase = "disconnected"
         self.error: str | None = None
         self._jog_direction = 0
+        self._joint_speeds: dict[str, float] = {}
 
     def connect_monitor(self, settings: ManualTestSettings) -> None:
         self._require_phase("disconnected")
@@ -104,11 +105,25 @@ class ManualArmTestSession:
         if direction not in (-1, 1):
             raise ValueError("Jog direction must be -1 or +1.")
         self._jog_direction = direction
+        self._joint_speeds = {}
+
+    def begin_multi_jog(self, speeds_deg_s: dict[str, float]) -> None:
+        self._require_phase("armed")
+        cleaned = {
+            joint: float(speed)
+            for joint, speed in speeds_deg_s.items()
+            if joint in JOINT_NAMES and speed != 0.0
+        }
+        if not cleaned or len(cleaned) != len(speeds_deg_s):
+            raise ValueError("Select at least one valid joint direction.")
+        self._jog_direction = 0
+        self._joint_speeds = cleaned
 
     def end_jog(self) -> None:
-        if self._jog_direction == 0:
+        if self._jog_direction == 0 and not self._joint_speeds:
             return
         self._jog_direction = 0
+        self._joint_speeds = {}
         if self.phase != "armed" or self._backend is None:
             return
         try:
@@ -136,6 +151,8 @@ class ManualArmTestSession:
         try:
             if self.phase == "armed" and self._jog_direction:
                 self._backend.refresh_jog(self._jog_direction)
+            elif self.phase == "armed" and self._joint_speeds:
+                self._backend.refresh_joint_jogs(self._joint_speeds)
             return self._backend.robot_state()
         except (Exception, SystemExit) as error:
             self._fault(error)
@@ -154,6 +171,7 @@ class ManualArmTestSession:
 
     def stop_and_disconnect(self) -> None:
         self._jog_direction = 0
+        self._joint_speeds = {}
         backend, self._backend = self._backend, None
         failure: BaseException | None = None
         if backend is not None:
@@ -205,6 +223,7 @@ class ManualArmTestSession:
 
     def _fault(self, error: BaseException) -> None:
         self._jog_direction = 0
+        self._joint_speeds = {}
         self.error = str(error)
         self.phase = "fault"
         if self._backend is not None:

@@ -133,6 +133,17 @@ class ManualArmTestSessionTests(unittest.TestCase):
 
         self.control.set_commissioning_speed.assert_called_once_with(0.3)
 
+    def test_multiple_joint_velocities_refresh_together(self):
+        self.prepare_and_arm()
+        speeds = {"base": -1.0, "elbow": 2.0, "wrist_3": 0.5}
+
+        self.session.begin_multi_jog(speeds)
+        self.session.tick()
+        self.session.end_jog()
+
+        self.control.refresh_joint_jogs.assert_called_once_with(speeds)
+        self.control.pause.assert_called_once()
+
     def test_jog_is_impossible_before_explicit_arming(self):
         for prepare in (False, True):
             with self.subTest(prepared=prepare):
