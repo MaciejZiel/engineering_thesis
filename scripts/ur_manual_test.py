@@ -56,6 +56,7 @@ class ManualTestWindow:
         self._closed = False
         self._configure_window()
         self._build()
+        self.speed.trace_add("write", self._on_speed_changed)
         self._refresh_ui()
         self.root.after(50, self._tick)
 
@@ -187,6 +188,7 @@ class ManualTestWindow:
         speed.grid(row=3, column=1, sticky="ew", pady=7)
         self._unit(grid, "°/s", 3)
         self._controls.append(speed)
+        self.speed_control = speed
 
         self._field_label(grid, "Max excursion", 4)
         excursion = ttk.Spinbox(
@@ -377,7 +379,25 @@ class ManualTestWindow:
     def _begin_jog(self, direction: int) -> None:
         if not self.session.can_jog:
             return
+        self._apply_speed()
         self._perform(lambda: self.session.begin_jog(direction))
+
+    def _apply_speed(self) -> None:
+        try:
+            speed = float(self.speed.get().replace(",", "."))
+        except ValueError as error:
+            raise ValueError("Speed must be a number.") from error
+        self.session.set_speed(speed)
+
+    def _on_speed_changed(self, *_args) -> None:
+        if self.session.phase not in ("prepared", "armed"):
+            return
+        try:
+            self._apply_speed()
+        except (ValueError, RuntimeError):
+            # Partial values are normal while editing. The complete value is
+            # validated again before the next jog command starts.
+            pass
 
     def _end_jog(self) -> None:
         self.session.end_jog()
@@ -421,6 +441,11 @@ class ManualTestWindow:
                 control.configure(state="readonly" if editable else "disabled")
             else:
                 control.configure(state="normal" if editable else "disabled")
+        # Speed is deliberately adjustable between jogs after the connection
+        # settings and excursion limit have been locked.
+        self.speed_control.configure(
+            state="normal" if phase in ("disconnected", "prepared", "armed") else "disabled"
+        )
         self.connect_button.configure(
             state="normal" if phase == "disconnected" else "disabled"
         )

@@ -64,6 +64,15 @@ def encode_stopj(accel_deg_s2: float = STOP_DECELERATION_DEG_S2) -> bytes:
     return f"stopj({math.radians(accel_deg_s2):.3f})\n".encode("ascii")
 
 
+def encode_speedj(joint: str, speed_deg_s: float, duration_s: float) -> bytes:
+    velocities = [0.0] * len(JOINT_NAMES)
+    velocities[JOINT_NAMES.index(joint)] = math.radians(speed_deg_s)
+    vector = "[" + ", ".join(f"{value:.5f}" for value in velocities) + "]"
+    # A gentle acceleration lets the controller blend repeated dead-man
+    # updates instead of settling a new servoj position every UI frame.
+    return f"speedj({vector}, {math.radians(10.0):.5f}, {duration_s:.3f})\n".encode("ascii")
+
+
 def encode_gripper(closed: bool, tool_output: int = 0) -> bytes:
     value = "True" if closed else "False"
     return f"set_tool_digital_out({tool_output}, {value})\n".encode("ascii")
@@ -148,7 +157,8 @@ class URArm:
         joint: str,
         direction: int,
         origin: dict[str, float],
-        elapsed_s: float,
+        speed_deg_s: float,
+        watchdog_s: float,
     ) -> None:
         if joint not in JOINT_NAMES or direction not in (-1, 1):
             raise ControlFault("Invalid commissioning jog request.")
@@ -160,19 +170,16 @@ class URArm:
             self._config.limit_for(joint).maximum,
             origin[joint] + self._config.commissioning_excursion_deg,
         )
-        requested = self._setpoints.joints[joint] + (
-            direction * self._config.commissioning_speed_deg_s * max(0.0, elapsed_s)
-        )
-        self._setpoints.joints[joint] = max(lower, min(upper, requested))
-        self._setpoints.targets.update(self._setpoints.joints)
-        self._send(
-            encode_servoj(
-                self._setpoints.joints,
-                self._config.send_interval,
-                self._config.servo_lookahead_s,
-                self._config.servo_gain,
-            )
-        )
+        actual = self.feedback_joints
+        if actual is None:
+            raise ControlFault(f"{self.name}: fresh joint feedback is required.")
+        at_limit = actual[joint] >= upper if direction > 0 else actual[joint] <= lower
+        if at_limit:
+            self.pause()
+            return
+        self._setpoints.joints.update(actual)
+        self._setpoints.targets.update(actual)
+        self._send(encode_speedj(joint, direction * speed_deg_s, watchdog_s))
 
     def pause(self) -> None:
         self._send(encode_stopj())
@@ -354,6 +361,7 @@ class URBackend:
         self._jog_direction = 0
         self._jog_deadline = 0.0
         self._commissioning_last_step: float | None = None
+        self._commissioning_speed_deg_s = config.commissioning_speed_deg_s
     def arm_commissioning(self) -> None:
         if not self._commissioning:
             raise ControlFault("This backend is not in commissioning mode.")
@@ -416,6 +424,11 @@ class URBackend:
         self._jog_direction = direction
         self._jog_deadline = self._clock() + self._config.commissioning_watchdog_s
 
+    def set_commissioning_speed(self, speed_deg_s: float) -> None:
+        if not math.isfinite(speed_deg_s) or not 0 < speed_deg_s <= 5.0:
+            raise ControlFault("Commissioning speed must be between 0 and 5 deg/s.")
+        self._commissioning_speed_deg_s = speed_deg_s
+
     def _commissioning_tick(self) -> None:
         if not self._commissioning or not self._commissioning_origins:
             return
@@ -447,7 +460,8 @@ class URBackend:
                     self._config.commissioning_joint,
                     self._jog_direction,
                     self._commissioning_origins[name],
-                    elapsed,
+                    self._commissioning_speed_deg_s,
+                    self._config.commissioning_watchdog_s,
                 )
             self._commissioning_last_step = now
         except BaseException as error:
@@ -554,7 +568,7 @@ class URBackend:
             state = "armed" if self._commissioning_origins else "not armed"
             lines.append(
                 f"commissioning {state}: {self._config.commissioning_joint}, "
-                f"{self._config.commissioning_speed_deg_s:g} deg/s, "
+                f"{self._commissioning_speed_deg_s:g} deg/s, "
                 f"+/-{self._config.commissioning_excursion_deg:g} deg"
             )
         return lines

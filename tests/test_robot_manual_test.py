@@ -116,6 +116,14 @@ class ManualArmTestSessionTests(unittest.TestCase):
         self.control.pause.assert_called_once()
         self.assertEqual(self.session.phase, "armed")
 
+    def test_speed_can_be_changed_after_control_is_prepared(self):
+        self.session.connect_monitor(self.settings)
+        self.session.prepare_control()
+
+        self.session.set_speed(0.3)
+
+        self.control.set_commissioning_speed.assert_called_once_with(0.3)
+
     def test_jog_is_impossible_before_explicit_arming(self):
         for prepare in (False, True):
             with self.subTest(prepared=prepare):

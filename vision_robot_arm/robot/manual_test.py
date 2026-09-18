@@ -120,6 +120,14 @@ class ManualArmTestSession:
         except (Exception, SystemExit) as error:
             self._fault(error)
 
+    def set_speed(self, speed_deg_s: float) -> None:
+        if self.phase not in ("prepared", "armed") or self._backend is None:
+            raise RuntimeError("Connect and prepare manual control before changing speed.")
+        try:
+            self._backend.set_commissioning_speed(speed_deg_s)
+        except (Exception, SystemExit) as error:
+            self._fault(error)
+
     def tick(self) -> RobotState | None:
         if self._backend is None or self.phase not in (
             "monitoring",

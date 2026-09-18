@@ -12,6 +12,7 @@ from vision_robot_arm.robot.ur_backend import (
     ControlFault,
     encode_gripper,
     encode_servoj,
+    encode_speedj,
     encode_stopj,
 )
 from vision_robot_arm.robot.ur_dashboard import DashboardStatus
@@ -116,6 +117,12 @@ def targets(
 
 
 class EncodeTests(unittest.TestCase):
+    def test_encodes_single_joint_speed_command(self) -> None:
+        self.assertEqual(
+            encode_speedj("shoulder", 0.5, 0.15),
+            b"speedj([0.00000, 0.00873, 0.00000, 0.00000, 0.00000, 0.00000], 0.17453, 0.150)\n",
+        )
+
     def test_servoj_uses_ur_joint_order_in_radians_with_home_for_held_joints(self) -> None:
         frame = encode_servoj({"shoulder": -45.0, "elbow": 90.0}, 0.05, 0.1, 300)
 
@@ -548,10 +555,12 @@ class CommissioningTests(unittest.TestCase):
         clock.now = 0.05
         backend.robot_state()
 
-        commands = socket.commands(b"servoj(")
+        commands = socket.commands(b"speedj(")
         self.assertEqual(len(commands), 1)
-        shoulder = math.degrees(float(commands[0].split(b"[")[1].split(b",")[1]))
-        self.assertAlmostEqual(shoulder, -39.9, delta=0.01)
+        shoulder_speed = math.degrees(
+            float(commands[0].split(b"[")[1].split(b",")[1])
+        )
+        self.assertAlmostEqual(shoulder_speed, 2.0, delta=0.01)
         self.assertEqual(socket.commands(b"movej("), [])
 
         clock.now = 0.16

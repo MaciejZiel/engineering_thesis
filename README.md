@@ -564,6 +564,11 @@ The laboratory robot address `10.20.3.20` is prefilled but remains editable. Pre
 **Escape** or **STOP AND DISCONNECT** to stop, disarm and close the connection.
 Change the IP, side, joint or limits only while disconnected.
 
+The speed field remains editable after manual control is prepared, including
+during a keyboard-held jog. Manual jogging uses a velocity command with gentle
+acceleration rather than a sequence of short position corrections; changing the
+speed therefore takes effect on the next 50 ms refresh without a position jump.
+
 Test the two arms in separate runs. If the displayed joint values, direction,
 stopping response or selected robot identity is wrong, disconnect and resolve
 that issue before testing another joint.
