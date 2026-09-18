@@ -48,7 +48,6 @@ class ManualTestWindow:
         self.joint = tk.StringVar(value="shoulder")
         self.speed = tk.StringVar(value="0.5")
         self.excursion = tk.StringVar(value="0.5")
-        self.extended_confirmed = tk.BooleanVar(value=False)
         self.phase = tk.StringVar(value=PHASE_LABELS["disconnected"])
         self.hint = tk.StringVar(value=self.session.action_hint)
         self.detail = tk.StringVar(value="No robot connection.")
@@ -204,21 +203,6 @@ class ManualTestWindow:
         self._unit(grid, "± °", 4)
         self._controls.append(excursion)
 
-        confirmation = tk.Checkbutton(
-            grid,
-            text="Workspace clear · allow >5°/s or ±5° in NORMAL",
-            variable=self.extended_confirmed,
-            bg=SURFACE,
-            fg=MUTED,
-            activebackground=SURFACE,
-            activeforeground=TEXT,
-            selectcolor=SURFACE_RAISED,
-            anchor="w",
-            highlightthickness=0,
-            font=("Segoe UI", 8),
-        )
-        confirmation.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(10, 2))
-        self._controls.append(confirmation)
 
         actions = tk.Frame(parent, bg=SURFACE, padx=22, pady=22)
         actions.pack(fill="x")
@@ -382,7 +366,6 @@ class ManualTestWindow:
             joint=self.joint.get(),
             speed_deg_s=speed,
             excursion_deg=excursion,
-            allow_extended_normal=self.extended_confirmed.get(),
         )
 
     def _connect(self) -> None:

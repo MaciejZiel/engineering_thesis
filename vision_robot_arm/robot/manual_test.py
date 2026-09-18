@@ -16,10 +16,6 @@ from vision_robot_arm.robot.ur_backend import URBackend
 from vision_robot_arm.robot.ur_monitor import URMonitorBackend
 
 BackendFactory = Callable[[RobotConfig], object]
-NORMAL_MODE_MAX_SPEED_DEG_S = 5.0
-NORMAL_MODE_MAX_EXCURSION_DEG = 5.0
-
-
 @dataclass(frozen=True)
 class ManualTestSettings:
     host: str
@@ -27,7 +23,6 @@ class ManualTestSettings:
     joint: str = "shoulder"
     speed_deg_s: float = 1.0
     excursion_deg: float = 1.0
-    allow_extended_normal: bool = False
 
     def config(self, operation: str) -> RobotConfig:
         host = self.host.strip()
@@ -56,15 +51,6 @@ class ManualTestSettings:
             config.validate()
         except SystemExit as error:
             raise ValueError(str(error)) from error
-        extended = (
-            self.speed_deg_s > NORMAL_MODE_MAX_SPEED_DEG_S
-            or self.excursion_deg > NORMAL_MODE_MAX_EXCURSION_DEG
-        )
-        if extended and not self.allow_extended_normal:
-            raise ValueError(
-                "Extended motion in NORMAL requires confirming that the robot "
-                "workspace is clear."
-            )
         return config
 
 

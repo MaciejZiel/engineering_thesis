@@ -560,10 +560,8 @@ Only then can the `-` or `+` button be held to jog the selected joint. Releasing
 the button sends `stopj` immediately; the existing 150 ms watchdog remains
 active. The application accepts at most 30 deg/s and +/-80 degrees from the
 captured origin, with first-connection defaults of 0.5 deg/s and +/-0.5 degree.
-Any value above 5 deg/s or +/-5 degrees requires the standalone tester's
-explicit **Workspace clear** confirmation. This acknowledgement permits the
-bounded test in NORMAL or REDUCED; the UR controller's configured safety limits
-remain authoritative.
+The complete configured range is available in both NORMAL and REDUCED. The UR
+controller's configured safety limits remain authoritative.
 The laboratory robot address `10.20.3.20` is prefilled but remains editable. Press
 **Escape** or **STOP AND DISCONNECT** to stop, disarm and close the connection.
 Change the IP, side, joint or limits only while disconnected.
