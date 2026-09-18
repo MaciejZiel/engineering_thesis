@@ -8,6 +8,7 @@ const surface = '#9aa6ae';
 const toScene = (p:number[], mirror=false) => new THREE.Vector3(p[0] * (mirror ? -1 : 1), p[2], -p[1]);
 
 export default function Scene({state,view,grid,targets,body,reset}:Props) {
+  const poseSignature=JSON.stringify([state?.arms,state?.body_m,state?.mirrored]);
   const element = useRef<HTMLDivElement>(null);
   const engine = useRef<{root:THREE.Group; camera:THREE.PerspectiveCamera; controls:OrbitControls; grid:THREE.GridHelper} | null>(null);
   const [error,setError] = useState('');
@@ -63,7 +64,7 @@ export default function Scene({state,view,grid,targets,body,reset}:Props) {
       }
       if(points[0]?.[3]>.5)ball(at(0),.07,'#8fbdab');
     }
-  },[state?.sequence,targets,body]);
+  },[poseSignature,targets,body]);
   return <div ref={element} className="three-scene">{error&&<div className="scene-error" role="alert">{error}</div>}</div>;
 }
 
