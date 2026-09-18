@@ -560,8 +560,8 @@ field. Configure any combination of the six axes, then hold **HOLD TO MOVE
 SELECTED JOINTS** or Space. All selected velocities are sent together in one
 `speedj` vector. Releasing the global dead-man sends `stopj` immediately; the
 150 ms watchdog remains active. The application accepts at most 30 deg/s per
-joint and +/-80 degrees from the captured origin, with first-connection defaults
-of 0.5 deg/s per joint and +/-5 degrees.
+joint and +/-80 degrees from the captured origin. All six joint speeds default
+to 30 deg/s and the shared excursion defaults to +/-80 degrees.
 The complete configured range is available in both NORMAL and REDUCED. The UR
 controller's configured safety limits remain authoritative.
 The laboratory robot address `10.20.3.20` is prefilled but remains editable. Press
@@ -596,15 +596,15 @@ workspace, select a low pendant speed slider and run:
 python main.py --robot-backend ur --robot-operation commissioning `
   --robot-right-host 192.168.1.10 `
   --robot-commissioning-joint shoulder `
-  --robot-commissioning-speed 2 `
-  --robot-commissioning-excursion 2
+  --robot-commissioning-speed 30 `
+  --robot-commissioning-excursion 80
 ```
 
 Press **H** once to connect and a second time to capture the stationary current
 pose. Neither action commands motion. Then hold the on-screen `−`/`+` button or
 the **[**/**]** key to jog. Releasing it stops refresh; a 150 ms watchdog sends
-`stopj`. The default is limited to 2 deg/s and ±2 degrees from the captured
-origin. Hard validation prevents commissioning above 5 deg/s or ±5 degrees and
+`stopj`. The default is 30 deg/s and ±80 degrees from the captured origin.
+Hard validation prevents commissioning above 30 deg/s or ±80 degrees and
 prevents specifying two robot hosts. Press **P**, **H**, or **Stop motion** to
 disarm commissioning.
 

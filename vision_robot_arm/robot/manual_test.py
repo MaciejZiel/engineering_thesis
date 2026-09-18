@@ -21,8 +21,8 @@ class ManualTestSettings:
     host: str
     side: str = "right"
     joint: str = "shoulder"
-    speed_deg_s: float = 1.0
-    excursion_deg: float = 1.0
+    speed_deg_s: float = 30.0
+    excursion_deg: float = 80.0
 
     def config(self, operation: str) -> RobotConfig:
         host = self.host.strip()

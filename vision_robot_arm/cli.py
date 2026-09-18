@@ -279,14 +279,14 @@ def build_parser() -> argparse.ArgumentParser:
     robot.add_argument(
         "--robot-commissioning-speed",
         type=float,
-        default=2.0,
-        help=f"Commissioning speed in deg/s, at most {COMMISSIONING_MAX_SPEED_DEG_S:g}. Default: 2.",
+        default=30.0,
+        help=f"Commissioning speed in deg/s, at most {COMMISSIONING_MAX_SPEED_DEG_S:g}. Default: 30.",
     )
     robot.add_argument(
         "--robot-commissioning-excursion",
         type=float,
-        default=2.0,
-        help=f"Maximum offset from captured position in degrees, at most {COMMISSIONING_MAX_EXCURSION_DEG:g}. Default: 2.",
+        default=80.0,
+        help=f"Maximum offset from captured position in degrees, at most {COMMISSIONING_MAX_EXCURSION_DEG:g}. Default: 80.",
     )
     robot.add_argument(
         "--robot-commissioning-watchdog",

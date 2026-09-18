@@ -91,8 +91,8 @@ class RobotConfig:
     send_interval: float = 0.05
     max_speed_deg_s: float = 60.0
     commissioning_joint: str = JOINT_SHOULDER
-    commissioning_speed_deg_s: float = 2.0
-    commissioning_excursion_deg: float = 2.0
+    commissioning_speed_deg_s: float = 30.0
+    commissioning_excursion_deg: float = 80.0
     commissioning_watchdog_s: float = 0.15
     commissioning_require_reduced: bool = True
     joint_deadband_deg: float = 1.5

@@ -32,12 +32,12 @@ class ManualTestWindow:
         self.root = root
         self.session = ManualArmTestSession()
         self.host, self.side = tk.StringVar(value=host), tk.StringVar(value=side)
-        self.excursion = tk.StringVar(value="5.0")
+        self.excursion = tk.StringVar(value="80.0")
         self.phase = tk.StringVar(value=PHASE_LABELS["disconnected"])
         self.hint = tk.StringVar(value=self.session.action_hint)
         self.detail = tk.StringVar(value="Connect read-only to inspect the controller.")
         self.joint_values = {name: tk.StringVar(value="—") for name in JOINT_NAMES}
-        self.joint_speeds = {name: tk.StringVar(value="0.5") for name in JOINT_NAMES}
+        self.joint_speeds = {name: tk.StringVar(value="30.0") for name in JOINT_NAMES}
         self.joint_directions = {name: 0 for name in JOINT_NAMES}
         self.direction_buttons = {}
         self.speed_controls, self.locked_controls = [], []
