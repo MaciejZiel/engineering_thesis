@@ -22,11 +22,17 @@ UR7E_DH = (
 )
 
 POSITION_JOINTS = ("base", "shoulder", "elbow")
+# Software limits, tighter than the UR7e's +/-360 hardware range, chosen so the
+# solver keeps to the half of the workspace a table-mounted arm can work in.
 DEFAULT_IK_LIMITS = {
     "base": (-180.0, 180.0),
     "shoulder": (-180.0, 0.0),
     "elbow": (-160.0, 160.0),
 }
+# A real cell has a safety plane at the table. Checking the joint origins is
+# enough for a horizontal plane: a straight link between two points above the
+# table is a convex combination of them, so it cannot dip below.
+FLOOR_Z_M = 0.0
 
 
 def ur7e_joint_points(
@@ -43,6 +49,17 @@ def ur7e_joint_points(
             (point[0] + base[0], point[1] + base[1], point[2] + base[2])
         )
     return tuple(points)
+
+
+def lowest_link_point(joints_deg: dict[str, float], base: Point3) -> float:
+    """Height of the lowest point on the arm."""
+    return min(point[2] for point in ur7e_joint_points(joints_deg, base))
+
+
+def clears_floor(
+    joints_deg: dict[str, float], base: Point3, clearance_m: float = 0.0
+) -> bool:
+    return lowest_link_point(joints_deg, base) >= FLOOR_Z_M + clearance_m - 1e-9
 
 
 def solve_position_ik(
@@ -69,7 +86,9 @@ def solve_position_ik(
         current = np.asarray(ur7e_joint_points(joints, base)[-1], dtype=float)
         error = target_vector - current
         if float(np.linalg.norm(error)) <= tolerance_m:
-            return {name: float(value) for name, value in joints.items()}
+            solution = {name: float(value) for name, value in joints.items()}
+            # Hold the previous pose rather than show one that goes through the table.
+            return solution if clears_floor(solution, base) else None
 
         jacobian_columns = []
         epsilon_deg = 0.1
@@ -96,9 +115,10 @@ def solve_position_ik(
             joints[name] = _clamp(joints[name] + float(delta), minimum, maximum)
 
     endpoint = ur7e_joint_points(joints, base)[-1]
-    if math.dist(endpoint, target) <= tolerance_m:
-        return {name: float(value) for name, value in joints.items()}
-    return None
+    if math.dist(endpoint, target) > tolerance_m:
+        return None
+    solution = {name: float(value) for name, value in joints.items()}
+    return solution if clears_floor(solution, base) else None
 
 
 def _identity() -> tuple[tuple[float, ...], ...]:

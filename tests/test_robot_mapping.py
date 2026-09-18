@@ -250,7 +250,9 @@ class RobotConfigTests(unittest.TestCase):
         self.assertFalse(config.enabled)
         self.assertTrue(RobotConfig(backend="sim").enabled)
         self.assertEqual(config.limit_for("elbow"), JointLimit(-160.0, 160.0))
-        self.assertEqual(config.limit_for("base"), JointLimit(-360.0, 360.0))
+        # The base is held to the band the solver works in, not the
+        # hardware range, so the twin cannot show a pose never commanded.
+        self.assertEqual(config.limit_for("base"), JointLimit(-180.0, 180.0))
         self.assertEqual(config.home_for("wrist_1"), -90.0)
         self.assertEqual(config.hosts, {})
         self.assertEqual(RobotConfig(right_host="10.0.0.2").hosts, {"right": "10.0.0.2"})

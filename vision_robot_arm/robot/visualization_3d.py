@@ -69,6 +69,10 @@ GRID_MAJOR_EVERY = 2
 # Long enough to read at preview size, short enough not to reach the other base.
 BASE_TICK_M = 0.20
 BASE_TICK_Z = 0.02
+# Widths of the four drawn links, from the base column out to the tool.
+LINK_WIDTHS = (7.5, 6.0, 4.8, 3.2)
+# Radii of the shoulder, elbow, wrist and tool markers.
+JOINT_RADII = (5.6, 5.0, 3.6, 2.8)
 
 # Two arms with nothing between them read as sticks floating in the air.
 TORSO_LINKS = (
@@ -308,7 +312,9 @@ def _append_grid(segments: list[Segment3D]) -> None:
 def _append_robots(
     segments: list[Segment3D], state: RobotState | None, scale: float
 ) -> None:
-    link = max(3, round(5 * scale))
+    # A UR7e tapers: a stout column at the base, a thick upper arm, a slimmer
+    # forearm, a slim tool. One uniform width made it read as a stick figure.
+    widths = [max(3, round(width * scale)) for width in LINK_WIDTHS]
     for side, x, color in (
         (ARM_LEFT, -BASE_SEPARATION_M / 2, LEFT_ARM),
         (ARM_RIGHT, BASE_SEPARATION_M / 2, RIGHT_ARM),
@@ -328,10 +334,8 @@ def _append_robots(
         # The long links carry the pose; the tool is one short stub, not the
         # three near-coincident wrist frames that used to knot up at this size.
         segments.extend(
-            Segment3D(a, b, color, link) for a, b in zip(outline[:-1], outline[1:-1])
-        )
-        segments.append(
-            Segment3D(outline[-2], outline[-1], color, max(2, round(3 * scale)))
+            Segment3D(a, b, color, width)
+            for (a, b), width in zip(zip(outline, outline[1:]), widths)
         )
 
 
@@ -549,7 +553,8 @@ def _draw_base_heading(
 def _draw_joint_markers(
     cv2: Any, canvas: Any, project: Any, state: RobotState | None, scale: float
 ) -> None:
-    radius = max(3, round(5 * scale))
+    """A UR7e wears its joints on the outside, and the big ones are unmistakable."""
+    radii = [max(2, round(radius * scale)) for radius in JOINT_RADII]
     for side, x, color in (
         (ARM_LEFT, -BASE_SEPARATION_M / 2, LEFT_ARM),
         (ARM_RIGHT, BASE_SEPARATION_M / 2, RIGHT_ARM),
@@ -558,7 +563,7 @@ def _draw_joint_markers(
         points = _arm_outline(
             ur7e_joint_points(arm.joints if arm is not None else UR_HOME_DEG, (x, 0, 0))
         )
-        for point in points[1:]:
+        for point, radius in zip(points[1:], radii):
             projected = project(point)
             if projected is not None:
                 cv2.circle(canvas, projected[:2], radius, color, -1, cv2.LINE_AA)

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import math
 
 from vision_robot_arm.robot.targets import (
+    JOINT_BASE,
     JOINT_ELBOW,
     JOINT_NAMES,
     JOINT_SHOULDER,
@@ -43,6 +44,9 @@ class JointLimit:
 
 
 UR7E_JOINT_RANGE = JointLimit(-360.0, 360.0)
+# The solver works within this; the simulation clamps to the same band so a
+# twin can never show a pose the controller would never be asked for.
+UR7E_BASE_RANGE = JointLimit(-180.0, 180.0)
 UR7E_ELBOW_RANGE = JointLimit(-160.0, 160.0)
 
 
@@ -127,6 +131,8 @@ class RobotConfig:
             return mapping.limit
         if joint == JOINT_ELBOW:
             return UR7E_ELBOW_RANGE
+        if joint == JOINT_BASE:
+            return UR7E_BASE_RANGE
         return UR7E_JOINT_RANGE
 
     def home_for(self, joint: str) -> float:

@@ -179,8 +179,10 @@ two 3D views side by side, `3D workspace` for the cobots and `Body tracking`
 for the operator, with the session panel underneath.
 
 The workspace panel is split into a plan and an elevation, labelled `TOP` and
-`FRONT`. A pale tick on the floor at each base shows which way that base is
-turned: base rotation is about the vertical axis, so it barely shows in the
+`FRONT`. Links are drawn with UR7e proportions, a stout column at the base
+tapering to a slim tool, because one uniform width read as a stick figure
+rather than a robot. A pale tick on the floor at each base shows which way that
+base is turned: base rotation is about the vertical axis, so it barely shows in the
 elevation, and when the upper arm stands above its own base the links are
 identical whatever the base angle. The status line reports the base too. A single perspective view cannot answer both how far an arm reaches
 across the table and how high it holds the tool, because depth and height
@@ -193,6 +195,19 @@ left each of them a letterboxed strip, so they share a row instead.
 Both 3D views are mirrored whenever the camera image is, so the hand you watch
 yourself raise belongs to the robot on that same side of the screen. Without
 that, raising your right hand moved the robot drawn on the opposite side.
+
+### Joint limits
+
+The solver works inside software limits tighter than the UR7e's ±360° hardware
+range: base ±180°, shoulder −180°…0°, elbow ±160°. The simulated twin clamps to
+the same band, so it can never show a pose the controller would not be asked
+for, and speed is capped by `--robot-max-speed` well under the 180°/s hardware
+limit.
+
+A solution that would put any part of the arm below the table is refused and
+the arm holds its previous pose, the way a safety plane works in a real cell.
+Checking the joint origins is enough for a horizontal plane: a straight link
+between two points above the table cannot dip below them.
 
 ### Skeleton calibration
 
