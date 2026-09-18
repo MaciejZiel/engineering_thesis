@@ -32,6 +32,7 @@ class ManualTestSettingsTests(unittest.TestCase):
         self.assertEqual(config.operation, OPERATION_COMMISSIONING)
         self.assertEqual(config.commissioning_speed_deg_s, 0.5)
         self.assertEqual(config.commissioning_excursion_deg, 1.0)
+        self.assertFalse(config.commissioning_require_reduced)
         self.assertTrue(config.feedback)
         self.assertTrue(config.preflight)
 

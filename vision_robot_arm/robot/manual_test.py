@@ -42,6 +42,10 @@ class ManualTestSettings:
             commissioning_speed_deg_s=self.speed_deg_s,
             commissioning_excursion_deg=self.excursion_deg,
             commissioning_watchdog_s=0.15,
+            # The standalone laboratory jogger may run in the controller's
+            # NORMAL state. Its one-joint, low-speed and bounded-motion guards
+            # remain independent from the safety-mode check used elsewhere.
+            commissioning_require_reduced=False,
             send_interval=0.05,
             **kwargs,
         )

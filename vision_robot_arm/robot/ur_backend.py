@@ -330,7 +330,13 @@ class URBackend:
         if require_feedback and not config.feedback:
             raise ControlFault("Hardware control requires RTDE feedback.")
         if config.preflight:
-            _preflight(config, status_query, require_reduced=self._commissioning)
+            _preflight(
+                config,
+                status_query,
+                require_reduced=(
+                    self._commissioning and config.commissioning_require_reduced
+                ),
+            )
         factory = rtde_factory if config.feedback else None
         self._arms: dict[str, URArm] = {}
         try:
@@ -354,7 +360,11 @@ class URBackend:
         if self._fault is not None:
             raise ControlFault(self._fault)
         try:
-            _preflight(self._config, self._status_query, require_reduced=True)
+            _preflight(
+                self._config,
+                self._status_query,
+                require_reduced=self._config.commissioning_require_reduced,
+            )
             origins = {}
             for name, arm in self._arms.items():
                 arm.poll_feedback()
@@ -449,9 +459,12 @@ class URBackend:
         self, arm: URArm, require_stationary: bool = False
     ) -> None:
         arm.check_control_health()
-        if arm._feedback.get("safety_status") != 2:
+        allowed_safety_states = (
+            (2,) if self._config.commissioning_require_reduced else (1, 2)
+        )
+        if arm._feedback.get("safety_status") not in allowed_safety_states:
             raise ControlFault(
-                f"{arm.name}: commissioning requires controller safety status REDUCED."
+                f"{arm.name}: controller safety status blocks commissioning."
             )
         speeds = arm.feedback_speeds_deg_s
         if speeds is None:

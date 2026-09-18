@@ -94,6 +94,7 @@ class RobotConfig:
     commissioning_speed_deg_s: float = 2.0
     commissioning_excursion_deg: float = 2.0
     commissioning_watchdog_s: float = 0.15
+    commissioning_require_reduced: bool = True
     joint_deadband_deg: float = 1.5
     shoulder: JointMapping = DEFAULT_SHOULDER_MAPPING
     elbow: JointMapping = DEFAULT_ELBOW_MAPPING

@@ -549,8 +549,10 @@ actions:
 
 1. **Connect read-only** opens Dashboard and RTDE monitoring without a motion
    command.
-2. **Prepare manual control** verifies Remote Control and **REDUCED** safety
-   status, then opens the commissioning channel without moving the arm.
+2. **Prepare manual control** verifies Remote Control and a motion-capable
+   **NORMAL** or **REDUCED** safety status, then opens the commissioning channel
+   without moving the arm. This NORMAL-mode exception exists only in this
+   low-speed standalone tester; regular commissioning still requires REDUCED.
 3. **Capture current pose & arm** requires fresh, stationary RTDE feedback and
    adopts that position as the limited test origin without moving the arm.
 
