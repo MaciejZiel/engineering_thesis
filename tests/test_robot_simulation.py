@@ -114,15 +114,16 @@ class SimulationBackendTests(unittest.TestCase):
 
         lines = backend.status_lines()
 
+        # All six joints are reported now that wrist 2 and wrist 3 can move.
         self.assertEqual(
             lines[0],
             "sim R: B    0.0->   0.0 S  -90.0-> -30.0 E    0.0->   0.0 "
-            "W1  -90.0-> -90.0 grip open",
+            "W1  -90.0-> -90.0 W2    0.0->   0.0 W3    0.0->   0.0 grip open",
         )
         self.assertEqual(
             lines[1],
             "sim L: B    0.0->   0.0 S  -90.0-> -90.0 E    0.0->   0.0 "
-            "W1  -90.0-> -90.0 grip open",
+            "W1  -90.0-> -90.0 W2    0.0->   0.0 W3    0.0->   0.0 grip open",
         )
         self.assertEqual(lines[2], "sim lift_mode=off")
 

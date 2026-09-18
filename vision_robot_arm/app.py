@@ -22,6 +22,7 @@ from vision_robot_arm.vision.skeleton import (
     save_skeleton,
 )
 from vision_robot_arm.vision.arm_pose import arm_elevation_angles
+from vision_robot_arm.vision.arm_rotation import AZIMUTH_SUFFIX, ArmRotationTracker
 from vision_robot_arm.vision.dashboard import (
     ACTION_CALIBRATE,
     ACTION_CONTROL,
@@ -96,6 +97,7 @@ def run_app(config: AppConfig, *, web=None) -> int:
     cv2 = deps.cv2
     planar = config.robot.tracking_space == "2d"
     planar_tracker = PlanarArmTracker()
+    rotation_tracker = ArmRotationTracker()
     indices = build_landmark_indices(deps.vision)
     names = build_landmark_names(deps.vision)
 
@@ -185,8 +187,9 @@ def run_app(config: AppConfig, *, web=None) -> int:
         print(_source_started_message(config))
         print(
             "Keys: 1/2/3 console, c calibrate, b measure skeleton, r record, f fullscreen, "
-            "d details, Tab/Enter navigate, q/Esc quit."
+            "d details, ,/. follow interval, Tab/Enter navigate, q/Esc quit."
         )
+        follow_interval_s = config.robot.follow_interval_s
         if config.test_mode:
             print(
                 f"Test mode: joint angle labels and embedded robot simulation ({config.robot.backend})."
@@ -214,6 +217,7 @@ def run_app(config: AppConfig, *, web=None) -> int:
                 timestamp_offset_ms = last_timestamp_ms + wait_delay_ms
                 state_builder.reset_tracking()
                 planar_tracker.reset()
+                rotation_tracker.reset()
                 robot_controller.reset()
                 wrist_hold.reset()
                 gesture_filter.reset()
@@ -343,6 +347,27 @@ def run_app(config: AppConfig, *, web=None) -> int:
                 extra_angle_sources.update(
                     {name: "pose_world_3d" for name in elevation_angles}
                 )
+            if pose_landmarks and not planar and detection.world_landmarks is not None:
+                # Base, wrist 2 and wrist 3 come from here and only from here:
+                # the 2D space has nothing to say about rotation.
+                rotation_angles = rotation_tracker.measure(
+                    pose_landmarks,
+                    detection.world_landmarks,
+                    hand_world_by_side,
+                    indices,
+                    config.visibility_threshold,
+                )
+                extra_angles.update(rotation_angles)
+                extra_angle_sources.update(
+                    {
+                        name: (
+                            "pose_world_3d"
+                            if name.endswith(AZIMUTH_SUFFIX)
+                            else "hand_world_3d"
+                        )
+                        for name in rotation_angles
+                    }
+                )
             if planar and pose_landmarks:
                 extra_angles = planar_tracker.measure(
                     pose_landmarks, hands_by_side, indices,
@@ -434,6 +459,7 @@ def run_app(config: AppConfig, *, web=None) -> int:
                 if timestamp_ms - pose_missing_since_ms > config.robot.tracking_loss_grace_s * 1000:
                     state_builder.reset_tracking()
                     planar_tracker.reset()
+                    rotation_tracker.reset()
                     wrist_hold.reset()
                     gesture_filter.reset()
                     hand_smoothers.clear()
@@ -579,6 +605,17 @@ def run_app(config: AppConfig, *, web=None) -> int:
                 dashboard.toggle_fullscreen()
             if key == ord("v") or action == ACTION_VIEW:
                 dashboard.toggle_workspace_focus()
+            if key in (ord(","), ord(".")):
+                step = -0.25 if key == ord(",") else 0.25
+                follow_interval_s = min(10.0, max(0.0, round(follow_interval_s + step, 2)))
+                robot_controller.set_follow_interval(follow_interval_s)
+                preview_controller.set_follow_interval(follow_interval_s)
+                session_message = (
+                    f"Robot follows the pose once every {follow_interval_s:.2f} s, one movej per sample."
+                    if follow_interval_s > 0
+                    else "Robot follows the pose continuously (servoj stream)."
+                )
+                print(session_message)
             if (key == ord("c") or action == ACTION_CALIBRATE) and can_calibrate:
                 robot_controller.reset()
                 sides = tuple(config.robot.hosts) or ("left", "right")

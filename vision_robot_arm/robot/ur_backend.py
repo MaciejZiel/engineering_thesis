@@ -16,6 +16,7 @@ from typing import Any, Callable
 
 from vision_robot_arm.robot.backend import Clock, TargetTracker
 from vision_robot_arm.robot.config import (
+    MAX_FOLLOW_INTERVAL_S,
     COMMISSIONING_MAX_SPEED_DEG_S,
     GRIPPER_ROBOTIQ,
     OPERATION_COMMISSIONING,
@@ -23,10 +24,12 @@ from vision_robot_arm.robot.config import (
     OPERATION_TRACKING,
     RobotConfig,
 )
+from vision_robot_arm.robot.robotiq_socket import GripperError, RobotiqSocketGripper
 from vision_robot_arm.robot.simulation import SimulatedArm
 from vision_robot_arm.robot.targets import (
     GRIPPER_CLOSE,
     GRIPPER_OPEN,
+    JOINT_BASE,
     JOINT_NAMES,
     MAPPED_JOINTS,
     REPORTED_JOINTS,
@@ -45,11 +48,19 @@ STOP_DECELERATION_DEG_S2 = 120.0
 MAX_CATCHUP_INTERVALS = 3.0
 FEEDBACK_MAX_AGE_S = 0.5
 COMMISSIONING_STATIONARY_DEG_S = 0.5
-JOINT_SHORT_NAMES = {"base": "B", "shoulder": "S", "elbow": "E", "wrist_1": "W1"}
+JOINT_SHORT_NAMES = {
+    "base": "B", "shoulder": "S", "elbow": "E",
+    "wrist_1": "W1", "wrist_2": "W2", "wrist_3": "W3",
+}
 
 Connector = Callable[[str, int], Any]
 RtdeFactory = Callable[[str, int], RtdeClient | None]
 StatusQuery = Callable[[str, int], Any]
+GripperFactory = Callable[[str], RobotiqSocketGripper]
+# After a gripper socket error, wait this long before trying to reconnect. Each
+# attempt can block for one reply timeout, so a dead daemon must cost the frame
+# loop one short stall every ten seconds, not one per frame.
+GRIPPER_RETRY_S = 10.0
 
 
 class ControlFault(RuntimeError):
@@ -104,34 +115,8 @@ def encode_gripper(closed: bool, tool_output: int = 0) -> bytes:
     return f"set_tool_digital_out({tool_output}, {value})\n".encode("ascii")
 
 
-def encode_robotiq_gripper(
-    closed: bool, speed_percent: int = 80, force_percent: int = 50
-) -> bytes:
-    """Build a non-blocking Robotiq URCap command for the controller's local daemon."""
-    position = 255 if closed else 0
-    speed = round(max(0, min(100, speed_percent)) * 2.55)
-    force = round(max(0, min(100, force_percent)) * 2.55)
-    commands = (("ACT", 1), ("SPE", speed), ("FOR", force), ("POS", position), ("GTO", 1))
-    lines = [
-        "def motion_twin_gripper():",
-        '  if (socket_open("127.0.0.1", 63352, "motion_twin_gripper")):',
-    ]
-    for variable, value in commands:
-        lines.extend(
-            (
-                f'    socket_set_var("{variable}", {value}, "motion_twin_gripper")',
-                '    socket_read_byte_list(3, "motion_twin_gripper", 0.2)',
-            )
-        )
-    lines.extend(
-        (
-            '    socket_close("motion_twin_gripper")',
-            "  end",
-            "end",
-            "",
-        )
-    )
-    return "\n".join(lines).encode("ascii")
+def default_gripper_factory(host: str) -> RobotiqSocketGripper:
+    return RobotiqSocketGripper(host)
 
 
 def default_connector(host: str, port: int) -> Any:
@@ -158,10 +143,15 @@ class URArm:
         connector: Connector,
         rtde_factory: RtdeFactory | None,
         clock: Clock,
+        gripper_factory: GripperFactory | None = None,
     ) -> None:
         self.name = name
         self.host = host
         self.port = config.ur_port
+        self._gripper_factory = gripper_factory
+        self._robotiq: RobotiqSocketGripper | None = None
+        self._gripper_error: str | None = None
+        self._gripper_retry_at = 0.0
         self._config = config
         self._clock = clock
         try:
@@ -293,19 +283,71 @@ class URArm:
                 self._config.servo_gain,
             )
         )
-        if targets.gripper is not None and targets.gripper != self._gripper:
-            closed = targets.gripper == GRIPPER_CLOSE
-            command = (
-                encode_robotiq_gripper(
-                    closed,
-                    self._config.gripper_speed_percent,
-                    self._config.gripper_force_percent,
-                )
-                if self._config.gripper_driver == GRIPPER_ROBOTIQ
-                else encode_gripper(closed, self._config.tool_output)
+        self.send_gripper(targets.gripper)
+
+    def connect_gripper(self) -> None:
+        """Open the Robotiq socket if that driver is selected.
+
+        The gripper is optional by design: one that does not answer is reported
+        in the status line and retried every few seconds, and never keeps the
+        arm from arming or moving.
+        """
+        if self._config.gripper_driver != GRIPPER_ROBOTIQ or self._gripper_factory is None:
+            return
+        if self._robotiq is not None or self._clock() < self._gripper_retry_at:
+            return
+        gripper = self._gripper_factory(self.host)
+        try:
+            gripper.connect()
+        except GripperError as error:
+            gripper.close()
+            self._gripper_error = str(error)
+            self._gripper_retry_at = self._clock() + GRIPPER_RETRY_S
+            return
+        self._robotiq = gripper
+        self._gripper_error = None
+
+    @property
+    def gripper_state(self) -> str | None:
+        return self._gripper
+
+    @property
+    def gripper_error(self) -> str | None:
+        return self._gripper_error
+
+    def send_gripper(self, gripper: str | None) -> None:
+        """Command the gripper only when its requested state actually changes.
+
+        The Robotiq driver talks to the URCap's own socket and never touches the
+        motion program. The digital-output fallback is a URScript line and does
+        replace whatever program the controller is running.
+        """
+        if gripper is None or gripper == self._gripper:
+            return
+        closed = gripper == GRIPPER_CLOSE
+        if self._config.gripper_driver != GRIPPER_ROBOTIQ:
+            self._send(encode_gripper(closed, self._config.tool_output))
+            self._gripper = gripper
+            return
+        if self._robotiq is None:
+            self.connect_gripper()
+            if self._robotiq is None:
+                return
+        try:
+            self._robotiq.command(
+                closed,
+                self._config.gripper_speed_percent,
+                self._config.gripper_force_percent,
             )
-            self._send(command)
-            self._gripper = targets.gripper
+        except GripperError as error:
+            # A gripper hiccup must be visible on screen, not fatal for the arm.
+            self._gripper_error = str(error)
+            self._robotiq.close()
+            self._robotiq = None
+            self._gripper_retry_at = self._clock() + GRIPPER_RETRY_S
+            return
+        self._gripper_error = None
+        self._gripper = gripper
 
     def _step_tracking_setpoints(self, elapsed_s: float, speed_limits=None) -> None:
         """Ramp velocity linearly and brake smoothly before each target."""
@@ -372,7 +414,10 @@ class URArm:
             for joint in REPORTED_JOINTS
             if joint in joints
         )
-        return f"ur {self.name[0].upper()} {self.host} {health} {detail} grip {self._gripper or 'n/a'}"
+        grip = self._gripper or "n/a"
+        if self._gripper_error:
+            grip += f" (gripper error: {self._gripper_error})"
+        return f"ur {self.name[0].upper()} {self.host} {health} {detail} grip {grip}"
 
     def close(self) -> None:
         """Shutdown must always finish: a dead socket cannot stop the other arm."""
@@ -381,6 +426,9 @@ class URArm:
         except OSError:
             pass
         finally:
+            if self._robotiq is not None:
+                self._robotiq.close()
+                self._robotiq = None
             self._release()
 
     def _release(self) -> None:
@@ -444,6 +492,7 @@ class URBackend:
         rtde_factory: RtdeFactory | None = default_rtde_factory,
         status_query: StatusQuery = query_status,
         require_feedback: bool = False,
+        gripper_factory: GripperFactory = default_gripper_factory,
     ) -> None:
         self._config = config
         self._clock = clock
@@ -470,7 +519,10 @@ class URBackend:
         self._arms: dict[str, URArm] = {}
         try:
             for name, host in config.hosts.items():
-                self._arms[name] = URArm(name, host, config, connector, factory, clock)
+                self._arms[name] = URArm(
+                    name, host, config, connector, factory, clock,
+                    gripper_factory=gripper_factory,
+                )
                 if require_feedback and self._arms[name]._rtde is None:
                     raise ControlFault(f"{name}: the interactive hardware session requires RTDE feedback.")
         except BaseException:
@@ -492,6 +544,8 @@ class URBackend:
         self._jog_deadline = 0.0
         self._commissioning_last_step: float | None = None
         self._commissioning_speed_deg_s = config.commissioning_speed_deg_s
+        self._follow_interval_s = config.follow_interval_s
+        self._last_follow_at: float | None = None
         if config.telemetry_log_path:
             path = Path(config.telemetry_log_path)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -549,6 +603,10 @@ class URBackend:
                     raise ControlFault(
                         f"{arm.name}: robot must be stationary before tracking is armed."
                     )
+            # Best effort: open the gripper socket now so a fist later does not
+            # wait for a connection. A silent gripper is shown, not fatal.
+            for arm in arms:
+                arm.connect_gripper()
             # Validate every arm first, then atomically adopt both current poses.
             self._tracking_origins = {
                 arm.name: arm.capture_current_as_setpoint() for arm in arms
@@ -820,6 +878,7 @@ class URBackend:
         self._tracker = TargetTracker()
         self._last_send_at = None
         self._next_send_at = 0.0
+        self._last_follow_at = None
         try:
             for arm in self._arms.values():
                 arm.pause()
@@ -836,6 +895,9 @@ class URBackend:
             return
         self._tracker.update(targets)
         now = self._clock()
+        if self._follow_interval_s > 0:
+            self._follow_step(now)
+            return
         if now < self._next_send_at:
             return
         elapsed = self._catch_up_interval(now)
@@ -864,6 +926,79 @@ class URBackend:
             self.close()
             raise
 
+    def set_follow_interval(self, seconds: float) -> None:
+        """Switch between streaming and sampled following while running."""
+        if not math.isfinite(seconds) or not 0 <= seconds <= MAX_FOLLOW_INTERVAL_S:
+            raise ControlFault(
+                f"Follow interval must be between 0 and {MAX_FOLLOW_INTERVAL_S:g} seconds."
+            )
+        if seconds == self._follow_interval_s:
+            return
+        self._follow_interval_s = seconds
+        self._last_follow_at = None
+        # Re-seat every setpoint on the measured pose, so the other mode starts
+        # from where the arm really is rather than where the last one left it.
+        if self._arms and self._tracking_origins:
+            self.pause()
+
+    @property
+    def follow_interval_s(self) -> float:
+        return self._follow_interval_s
+
+    def _follow_step(self, now: float) -> None:
+        """Sample the pose every follow interval and send one movej per arm.
+
+        Between samples nothing is streamed; the controller executes the move it
+        was given. A sample is skipped while an arm is still travelling, because
+        a movej that replaces a running one stops the arm before restarting it.
+        After three intervals the wait ends regardless, so a noisy velocity
+        reading cannot freeze following for good. This is the variant that ran
+        on the physical arm without a fault; a streamed variant was tried and
+        withdrawn after the controller reported it could not follow the path.
+        """
+        accumulated = self._tracker.accumulated_targets()
+        if accumulated is None:
+            return
+        try:
+            for arm in self._arms.values():
+                sample = arm.poll_feedback()
+                if sample:
+                    self._log_robot_feedback(arm, sample, now)
+                arm.check_control_health()
+            # Gestures act the moment they are seen; they never wait for a
+            # sample, and over its own socket the gripper never disturbs motion.
+            for name, arm in self._arms.items():
+                before = arm.gripper_state
+                arm.send_gripper(accumulated.arm(name).gripper)
+                if arm.gripper_state != before:
+                    self._write_telemetry("gripper_command", arm=name, gripper=arm.gripper_state)
+            if self._last_follow_at is not None:
+                waited = now - self._last_follow_at
+                if waited < self._follow_interval_s:
+                    return
+                still_moving = any(
+                    speeds is not None
+                    and max(abs(value) for value in speeds.values()) > COMMISSIONING_STATIONARY_DEG_S
+                    for speeds in (arm.feedback_speeds_deg_s for arm in self._arms.values())
+                )
+                if still_moving and waited < 3.0 * self._follow_interval_s:
+                    return
+            for name, arm in self._arms.items():
+                raw = accumulated.arm(name)
+                bounded = self._bounded_tracking_targets(name, raw)
+                if bounded.joints:
+                    arm.move_joints(
+                        bounded.joints,
+                        self._config.max_speed_deg_s,
+                        self._config.tracking_acceleration_deg_s2,
+                    )
+                self._log_tracking_sample(name, raw, bounded, arm, now)
+            self._last_follow_at = now
+        except ControlFault as error:
+            self._fault = str(error)
+            self.close()
+            raise
+
     def _catch_up_interval(self, now: float) -> float:
         """Time credited to the ramp. A long pose gap must not buy one huge step."""
         if self._last_send_at is None:
@@ -876,12 +1011,18 @@ class URBackend:
         origin = self._tracking_origins.get(name)
         if origin is None:
             raise ControlFault(f"{name}: capture the tracking origin before sending targets.")
-        excursion = self._config.tracking_excursion_deg
-        bounded = {
-            joint: max(origin[joint] - excursion, min(origin[joint] + excursion, value))
-            for joint, value in targets.joints.items()
-            if joint in origin
-        }
+        bounded = {}
+        for joint, value in targets.joints.items():
+            if joint not in origin:
+                continue
+            # The base sweeps the whole arm across the table; it never gets the
+            # room the pitch joints are allowed.
+            excursion = (
+                self._config.base_excursion_deg
+                if joint == JOINT_BASE
+                else self._config.tracking_excursion_deg
+            )
+            bounded[joint] = max(origin[joint] - excursion, min(origin[joint] + excursion, value))
         return ArmTargets(
             joints=bounded,
             gripper=targets.gripper,
@@ -987,6 +1128,12 @@ class URBackend:
 
     def status_lines(self) -> list[str]:
         lines = [arm.status_line() for arm in self._arms.values()]
+        if not self._commissioning:
+            lines.append(
+                f"follow: one movej every {self._follow_interval_s:.2f} s  (, / . adjust)"
+                if self._follow_interval_s > 0
+                else f"follow: servoj stream every {self._config.send_interval * 1000:.0f} ms  (, / . adjust)"
+            )
         if self._commissioning:
             state = "armed" if self._commissioning_origins else "not armed"
             lines.append(

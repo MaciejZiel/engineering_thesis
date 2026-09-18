@@ -16,9 +16,15 @@ from vision_robot_arm.robot.config import (
     BACKEND_SIM,
     COMMISSIONING_MAX_EXCURSION_DEG,
     COMMISSIONING_MAX_SPEED_DEG_S,
+    DEFAULT_BASE_EXCURSION_DEG,
+    DEFAULT_BASE_MAPPING,
     DEFAULT_ELBOW_MAPPING,
     DEFAULT_SHOULDER_MAPPING,
+    DEFAULT_WRIST2_MAPPING,
+    DEFAULT_WRIST3_MAPPING,
     DEFAULT_WRIST_MAPPING,
+    MAX_BASE_EXCURSION_DEG,
+    MAX_FOLLOW_INTERVAL_S,
     UR7E_MAX_JOINT_SPEED_DEG_S,
     OPERATION_CHOICES,
     OPERATION_MONITOR,
@@ -464,6 +470,65 @@ def build_parser() -> argparse.ArgumentParser:
         metavar=("MIN", "MAX"),
         help="Allowed UR wrist 1 joint range in degrees. Default: -180 180.",
     )
+    robot.add_argument(
+        "--robot-base-range",
+        type=float,
+        nargs=2,
+        default=(DEFAULT_BASE_MAPPING.limit.minimum, DEFAULT_BASE_MAPPING.limit.maximum),
+        metavar=("MIN", "MAX"),
+        help="Allowed UR base joint range in degrees. Default: -180 180.",
+    )
+    robot.add_argument(
+        "--robot-wrist2-range",
+        type=float,
+        nargs=2,
+        default=(DEFAULT_WRIST2_MAPPING.limit.minimum, DEFAULT_WRIST2_MAPPING.limit.maximum),
+        metavar=("MIN", "MAX"),
+        help="Allowed UR wrist 2 joint range in degrees. Default: -360 360.",
+    )
+    robot.add_argument(
+        "--robot-wrist3-range",
+        type=float,
+        nargs=2,
+        default=(DEFAULT_WRIST3_MAPPING.limit.minimum, DEFAULT_WRIST3_MAPPING.limit.maximum),
+        metavar=("MIN", "MAX"),
+        help="Allowed UR wrist 3 joint range in degrees. Default: -360 360.",
+    )
+    robot.add_argument(
+        "--robot-base-excursion",
+        type=float,
+        default=DEFAULT_BASE_EXCURSION_DEG,
+        help=(
+            "How far the base may turn from the pose captured when control was "
+            f"enabled, in degrees, at most {MAX_BASE_EXCURSION_DEG:g}. The base "
+            "sweeps the whole arm, so this is separate from --robot-tracking-excursion. "
+            f"Default: {DEFAULT_BASE_EXCURSION_DEG:g}."
+        ),
+    )
+    robot.add_argument(
+        "--robot-rotation-signs",
+        type=int,
+        nargs=3,
+        choices=(-1, 1),
+        default=(1, 1, 1),
+        metavar=("BASE", "WRIST2", "WRIST3"),
+        help=(
+            "Direction of the base, wrist 2 and wrist 3 relative to the operator's "
+            "shoulder swing, hand deviation and forearm roll. Verify one joint at a "
+            "time in commissioning before trusting a sign. Default: 1 1 1."
+        ),
+    )
+    robot.add_argument(
+        "--robot-follow-interval",
+        type=float,
+        default=0.0,
+        help=(
+            "Seconds between the moments the robot follows the operator's pose. "
+            "0 streams servoj continuously; above 0 the pose is sampled that often "
+            f"and each sample is one movej. At most {MAX_FOLLOW_INTERVAL_S:g}. "
+            "Adjustable while running with , and . in 0.25 s steps. Default: 0."
+        ),
+    )
     return parser
 
 
@@ -512,6 +577,17 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         shoulder=_with_limit(DEFAULT_SHOULDER_MAPPING, args.robot_shoulder_range),
         elbow=_with_limit(DEFAULT_ELBOW_MAPPING, args.robot_elbow_range),
         wrist=_with_limit(DEFAULT_WRIST_MAPPING, args.robot_wrist_range),
+        base=_with_limit(
+            DEFAULT_BASE_MAPPING, args.robot_base_range, sign=args.robot_rotation_signs[0]
+        ),
+        wrist_2=_with_limit(
+            DEFAULT_WRIST2_MAPPING, args.robot_wrist2_range, sign=args.robot_rotation_signs[1]
+        ),
+        wrist_3=_with_limit(
+            DEFAULT_WRIST3_MAPPING, args.robot_wrist3_range, sign=args.robot_rotation_signs[2]
+        ),
+        base_excursion_deg=args.robot_base_excursion,
+        follow_interval_s=args.robot_follow_interval,
     )
     return AppConfig(
         camera=args.camera,
@@ -545,11 +621,13 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
     )
 
 
-def _with_limit(mapping: JointMapping, limits: tuple[float, float]) -> JointMapping:
+def _with_limit(
+    mapping: JointMapping, limits: tuple[float, float], sign: float | None = None
+) -> JointMapping:
     return JointMapping(
         source=mapping.source,
         offset_deg=mapping.offset_deg,
-        sign=mapping.sign,
+        sign=mapping.sign if sign is None else float(sign),
         limit=JointLimit(limits[0], limits[1]),
     )
 

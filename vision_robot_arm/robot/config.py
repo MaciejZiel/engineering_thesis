@@ -7,6 +7,8 @@ from vision_robot_arm.robot.targets import (
     JOINT_NAMES,
     JOINT_SHOULDER,
     JOINT_WRIST_1,
+    JOINT_WRIST_2,
+    JOINT_WRIST_3,
     UR_HOME_DEG,
 )
 
@@ -78,6 +80,27 @@ DEFAULT_ELBOW_MAPPING = JointMapping(
 DEFAULT_WRIST_MAPPING = JointMapping(
     source="wrist", offset_deg=180.0, sign=-1.0, limit=JointLimit(-180.0, 180.0)
 )
+# Rotation joints. Offsets are zero on purpose: the hardware session anchors
+# each of them to the pose the robot AND the operator held when control was
+# enabled, so only the change of angle ever reaches the controller. The signs
+# are anatomical guesses until verified one joint at a time on the cell.
+DEFAULT_BASE_MAPPING = JointMapping(
+    source="shoulder_azimuth", offset_deg=0.0, sign=1.0, limit=UR7E_BASE_RANGE
+)
+DEFAULT_WRIST2_MAPPING = JointMapping(
+    source="wrist_deviation", offset_deg=0.0, sign=1.0, limit=UR7E_JOINT_RANGE
+)
+DEFAULT_WRIST3_MAPPING = JointMapping(
+    source="forearm_roll", offset_deg=0.0, sign=1.0, limit=UR7E_JOINT_RANGE
+)
+# The base swings the whole arm. At 0.85 m reach, 20 degrees is already a
+# 0.3 m sweep of the tool, so it gets a ceiling of its own, far below the
+# excursion the pitch joints are allowed.
+DEFAULT_BASE_EXCURSION_DEG = 20.0
+MAX_BASE_EXCURSION_DEG = 90.0
+# How often the robot follows the operator. 0 streams servoj every send
+# interval; anything above samples the pose that often and sends one movej.
+MAX_FOLLOW_INTERVAL_S = 10.0
 
 
 @dataclass(frozen=True)
@@ -118,6 +141,11 @@ class RobotConfig:
     shoulder: JointMapping = DEFAULT_SHOULDER_MAPPING
     elbow: JointMapping = DEFAULT_ELBOW_MAPPING
     wrist: JointMapping = DEFAULT_WRIST_MAPPING
+    base: JointMapping = DEFAULT_BASE_MAPPING
+    wrist_2: JointMapping = DEFAULT_WRIST2_MAPPING
+    wrist_3: JointMapping = DEFAULT_WRIST3_MAPPING
+    base_excursion_deg: float = DEFAULT_BASE_EXCURSION_DEG
+    follow_interval_s: float = 0.0
 
     @property
     def enabled(self) -> bool:
@@ -139,6 +167,12 @@ class RobotConfig:
             return self.elbow
         if joint == JOINT_WRIST_1:
             return self.wrist
+        if joint == JOINT_BASE:
+            return self.base
+        if joint == JOINT_WRIST_2:
+            return self.wrist_2
+        if joint == JOINT_WRIST_3:
+            return self.wrist_3
         return None
 
     def limit_for(self, joint: str) -> JointLimit:
@@ -255,6 +289,16 @@ class RobotConfig:
                 raise SystemExit(f"{flag} must be an integer between 0 and 100")
         if self.servo_lookahead_s < 0.03 or self.servo_lookahead_s > 0.2:
             raise SystemExit("--robot-servo-lookahead must be between 0.03 and 0.2 seconds")
+        _validate_finite_number("--robot-base-excursion", self.base_excursion_deg)
+        if not 0 < self.base_excursion_deg <= MAX_BASE_EXCURSION_DEG:
+            raise SystemExit(
+                f"--robot-base-excursion must be between 0 and {MAX_BASE_EXCURSION_DEG:g} degrees"
+            )
+        _validate_finite_number("--robot-follow-interval", self.follow_interval_s)
+        if not 0 <= self.follow_interval_s <= MAX_FOLLOW_INTERVAL_S:
+            raise SystemExit(
+                f"--robot-follow-interval must be between 0 and {MAX_FOLLOW_INTERVAL_S:g} seconds"
+            )
         if self.backend == BACKEND_UR and not self.hosts:
             raise SystemExit(
                 "--robot-right-host and/or --robot-left-host is required with --robot-backend ur"
@@ -277,8 +321,14 @@ class RobotConfig:
             "shoulder": UR7E_JOINT_RANGE,
             "elbow": UR7E_ELBOW_RANGE,
             "wrist": UR7E_JOINT_RANGE,
+            "base": UR7E_JOINT_RANGE,
+            "wrist2": UR7E_JOINT_RANGE,
+            "wrist3": UR7E_JOINT_RANGE,
         }
-        for name, mapping in (("shoulder", self.shoulder), ("elbow", self.elbow), ("wrist", self.wrist)):
+        for name, mapping in (
+            ("shoulder", self.shoulder), ("elbow", self.elbow), ("wrist", self.wrist),
+            ("base", self.base), ("wrist2", self.wrist_2), ("wrist3", self.wrist_3),
+        ):
             for field, value in (
                 ("minimum", mapping.limit.minimum), ("maximum", mapping.limit.maximum),
                 ("offset", mapping.offset_deg), ("sign", mapping.sign),

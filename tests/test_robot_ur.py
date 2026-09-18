@@ -1,4 +1,5 @@
 import math
+import re
 import json
 import tempfile
 import unittest
@@ -14,12 +15,12 @@ from vision_robot_arm.robot.ur_backend import (
     URBackend,
     ControlFault,
     encode_gripper,
-    encode_robotiq_gripper,
     encode_servoj,
     encode_speedj,
     encode_speedj_vector,
     encode_stopj,
 )
+from vision_robot_arm.robot.robotiq_socket import GripperError
 from vision_robot_arm.robot.ur_dashboard import DashboardStatus
 
 
@@ -94,6 +95,44 @@ def failing_connector(host: str, port: int) -> None:
     raise OSError("timed out")
 
 
+class FakeGripper:
+    """Stands in for RobotiqSocketGripper: records commands, can fail on demand."""
+
+    def __init__(self, host: str, unreachable: bool = False) -> None:
+        self.host = host
+        self.unreachable = unreachable
+        self.connected = False
+        self.commands: list[tuple[bool, int, int]] = []
+        self.fail_next = False
+
+    def connect(self) -> None:
+        if self.unreachable:
+            raise GripperError(f"Robotiq gripper at {self.host}:63352 is unreachable")
+        self.connected = True
+
+    def command(self, closed: bool, speed_percent: int, force_percent: int) -> None:
+        if self.fail_next:
+            self.fail_next = False
+            raise GripperError("no reply from the Robotiq gripper")
+        self.commands.append((closed, speed_percent, force_percent))
+
+    def close(self) -> None:
+        self.connected = False
+
+
+class FakeGripperFactory:
+    def __init__(self, unreachable: bool = False) -> None:
+        self.unreachable = unreachable
+        self.created: dict[str, FakeGripper] = {}
+        self.connections = 0
+
+    def __call__(self, host: str) -> FakeGripper:
+        self.connections += 1
+        gripper = FakeGripper(host, self.unreachable)
+        self.created[host] = gripper
+        return gripper
+
+
 def ready_status(host: str, port: int) -> DashboardStatus:
     return DashboardStatus("RUNNING", "NORMAL", True)
 
@@ -152,16 +191,6 @@ class EncodeTests(unittest.TestCase):
     def test_gripper_uses_the_configured_tool_output(self) -> None:
         self.assertEqual(encode_gripper(True), b"set_tool_digital_out(0, True)\n")
         self.assertEqual(encode_gripper(False, tool_output=1), b"set_tool_digital_out(1, False)\n")
-
-    def test_robotiq_gripper_uses_urcap_socket_with_scaled_settings(self) -> None:
-        opened = encode_robotiq_gripper(False, speed_percent=80, force_percent=50)
-        closed = encode_robotiq_gripper(True, speed_percent=80, force_percent=50)
-
-        self.assertIn(b'socket_open("127.0.0.1", 63352', opened)
-        self.assertIn(b'socket_set_var("SPE", 204', opened)
-        self.assertIn(b'socket_set_var("FOR", 127', opened)
-        self.assertIn(b'socket_set_var("POS", 0', opened)
-        self.assertIn(b'socket_set_var("POS", 255', closed)
 
 
 class URBackendTests(unittest.TestCase):
@@ -694,7 +723,7 @@ class TrackingArmingTests(unittest.TestCase):
         arm._step_tracking_setpoints(.05)
         self.assertLess(abs(arm._setpoints.joints["shoulder"] - before), .2)
         self.assertNotEqual(arm._setpoints.joints["shoulder"], -60)
-    def make(self, velocity: float = 0.0, **overrides):
+    def make(self, velocity: float = 0.0, clock=None, gripper_factory=None, **overrides):
         connector = FakeConnector()
         factory = FakeRtdeFactory()
         settings = dict(
@@ -704,12 +733,16 @@ class TrackingArmingTests(unittest.TestCase):
         )
         settings.update(overrides)
         config = RobotConfig(**settings)
+        timing = {} if clock is None else {"clock": clock}
+        if gripper_factory is not None:
+            timing["gripper_factory"] = gripper_factory
         backend = URBackend(
             config,
             connector=connector,
             rtde_factory=factory,
             status_query=ready_status,
             require_feedback=True,
+            **timing,
         )
         factory.clients["10.0.0.2"].sample = {
             "actual_q": (0.0, math.radians(-37.0), 0.0, 0.0, 0.0, 0.0),
@@ -748,6 +781,124 @@ class TrackingArmingTests(unittest.TestCase):
 
         self.assertEqual(bounded.joints["shoulder"], 3.0)
         self.assertEqual(bounded.joints["elbow"], -40.0)
+
+    def test_the_base_has_its_own_tighter_excursion(self) -> None:
+        backend, _ = self.make(base_excursion_deg=20.0)
+        backend.arm_tracking()
+        origin = backend._tracking_origins["right"]
+
+        bounded = backend._bounded_tracking_targets(
+            "right",
+            ArmTargets(joints={"base": origin["base"] + 90.0, "wrist_3": origin["wrist_3"] + 90.0}),
+        )
+
+        self.assertAlmostEqual(bounded.joints["base"], origin["base"] + 20.0)
+        self.assertAlmostEqual(bounded.joints["wrist_3"], origin["wrist_3"] + 40.0)
+
+    def test_follow_interval_sends_one_movej_per_sample_and_no_servoj(self) -> None:
+        clock = FakeClock()
+        backend, socket = self.make(follow_interval_s=1.0, clock=clock)
+        backend.arm_tracking()
+
+        backend.send(targets(right={"shoulder": 3.0}))
+        clock.now += 0.5
+        backend.send(targets(right={"shoulder": 3.0}))
+
+        self.assertEqual(len(socket.commands(b"movej(")), 1, "second sample inside the interval")
+        self.assertEqual(socket.commands(b"servoj("), [])
+
+        clock.now += 0.5
+        backend.send(targets(right={"shoulder": 0.0}))
+        self.assertEqual(len(socket.commands(b"movej(")), 2)
+        self.assertIn("one movej every 1.00 s", " ".join(backend.status_lines()))
+
+    def test_follow_waits_for_a_travelling_arm_but_not_forever(self) -> None:
+        clock = FakeClock()
+        backend, socket = self.make(follow_interval_s=1.0, clock=clock)
+        backend.arm_tracking()
+        backend.send(targets(right={"shoulder": 3.0}))
+        # The arm is still moving from the first sample.
+        backend._arms["right"]._rtde.sample["actual_qd"] = (0.0, 0.2, 0.0, 0.0, 0.0, 0.0)
+
+        clock.now += 1.0
+        backend.send(targets(right={"shoulder": 0.0}))
+        self.assertEqual(len(socket.commands(b"movej(")), 1, "no new move while travelling")
+
+        clock.now += 2.0  # three intervals since the first sample
+        backend.send(targets(right={"shoulder": 0.0}))
+        self.assertEqual(len(socket.commands(b"movej(")), 2, "the wait has a ceiling")
+
+    def test_robotiq_gripper_is_driven_over_its_own_socket_never_urscript(self) -> None:
+        clock = FakeClock()
+        grippers = FakeGripperFactory()
+        backend, socket = self.make(
+            follow_interval_s=1.0, clock=clock, gripper_factory=grippers, gripper_driver="robotiq"
+        )
+        backend.arm_tracking()
+        gripper = grippers.created["10.0.0.2"]
+        self.assertTrue(gripper.connected, "the socket is opened while arming")
+
+        backend.send(targets(right={"shoulder": 3.0}))
+        clock.now += 0.3  # inside the follow interval
+        backend.send(targets(right={"shoulder": 3.0}, right_gripper=GRIPPER_CLOSE))
+
+        self.assertEqual(gripper.commands, [(True, 80, 50)], "a fist acts at once, not at the next sample")
+        self.assertEqual(len(socket.commands(b"movej(")), 1)
+        self.assertEqual([f for f in socket.sent if b"gripper" in f or b"set_tool_digital_out" in f], [])
+        self.assertIn("grip close", " ".join(backend.status_lines()))
+
+    def test_a_gripper_error_is_shown_but_does_not_stop_the_arm(self) -> None:
+        clock = FakeClock()
+        grippers = FakeGripperFactory()
+        backend, socket = self.make(
+            follow_interval_s=1.0, clock=clock, gripper_factory=grippers, gripper_driver="robotiq"
+        )
+        backend.arm_tracking()
+        grippers.created["10.0.0.2"].fail_next = True
+
+        backend.send(targets(right={"shoulder": 3.0}, right_gripper=GRIPPER_CLOSE))
+
+        self.assertEqual(len(socket.commands(b"movej(")), 1, "motion continues")
+        self.assertIn("gripper error", " ".join(backend.status_lines()))
+        # The retry is rate limited, then reconnects through the factory.
+        clock.now += 1.0
+        backend.send(targets(right={"shoulder": 3.0}, right_gripper=GRIPPER_CLOSE))
+        self.assertEqual(grippers.connections, 1)
+        clock.now += 10.0
+        backend.send(targets(right={"shoulder": 3.0}, right_gripper=GRIPPER_CLOSE))
+        self.assertEqual(grippers.connections, 2)
+        self.assertNotIn("gripper error", " ".join(backend.status_lines()))
+
+    def test_an_unreachable_gripper_is_optional_and_never_blocks_the_arm(self) -> None:
+        clock = FakeClock()
+        grippers = FakeGripperFactory(unreachable=True)
+        backend, socket = self.make(clock=clock, gripper_factory=grippers, gripper_driver="robotiq")
+
+        backend.arm_tracking()  # must not raise
+
+        self.assertIn("gripper error", " ".join(backend.status_lines()))
+        backend.send(targets(right={"shoulder": 3.0}, right_gripper=GRIPPER_CLOSE))
+        self.assertEqual(len(socket.commands(b"servoj(")), 1, "the arm still moves")
+        self.assertEqual(grippers.connections, 1, "no retry storm inside the cooldown")
+        clock.now += 10.5
+        backend.send(targets(right={"shoulder": 3.0}, right_gripper=GRIPPER_CLOSE))
+        self.assertEqual(grippers.connections, 2, "retried after the cooldown")
+
+    def test_switching_the_interval_off_resumes_streaming(self) -> None:
+        clock = FakeClock()
+        backend, socket = self.make(follow_interval_s=1.0, clock=clock)
+        backend.arm_tracking()
+        backend.send(targets(right={"shoulder": -20.0}))
+        self.assertEqual(len(socket.commands(b"movej(")), 1)
+
+        backend.set_follow_interval(0.0)
+        clock.now += 0.1
+        backend.send(targets(right={"shoulder": -20.0}))
+
+        self.assertEqual(len(socket.commands(b"servoj(")), 1)
+        self.assertIn("servoj stream", " ".join(backend.status_lines()))
+        with self.assertRaises(ControlFault):
+            backend.set_follow_interval(11.0)
 
     def test_tracking_accelerates_instead_of_starting_at_full_speed(self) -> None:
         backend, socket = self.make()

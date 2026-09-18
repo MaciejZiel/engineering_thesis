@@ -85,10 +85,19 @@ PoseState -> RobotMapper -> JointTargets -> RobotBackend
              robot/mapping.py  robot/targets.py  robot/backend.py
 ```
 
-- Target hardware: two Universal Robots UR7e cobots. `robot/targets.py` uses
-  the UR joint names (`base`, `shoulder`, `elbow`, `wrist_1`, `wrist_2`,
-  `wrist_3`); only shoulder, elbow and wrist_1 are driven by the body, the
-  rest stay at the UR home pose `[0, -90, 0, -90, 0, 0]` deg.
+- Target hardware: two Universal Robots UR7e cobots, six rotating joints each.
+  `robot/targets.py` uses the UR joint names and splits them by geometry:
+  `MAPPED_JOINTS` (`shoulder`, `elbow`, `wrist_1`) share parallel horizontal
+  axes and pitch the arm in one vertical plane; `ROTATION_JOINTS` (`base`,
+  `wrist_2`, `wrist_3`) turn it. All six are driven by the body in the 3D
+  tracking space. In the 2D space the rotation joints hold the pose captured
+  when control was enabled, because an image plane cannot see rotation.
+- Rotation joints are anchored, not absolute (`robot/session.py`,
+  `_anchor_rotation_joints`): when control is enabled the session reads each
+  rotation joint over RTDE and takes the operator's angle at that instant as
+  zero, then commands only the change since. The base is additionally bounded
+  by `--robot-base-excursion` in `URBackend._bounded_tracking_targets`,
+  separately from the excursion the other joints get.
 - `RobotMapper` (`robot/mapping.py`) converts body angles into UR joint angles
   through `JointMapping` (offset, sign, limit; defaults in `robot/config.py`),
   clamps them to UR7e ranges and applies a dead-band so tiny changes do not
@@ -126,7 +135,11 @@ PoseState -> RobotMapper -> JointTargets -> RobotBackend
   `--test-mode` is on.
 - Angles measured outside the pose model reach the robot through
   `PoseStateBuilder.build(extra_angles=...)`, which merges them into
-  `PoseState.angles` and smooths them like any other angle. Two use it:
+  `PoseState.angles` and smooths them like any other angle.
+  `vision/arm_rotation.py` measures the three rotation angles (shoulder
+  azimuth, wrist deviation, forearm roll) in the metric body frame from
+  `vision/body_tracking.py` and keeps each continuous across ±180 so the
+  filter never sees a wrap. Two older users of the same path:
   `vision/arm_pose.py` measures arm elevation from the shoulder-to-elbow vector
   against the torso (or image vertical when the hips are out of frame), because
   the pose model's elbow-shoulder-hip angle is unavailable for a seated person;

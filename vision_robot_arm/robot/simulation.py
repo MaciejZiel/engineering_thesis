@@ -75,6 +75,18 @@ class SimulationBackend:
         self._arms = {name: SimulatedArm(config) for name in ARM_NAMES}
         self._lift_mode = False
         self._last_time: float | None = None
+        # Mirrors the hardware's sampled following: the target is accepted only
+        # once per interval while the arm keeps moving toward it in between.
+        self._follow_interval_s = config.follow_interval_s
+        self._last_follow_at: float | None = None
+
+    def set_follow_interval(self, seconds: float) -> None:
+        self._follow_interval_s = max(0.0, seconds)
+        self._last_follow_at = None
+
+    @property
+    def follow_interval_s(self) -> float:
+        return self._follow_interval_s
 
     @property
     def state(self) -> RobotState:
@@ -84,17 +96,26 @@ class SimulationBackend:
         )
 
     def send(self, targets: JointTargets) -> None:
-        for name, arm_targets in targets.arms.items():
-            arm = self._arms.get(name)
-            if arm is not None:
-                arm.set_targets(
-                    arm_targets.joints,
-                    arm_targets.gripper,
-                    arm_targets.tcp_target,
-                )
-        self._lift_mode = targets.lift_mode
-
         now = self._clock()
+        accept = True
+        if self._follow_interval_s > 0:
+            accept = (
+                self._last_follow_at is None
+                or now - self._last_follow_at >= self._follow_interval_s
+            )
+            if accept:
+                self._last_follow_at = now
+        if accept:
+            for name, arm_targets in targets.arms.items():
+                arm = self._arms.get(name)
+                if arm is not None:
+                    arm.set_targets(
+                        arm_targets.joints,
+                        arm_targets.gripper,
+                        arm_targets.tcp_target,
+                    )
+            self._lift_mode = targets.lift_mode
+
         dt = 0.0 if self._last_time is None else min(now - self._last_time, MAX_STEP_SECONDS)
         self._last_time = now
         self.step(dt)
@@ -117,6 +138,8 @@ class SimulationBackend:
             )
             lines.append(f"sim {name[0].upper()}: {joints} grip {arm.gripper}")
         lines.append(f"sim lift_mode={'on' if self._lift_mode else 'off'}")
+        if self._follow_interval_s > 0:
+            lines.append(f"sim follow every {self._follow_interval_s:.2f} s  (, / . adjust)")
         return lines
 
     def close(self) -> None:

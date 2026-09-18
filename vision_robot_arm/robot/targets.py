@@ -22,11 +22,16 @@ JOINT_NAMES = (
     JOINT_WRIST_2,
     JOINT_WRIST_3,
 )
+# The three pitch joints share parallel horizontal axes (UR DH: alpha 0 for
+# joints 2 and 3). They are driven in every tracking space and a session needs
+# all of them before it is usable.
 MAPPED_JOINTS = (JOINT_SHOULDER, JOINT_ELBOW, JOINT_WRIST_1)
-# Cartesian tracking drives the base too, so a status line that hides it
-# cannot answer whether the arm is turning.
-REPORTED_JOINTS = (JOINT_BASE, JOINT_SHOULDER, JOINT_ELBOW, JOINT_WRIST_1)
-HELD_JOINTS = (JOINT_BASE, JOINT_WRIST_2, JOINT_WRIST_3)
+# The three rotation joints - base about the vertical, wrist 2 yaw, wrist 3
+# roll - are driven from 3D body angles only. In the 2D tracking space they hold
+# the pose captured when control was enabled.
+ROTATION_JOINTS = (JOINT_BASE, JOINT_WRIST_2, JOINT_WRIST_3)
+REPORTED_JOINTS = JOINT_NAMES
+HELD_JOINTS = ROTATION_JOINTS
 
 UR_HOME_DEG = {
     JOINT_BASE: 0.0,

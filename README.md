@@ -719,13 +719,33 @@ The six values are the joint angles in radians in UR order (base, shoulder,
 elbow, wrist 1, wrist 2, wrist 3). The remaining parameters are `a` and `v`
 (ignored by `servoj`), `t` (`--robot-send-interval`), `lookahead_time`
 (`--robot-servo-lookahead`, default `0.1`) and `gain` (`--robot-servo-gain`,
-default `300`).
+default `300`). Note that the camera loop delivers commands at whatever rate
+inference allows (about 90 ms at the measured 11 fps), so with the default 50 ms
+`t` each `servoj` expires before the next arrives and the arm decelerates in the
+gap, which shows as vibration in streaming mode. Lengthening `t` to cover the
+gap was tried and withdrawn after a controller fault; the sampled `movej` mode
+below avoids the problem by not streaming at all.
 
 **The streamed pose is a ramped setpoint, not the raw mapped angle.** Each arm
 runs the same motion model as the simulator, so the commanded pose moves toward
 your arm at most `--robot-max-speed` degrees per second (default `60`, UR7e
 limit `180`). A tracking glitch therefore cannot ask the controller for a jump
 of tens of degrees.
+
+**Following every N seconds instead.** `--robot-follow-interval SECONDS`
+(default `0` = the stream above, at most `10`) changes the rhythm: the operator's
+pose is sampled once per interval and each sample becomes **one `movej`** to the
+bounded target at `--robot-max-speed` with `--robot-tracking-acceleration`, the
+same command the sequence tab uses. Nothing is streamed between samples. A sample
+is skipped while an arm is still travelling, because a `movej` that replaces a
+running one stops the arm before it restarts; after three intervals the wait
+ends regardless. Each sample is therefore a visible start–stop; a variant that
+kept streaming `servoj` toward a target latched once per interval was tried on
+the cell and withdrawn when the controller reported it could not follow the
+path. Press **,** and **.** while running to change the interval in 0.25 s
+steps — `0` returns to streaming. The current rhythm is shown in the robot
+status line, and the simulated twin follows the same rhythm so it can be
+rehearsed without hardware.
 
 **Feedback**: the backend opens an RTDE connection (`--robot-rtde-port`,
 default `30004`) and reads joint position/velocity, TCP pose/velocity, robot and
@@ -737,11 +757,33 @@ feedback or dashboard preflight is disabled.
 **Shutdown** sends `stopj`, so closing the window decelerates the arms instead
 of leaving the last `servoj` running.
 
-The gripper is driven through a tool digital output
+**Gripper.** `--robot-gripper-driver robotiq` drives the Robotiq Hand-E over
+the URCap's own text server on the controller (`robot/robotiq_socket.py`, port
+63352, `SET POS 255 SPE … FOR … GTO 1`), from this PC directly. Nothing goes
+through the URScript port for it, which is the point: every program sent there
+replaces the running one, so a gripper program next to a `movej` either stopped
+the arm or was killed by the next motion command before it had set the GO bit.
+Over its own socket a fist (`right_fist` → close) or an open hand
+(`right_hand_open` → open) acts the instant it is recognised, even between
+follow samples, and never disturbs the motion. The gripper is optional by design:
+the socket is opened while arming, but one that does not answer is reported in
+the robot status line (`grip … (gripper error: …)`), skipped and retried every
+3 s — it never keeps the arm from arming or moving. It is activated only if it
+does not already report active, so no 5 s calibration cycle is triggered on a
+working gripper. Successful commands appear in the telemetry as
+`gripper_command` events. One quirk of this cell's controller is built in: its
+URCap server holds the reply to a request until the next request arrives, so a
+lone `GET STA` times out although the daemon is healthy. The driver therefore
+sends a harmless `GET STA` follow-up in the same packet as every request and
+skips the follow-up's stray reply when matching answers. The same server writes
+`ack` without a newline, so it arrives glued to the next reply (`ackSTA 3`); the
+driver recognises the bare `ack`/`nack` tokens on their own.
+
+`--robot-gripper-driver digital` is the fallback for a plain tool output
 (`--robot-tool-output`, default `0`; `set_tool_digital_out(0, True)` = close).
-Swap `encode_gripper` in `vision_robot_arm/robot/ur_backend.py` for the URCap
-call of the gripper the lab mounts (for example Robotiq). Do not test the gripper
-until its electrical interface and safe output state have been verified.
+It is a URScript line and does replace the running motion program. Do not test
+either driver until the gripper's electrical interface and safe state have been
+verified.
 
 Protocol and safety references: the official UR documentation describes
 [RTDE](https://docs.universal-robots.com/tutorials/communication-protocol-tutorials/rtde-guide.html),
@@ -757,10 +799,48 @@ Body angle to UR joint mapping (`vision_robot_arm/robot/config.py`,
 | shoulder elevation, 0 = down, 180 = up | `shoulder`| body - 180     | -180 .. 0     |
 | elbow (shoulder-elbow-wrist), 180 = straight | `elbow` | 180 - body   | -160 .. 160   |
 | wrist (3D forearm vs hand, signed), 180 = straight | `wrist_1` | 180 - body | -180 .. 180 |
+| shoulder azimuth, 0 = T-pose, +90 = arm forward | `base` | Δ body (anchored) | -180 .. 180 |
+| wrist deviation, + toward the index finger | `wrist_2` | Δ body (anchored) | -360 .. 360 |
+| forearm roll, 0 = palm down, + pronation | `wrist_3` | Δ body (anchored) | -360 .. 360 |
 
 So an arm held horizontally with a straight elbow gives the UR home pose
 `shoulder=-90, elbow=0`. Offsets and signs are constants in `config.py`;
 the ranges are the `--robot-*-range` flags.
+
+#### Rotation joints
+
+The UR7e's shoulder, elbow and wrist 1 share parallel horizontal axes (UR DH:
+α = 0 for joints 2 and 3), so the three angles above only ever move the arm up
+and down in one vertical plane. The other three joints are rotations — base
+about the vertical, wrist 2 yaw, wrist 3 roll — and are driven from the
+operator's own rotations, measured in the metric body frame by
+`vision/arm_rotation.py`:
+
+- **base** ← horizontal swing of the upper arm (shoulder→elbow projected on the
+  body's horizontal plane). A hanging arm has no azimuth and leaves the base
+  where it is.
+- **wrist 2** ← radial/ulnar bend of the hand, from the 21 hand landmarks.
+- **wrist 3** ← pronation/supination, the palm normal turning about the forearm.
+
+Angles are anatomical: the same motion of the left and right arm gives the same
+sign. Three things are deliberately different from the pitch joints:
+
+1. **3D only.** They need world landmarks. `--tracking-space 2d` cannot see a
+   swing toward the camera at all, so in that space the rotation joints hold the
+   pose captured when control was enabled. The colleague's presets run `2d`.
+2. **Anchored, never absolute.** A robot's mounting is unknown, so an azimuth of
+   40° means nothing to it. When control is enabled the session reads where each
+   rotation joint is over RTDE and takes the operator's angles at that instant as
+   zero; only the change since then is commanded. Enabling control therefore
+   never turns an arm, and resuming after a pause re-anchors instead of jumping.
+3. **The base has its own ceiling.** `--robot-base-excursion` (default `20`,
+   at most `90`) bounds the base around the enable-time pose separately from
+   `--robot-tracking-excursion`, because at 0.85 m reach 20° of base is already a
+   0.3 m sweep of the tool across a table two robots share.
+
+Directions are guesses until proven: `--robot-rotation-signs BASE WRIST2 WRIST3`
+(each `1` or `-1`, default `1 1 1`) flips them. Verify one joint at a time in
+commissioning before trusting a sign, exactly as was done for the shoulder.
 
 ### Serial protocol
 
@@ -816,7 +896,11 @@ whatever the lab decides it should do (a second tool output, a URCap call), and
 nothing moves because of it today.
 
 UR joint angles are clamped to `--robot-shoulder-range` (default `-180 0`),
-`--robot-elbow-range` (default `-160 160`) and `--robot-wrist-range` (default
-`-180 180`) and changes smaller than `--robot-deadband` degrees (default
-`1.5`) are ignored to suppress jitter. When neither gripper gesture is active
-the gripper keeps its previous state.
+`--robot-elbow-range` (default `-160 160`), `--robot-wrist-range` (default
+`-180 180`), `--robot-base-range` (default `-180 180`), `--robot-wrist2-range`
+and `--robot-wrist3-range` (default `-360 360`), and changes smaller than
+`--robot-deadband` degrees (default `1.5`) are ignored to suppress jitter. On
+hardware every joint is additionally bounded around the pose captured when
+control was enabled: `--robot-tracking-excursion` for shoulder, elbow and the
+three wrists, `--robot-base-excursion` for the base. When neither gripper
+gesture is active the gripper keeps its previous state.

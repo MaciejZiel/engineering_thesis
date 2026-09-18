@@ -9,6 +9,7 @@ from vision_robot_arm.robot.targets import (
     GRIPPER_CLOSE,
     GRIPPER_OPEN,
     MAPPED_JOINTS,
+    ROTATION_JOINTS,
     ArmTargets,
     JointTargets,
     UR_HOME_DEG,
@@ -70,7 +71,12 @@ class RobotMapper:
 
     def _map_arm(self, arm: str, state: PoseState) -> ArmTargets:
         joints: dict[str, float] = {}
-        for joint in MAPPED_JOINTS:
+        # Rotation joints need metric 3D body angles; the 2D space has no
+        # image-plane substitute for them and leaves them held.
+        driven = MAPPED_JOINTS + (
+            ROTATION_JOINTS if self._config.tracking_space == "3d" else ()
+        )
+        for joint in driven:
             mapping = self._config.mapping_for(joint)
             if mapping is None:
                 continue

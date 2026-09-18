@@ -13,7 +13,13 @@ from vision_robot_arm.robot.config import (
     RobotConfig,
 )
 from vision_robot_arm.robot.mapping import RobotMapper
-from vision_robot_arm.robot.targets import ArmTargets, JointTargets, MAPPED_JOINTS
+from vision_robot_arm.robot.targets import (
+    ArmTargets,
+    JointTargets,
+    MAPPED_JOINTS,
+    ROTATION_JOINTS,
+    RobotState,
+)
 
 
 class HardwareSession:
@@ -33,6 +39,25 @@ class HardwareSession:
         self._keyframe_robot_start: dict[str, dict[str, float]] = {}
         self._keyframe_final: JointTargets | None = None
         self._latest_pose_at: float | None = None
+        # Rotation joints are anchored twice: to the robot pose read when control
+        # was enabled and to the operator's angles at that same moment. Only the
+        # change since then is commanded, so enabling control never turns an arm.
+        self._rotation_robot_origin: dict[str, dict[str, float]] = {}
+        self._rotation_body_reference: dict[str, dict[str, float]] = {}
+        self.follow_interval_s = config.follow_interval_s
+
+    def set_follow_interval(self, seconds: float) -> None:
+        """Remember the operator's choice and hand it to the backend once one exists."""
+        self.follow_interval_s = seconds
+        if self._backend is None or self.phase == "fault":
+            return
+        setter = getattr(self._backend, "set_follow_interval", None)
+        if setter is None:
+            return
+        try:
+            setter(seconds)
+        except (Exception, SystemExit) as error:
+            self._fail(error)
 
     def _fail(self, error: BaseException) -> None:
         self.error = str(error)
@@ -47,6 +72,10 @@ class HardwareSession:
                 self._usable = False
             if self.phase == "disconnected":
                 self._backend = self._factory()
+                if self.follow_interval_s != self._config.follow_interval_s:
+                    setter = getattr(self._backend, "set_follow_interval", None)
+                    if setter is not None:
+                        setter(self.follow_interval_s)
                 self.phase = (
                     "monitoring"
                     if self._config.operation == OPERATION_MONITOR
@@ -77,6 +106,7 @@ class HardwareSession:
                             return
                     self._mapper.reset()
                     self.phase = "active"
+                    self._capture_rotation_origin()
             elif self.phase == "active":
                 self.pause()
             elif self.phase == "commissioning":
@@ -97,6 +127,8 @@ class HardwareSession:
             self._mapper.reset()
             self._tracking_lost_at = None
             self._last_targets = None
+            self._rotation_robot_origin = {}
+            self._rotation_body_reference = {}
         except (Exception, SystemExit) as error:
             self._fail(error)
 
@@ -125,6 +157,8 @@ class HardwareSession:
                     self._tracking_lost_at = None
                     if self._config.tracking_space == "2d":
                         targets = self._relative_targets(targets)
+                    else:
+                        targets = self._anchor_rotation_joints(targets)
                     self._last_targets = targets
                     self._backend.send(targets)
         except (Exception, SystemExit) as error:
@@ -212,6 +246,52 @@ class HardwareSession:
         return JointTargets(
             timestamp_ms=targets.timestamp_ms,
             arms=arms,
+        )
+
+    def _capture_rotation_origin(self) -> None:
+        """Read where every rotation joint is right now; that is its zero."""
+        self._rotation_robot_origin = {}
+        self._rotation_body_reference = {}
+        if self._config.tracking_space != "3d":
+            return
+        robot_state = self._backend.robot_state()
+        # Anything but a real, complete RobotState means "no origin": the
+        # rotation joints then hold instead of guessing.
+        if not isinstance(robot_state, RobotState):
+            return
+        for side in self._config.hosts:
+            arm = robot_state.arm(side)
+            if arm is not None and all(joint in arm.joints for joint in ROTATION_JOINTS):
+                self._rotation_robot_origin[side] = {
+                    joint: arm.joints[joint] for joint in ROTATION_JOINTS
+                }
+
+    def _anchor_rotation_joints(self, targets: JointTargets) -> JointTargets:
+        """Command rotation joints as offsets from the enable-time pose.
+
+        An absolute azimuth or roll means nothing to a robot whose mounting is
+        unknown, so the first measurement after enabling control defines "no
+        rotation" and only the change since then is added to the robot's own
+        pose. A side without a robot origin holds its rotation joints.
+        """
+        arms: dict[str, ArmTargets] = {}
+        for side, arm in targets.arms.items():
+            origin = self._rotation_robot_origin.get(side)
+            joints = dict(arm.joints)
+            for joint in ROTATION_JOINTS:
+                if joint not in joints:
+                    continue
+                if origin is None:
+                    del joints[joint]
+                    continue
+                reference = self._rotation_body_reference.setdefault(side, {})
+                anchor = reference.setdefault(joint, joints[joint])
+                joints[joint] = origin[joint] + (joints[joint] - anchor)
+            arms[side] = ArmTargets(
+                joints=joints, gripper=arm.gripper, tcp_target=arm.tcp_target
+            )
+        return JointTargets(
+            timestamp_ms=targets.timestamp_ms, arms=arms, lift_mode=targets.lift_mode
         )
 
     def jog(self, direction: int) -> None:
