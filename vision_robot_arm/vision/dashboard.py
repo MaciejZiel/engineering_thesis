@@ -702,7 +702,7 @@ class DashboardUi:
                     True,
                     True,
                 ),
-                (ACTION_QUIT, "Quit", "Esc", 90, False, True, False),
+                (ACTION_QUIT, "STOP", "Q", 90, False, True, False),
             )
         else:
             definitions = (
@@ -751,7 +751,7 @@ class DashboardUi:
                 True,
                 False,
             ),
-            (ACTION_QUIT, "Quit", "Esc", 90, False, True, False),
+            (ACTION_QUIT, "STOP", "Q", 90, False, True, False),
             )
         widths = [p.px(d[3]) for d in definitions]
         x = pad

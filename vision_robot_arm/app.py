@@ -548,6 +548,8 @@ def run_app(config: AppConfig, *, web=None) -> int:
             if web is None and not _window_is_visible(cv2, WINDOW_NAME):
                 return 0
             if key in (ord("q"), 27) or action == ACTION_QUIT:
+                if isinstance(robot_controller, HardwareSession):
+                    robot_controller.pause()
                 return 0
             if key == ord("f") or action == ACTION_FULLSCREEN:
                 dashboard.toggle_fullscreen()

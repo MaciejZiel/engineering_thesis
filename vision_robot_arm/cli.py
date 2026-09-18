@@ -277,6 +277,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Single joint enabled in commissioning mode. Default: shoulder.",
     )
     robot.add_argument(
+        "--robot-tracking-excursion",
+        type=float,
+        default=40.0,
+        help="Maximum tracking offset from the captured pose in degrees. Default: 40.",
+    )
+    robot.add_argument(
         "--robot-commissioning-speed",
         type=float,
         default=30.0,
@@ -447,6 +453,7 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         baud_rate=args.robot_baud,
         send_interval=args.robot_send_interval,
         max_speed_deg_s=args.robot_max_speed,
+        tracking_excursion_deg=args.robot_tracking_excursion,
         commissioning_joint=args.robot_commissioning_joint,
         commissioning_speed_deg_s=args.robot_commissioning_speed,
         commissioning_excursion_deg=args.robot_commissioning_excursion,

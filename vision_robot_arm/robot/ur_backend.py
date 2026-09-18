@@ -16,6 +16,7 @@ from vision_robot_arm.robot.backend import Clock, TargetTracker
 from vision_robot_arm.robot.config import (
     COMMISSIONING_MAX_SPEED_DEG_S,
     OPERATION_COMMISSIONING,
+    OPERATION_TRACKING,
     RobotConfig,
 )
 from vision_robot_arm.robot.simulation import SimulatedArm
@@ -372,6 +373,7 @@ class URBackend:
         self._next_send_at = 0.0
         self._last_send_at: float | None = None
         self._commissioning_origins: dict[str, dict[str, float]] = {}
+        self._tracking_origins: dict[str, dict[str, float]] = {}
         self._jog_direction = 0
         self._jog_speeds: dict[str, float] = {}
         self._jog_deadline = 0.0
@@ -424,8 +426,9 @@ class URBackend:
                         f"{arm.name}: robot must be stationary before tracking is armed."
                     )
             # Validate every arm first, then atomically adopt both current poses.
-            for arm in arms:
-                arm.capture_current_as_setpoint()
+            self._tracking_origins = {
+                arm.name: arm.capture_current_as_setpoint() for arm in arms
+            }
         except BaseException as error:
             self._fault = str(error)
             self.close()
@@ -586,7 +589,7 @@ class URBackend:
                 arm.poll_feedback()
                 arm.check_control_health()
             for name, arm in self._arms.items():
-                arm.update(accumulated.arm(name), elapsed)
+                arm.update(self._bounded_tracking_targets(name, accumulated.arm(name)), elapsed)
         except ControlFault as error:
             self._fault = str(error)
             self.close()
@@ -597,6 +600,24 @@ class URBackend:
         if self._last_send_at is None:
             return self._config.send_interval
         return min(now - self._last_send_at, self._config.send_interval * MAX_CATCHUP_INTERVALS)
+
+    def _bounded_tracking_targets(self, name: str, targets: ArmTargets) -> ArmTargets:
+        if self._config.operation != OPERATION_TRACKING:
+            return targets
+        origin = self._tracking_origins.get(name)
+        if origin is None:
+            raise ControlFault(f"{name}: capture the tracking origin before sending targets.")
+        excursion = self._config.tracking_excursion_deg
+        bounded = {
+            joint: max(origin[joint] - excursion, min(origin[joint] + excursion, value))
+            for joint, value in targets.joints.items()
+            if joint in origin
+        }
+        return ArmTargets(
+            joints=bounded,
+            gripper=targets.gripper,
+            tcp_target=targets.tcp_target,
+        )
 
     def robot_state(self) -> RobotState | None:
         if not self._arms:

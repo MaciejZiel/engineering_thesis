@@ -670,6 +670,17 @@ class TrackingArmingTests(unittest.TestCase):
 
         self.assertEqual(socket.commands(b"movej("), [])
 
+    def test_tracking_targets_are_bounded_from_the_captured_pose(self) -> None:
+        backend, _ = self.make()
+        backend.arm_tracking()
+
+        bounded = backend._bounded_tracking_targets(
+            "right", ArmTargets(joints={"shoulder": 120.0, "elbow": -100.0})
+        )
+
+        self.assertEqual(bounded.joints["shoulder"], 3.0)
+        self.assertEqual(bounded.joints["elbow"], -40.0)
+
 
 if __name__ == "__main__":
     unittest.main()
