@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from vision_robot_arm.cli import parse_args
 from vision_robot_arm.robot.config import JointLimit
@@ -147,3 +148,13 @@ class CliRobotOptionsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CliSkeletonOptionTests(unittest.TestCase):
+    def test_no_skeleton_profile_is_loaded_by_default(self) -> None:
+        self.assertIsNone(parse_args([]).skeleton_path)
+
+    def test_a_skeleton_profile_can_be_named(self) -> None:
+        config = parse_args(["--skeleton", "profiles/me.json"])
+
+        self.assertEqual(config.skeleton_path, Path("profiles/me.json"))

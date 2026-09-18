@@ -176,6 +176,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Directory for CSV recordings. Default: {DEFAULT_RECORDING_DIR}",
     )
     parser.add_argument(
+        "--skeleton",
+        type=Path,
+        default=None,
+        help=(
+            "Load a measured skeleton profile so bone lengths stay fixed. "
+            "Press b in the window to record one."
+        ),
+    )
+    parser.add_argument(
         "--model",
         type=Path,
         default=DEFAULT_MODEL_PATH,
@@ -465,6 +474,7 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         visibility_threshold=args.visibility_threshold,
         smoothing_alpha=args.smoothing_alpha,
         recording_dir=args.recording_dir,
+        skeleton_path=args.skeleton,
         model_path=args.model,
         hand_model_path=args.hand_model,
         hands=args.hands,

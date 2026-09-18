@@ -33,6 +33,7 @@ class AppConfig:
     visibility_threshold: float = 0.55
     smoothing_alpha: float = 0.35
     recording_dir: Path = DEFAULT_RECORDING_DIR
+    skeleton_path: Path | None = None
     model_path: Path = DEFAULT_MODEL_PATH
     hand_model_path: Path = DEFAULT_HAND_MODEL_PATH
     hands: bool = True

@@ -12,6 +12,12 @@ from vision_robot_arm.robot.mapping import RobotMapper
 from vision_robot_arm.robot.session import HardwareSession
 from vision_robot_arm.robot.simulation import SimulationBackend
 from vision_robot_arm.robot.visualization_3d import draw_workspace_3d
+from vision_robot_arm.vision.skeleton import (
+    SkeletonCalibrator,
+    SkeletonError,
+    load_skeleton,
+    save_skeleton,
+)
 from vision_robot_arm.vision.arm_pose import arm_elevation_angles
 from vision_robot_arm.vision.dashboard import (
     ACTION_CALIBRATE,
@@ -48,7 +54,7 @@ from vision_robot_arm.vision.landmarks import (
     build_landmark_names,
 )
 from vision_robot_arm.vision.output import emit_console_data
-from vision_robot_arm.vision.pose_tracker import PoseTracker
+from vision_robot_arm.vision.pose_tracker import PoseDetection, PoseTracker
 from vision_robot_arm.vision.recording import CsvPoseRecorder
 from vision_robot_arm.vision.smoothing import (
     MAX_WORLD_LANDMARK_SPEED_M_S,
@@ -132,10 +138,19 @@ def run_app(config: AppConfig) -> int:
         preview_controller = MappedRobotController(
             RobotMapper(config.robot, cartesian=True), SimulationBackend(config.robot)
         )
+        skeleton = None
+        if config.skeleton_path is not None:
+            try:
+                skeleton = load_skeleton(config.skeleton_path)
+            except SkeletonError as error:
+                raise SystemExit(f"--skeleton: {error}") from error
+            print(f"Skeleton loaded: {config.skeleton_path}")
+        skeleton_calibrator: SkeletonCalibrator | None = None
         state_builder = PoseStateBuilder(
             indices=indices,
             min_visibility=config.visibility_threshold,
             smoothing_alpha=config.smoothing_alpha,
+            skeleton=skeleton,
         )
         mode = ANGLE_MODE
         next_print_at = 0.0
@@ -156,7 +171,8 @@ def run_app(config: AppConfig) -> int:
 
         print(_source_started_message(config))
         print(
-            "Keys: 1/2/3 console, c calibrate, r record, f fullscreen, d details, Tab/Enter navigate, q/Esc quit."
+            "Keys: 1/2/3 console, c calibrate, b measure skeleton, r record, f fullscreen, "
+            "d details, Tab/Enter navigate, q/Esc quit."
         )
         if config.test_mode:
             print(
@@ -403,6 +419,22 @@ def run_app(config: AppConfig) -> int:
                 )
             last_frame_at = now
 
+            skeleton_lines: tuple[str, ...] = ()
+            if skeleton_calibrator is not None:
+                progress = skeleton_calibrator.update(
+                    timestamp_ms, _skeleton_points(detection), indices
+                )
+                skeleton_lines = (progress.status_line(),)
+                if progress.finished and progress.skeleton is not None:
+                    state_builder.set_skeleton(progress.skeleton)
+                    profile = config.recording_dir / "skeleton.json"
+                    try:
+                        save_skeleton(progress.skeleton, profile)
+                        print(f"Skeleton measured and saved: {profile}")
+                    except OSError as error:
+                        print(f"Skeleton measured but not saved: {error}")
+                    skeleton_calibrator = None
+
             robot_state = robot_controller.robot_state()
             preview_state = robot_state or preview_controller.robot_state()
             simulation_size = dashboard.simulation_target_size()
@@ -432,6 +464,7 @@ def run_app(config: AppConfig) -> int:
                 robot_label=config.robot.backend if config.robot.enabled else "off",
                 gestures=current_state.gestures if current_state else (),
                 status_lines=tuple(robot_controller.status_lines())
+                + skeleton_lines
                 + ((recorder.last_error,) if recorder.last_error else ()),
                 tracking_quality=tracking_quality,
                 fps=display_fps,
@@ -501,6 +534,16 @@ def run_app(config: AppConfig) -> int:
                     else "Hold all arm joints steady and visible for 0.8 seconds, then retry calibration."
                 )
                 print(session_message)
+            if key == ord("b"):
+                if skeleton_calibrator is None:
+                    skeleton_calibrator = SkeletonCalibrator()
+                    session_message = (
+                        "Measuring your skeleton: follow the poses on screen."
+                    )
+                else:
+                    skeleton_calibrator = None
+                    session_message = "Skeleton measurement cancelled."
+                print(session_message)
             if key in (ord("k"), ord("l"), ord("x")):
                 robot_controller.reset()
                 profile = config.recording_dir / "calibration.json"
@@ -547,6 +590,26 @@ def run_app(config: AppConfig) -> int:
             ("camera", None if capture is None else capture.release),
         )
         cv2.destroyAllWindows()
+
+
+def _skeleton_points(detection: PoseDetection) -> list[LandmarkPoint] | None:
+    """World points carrying the image model's visibility, which is what says
+    whether a joint was actually seen."""
+    if detection.world_landmarks is None or detection.landmarks is None:
+        return None
+    points = []
+    for index, world in enumerate(detection.world_landmarks):
+        visibility = (
+            float(getattr(detection.landmarks[index], "visibility", 1.0))
+            if index < len(detection.landmarks)
+            else 0.0
+        )
+        points.append(
+            LandmarkPoint(
+                float(world.x), float(world.y), float(world.z), visibility=visibility
+            )
+        )
+    return points
 
 
 def _smooth_hands(

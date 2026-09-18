@@ -1,6 +1,7 @@
 import unittest
 from dataclasses import dataclass
 
+from vision_robot_arm.vision.skeleton import Skeleton
 from vision_robot_arm.vision.state_builder import PoseStateBuilder
 
 POSE_LANDMARK_NAMES = (
@@ -143,3 +144,83 @@ class PoseStateBuilderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SkeletonIntegrationTests(unittest.TestCase):
+    """The skeleton has to reach the angles too, not only the 3D preview."""
+
+    UPPER_ARM = 0.30
+    FOREARM = 0.26
+
+    def world(self, elbow_depth: float) -> list[FakeLandmark]:
+        points = [FakeLandmark(0.0, 0.0, 0.0, visibility=0.0) for _ in INDICES]
+        points[INDICES["LEFT_SHOULDER"]] = FakeLandmark(-0.19, 0.0, 0.0)
+        points[INDICES["RIGHT_SHOULDER"]] = FakeLandmark(0.19, 0.0, 0.0)
+        points[INDICES["RIGHT_ELBOW"]] = FakeLandmark(0.49, 0.0, elbow_depth)
+        points[INDICES["RIGHT_WRIST"]] = FakeLandmark(0.75, 0.0, elbow_depth)
+        points[INDICES["LEFT_ELBOW"]] = FakeLandmark(-0.49, 0.0, 0.0)
+        points[INDICES["LEFT_WRIST"]] = FakeLandmark(-0.75, 0.0, 0.0)
+        return points
+
+    def image(self) -> list[FakeLandmark]:
+        points = [FakeLandmark(0.5, 0.5, visibility=1.0) for _ in INDICES]
+        return points
+
+    def skeleton(self) -> Skeleton:
+        return Skeleton(
+            {
+                "left_upper_arm": self.UPPER_ARM,
+                "left_forearm": self.FOREARM,
+                "right_upper_arm": self.UPPER_ARM,
+                "right_forearm": self.FOREARM,
+            }
+        )
+
+    def elbow_angle(self, builder: PoseStateBuilder, depth: float) -> float | None:
+        state = builder.build(
+            33, self.image(), self.world(depth), world_only=True
+        )
+        return state.raw_angles.get("right_elbow")
+
+    def test_depth_noise_no_longer_bends_a_straight_arm(self) -> None:
+        plain = PoseStateBuilder(INDICES, min_visibility=0.55, smoothing_alpha=1.0)
+        held = PoseStateBuilder(
+            INDICES,
+            min_visibility=0.55,
+            smoothing_alpha=1.0,
+            skeleton=self.skeleton(),
+        )
+
+        # The arm is straight; only the elbow's depth estimate is wrong.
+        self.assertLess(self.elbow_angle(plain, 0.12), 175.0)
+        self.assertGreater(self.elbow_angle(held, 0.12), 179.0)
+
+    def test_the_body_preview_points_are_corrected_as_well(self) -> None:
+        builder = PoseStateBuilder(
+            INDICES,
+            min_visibility=0.55,
+            smoothing_alpha=1.0,
+            skeleton=self.skeleton(),
+        )
+
+        state = builder.build(33, self.image(), self.world(0.12), world_only=True)
+
+        self.assertIsNotNone(state.body_landmarks)
+        shoulder = state.body_landmarks[INDICES["RIGHT_SHOULDER"]]
+        elbow = state.body_landmarks[INDICES["RIGHT_ELBOW"]]
+        length = (
+            (elbow.x - shoulder.x) ** 2
+            + (elbow.y - shoulder.y) ** 2
+            + (elbow.z - shoulder.z) ** 2
+        ) ** 0.5
+        self.assertAlmostEqual(length, self.UPPER_ARM, places=3)
+
+    def test_it_can_be_installed_and_removed_while_running(self) -> None:
+        builder = PoseStateBuilder(INDICES, min_visibility=0.55, smoothing_alpha=1.0)
+        self.assertIsNone(builder.skeleton)
+
+        builder.set_skeleton(self.skeleton())
+        self.assertGreater(self.elbow_angle(builder, 0.12), 179.0)
+
+        builder.set_skeleton(None)
+        self.assertLess(self.elbow_angle(builder, 0.12), 175.0)

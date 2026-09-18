@@ -13,6 +13,7 @@ from vision_robot_arm.vision.body_tracking import (
 )
 from vision_robot_arm.vision.gestures import detect_gestures
 from vision_robot_arm.vision.metrics import calculate_angles
+from vision_robot_arm.vision.skeleton import Skeleton
 from vision_robot_arm.vision.smoothing import (
     MAX_WORLD_LANDMARK_SPEED_M_S,
     AngleSmoother,
@@ -26,8 +27,10 @@ class PoseStateBuilder:
         indices: dict[str, int],
         min_visibility: float,
         smoothing_alpha: float,
+        skeleton: Skeleton | None = None,
     ) -> None:
         self._indices = indices
+        self._skeleton = skeleton
         self._min_visibility = min_visibility
         self._landmark_smoother = LandmarkSmoother(smoothing_alpha, min_visibility)
         self._world_landmark_smoother = LandmarkSmoother(
@@ -43,6 +46,14 @@ class PoseStateBuilder:
     @property
     def calibrated(self) -> bool:
         return self._calibration.calibrated
+
+    @property
+    def skeleton(self) -> Skeleton | None:
+        return self._skeleton
+
+    def set_skeleton(self, skeleton: Skeleton | None) -> None:
+        """Measured bone lengths hold the noisy depth axis still; None disables that."""
+        self._skeleton = skeleton
 
     def build(
         self,
@@ -72,13 +83,26 @@ class PoseStateBuilder:
             smoothed_world_landmarks = self._world_landmark_smoother.update(
                 raw_world_landmarks, timestamp_ms
             )
+            if self._skeleton is not None:
+                smoothed_world_landmarks = self._skeleton.constrain(
+                    smoothed_world_landmarks, self._indices
+                )
+
+        # Angles are measured on the unsmoothed world points, so they need the
+        # same correction applied separately.
+        world_for_angles = world_landmarks
+        if self._skeleton is not None and world_landmarks is not None:
+            world_for_angles = self._skeleton.constrain(
+                [LandmarkPoint.from_landmark(point) for point in world_landmarks],
+                self._indices,
+            )
 
         raw_angles = calculate_angles(
             raw_landmarks,
             self._indices,
             self._min_visibility,
             aspect_ratio=aspect_ratio,
-            world_landmarks=world_landmarks,
+            world_landmarks=world_for_angles,
         )
         if world_only and world_landmarks is None:
             raw_angles = {name: None for name in raw_angles}

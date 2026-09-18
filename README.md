@@ -172,6 +172,27 @@ position. CSV recordings include image and anchored-world coordinates for all 21
 landmarks on both hands plus an angle-source column. A held wrist measurement is
 explicitly marked `hand_world_3d_held`.
 
+### Skeleton calibration
+
+MediaPipe reads the direction of a limb across the image well and its depth
+badly, so the measured length of an upper arm changes from frame to frame and
+every angle taken from it changes with it. Press `b` and hold four poses in
+turn: a T-pose, bent elbows, arms up, arms down. Each pose must be held, not
+passed through, and only bones lying across the camera rather than along it are
+measured, which is why the T-pose comes first. The median of those samples
+becomes your bone lengths.
+
+From then on, every frame keeps the two well-seen coordinates of each joint and
+re-solves only the depth so the bone keeps its measured length. The profile is
+written to `recordings/skeleton.json`; pass it back with `--skeleton
+recordings/skeleton.json` to skip the routine next time.
+
+What this fixes and what it does not: limbs stop stretching and shrinking in the
+3D preview, and the elbow angle settles measurably. On synthetic arms moving
+through depth with 3.5 cm of depth noise, the mean elbow error drops by about a
+tenth; for an arm held across the camera it drops by about a third. It does not
+rescue a landmark the model put in the wrong place altogether.
+
 Pose-world coordinates are body-relative model estimates, not camera-space depth.
 They support 3D joint orientation, including motion toward and away from the
 camera, but cannot measure the operator's absolute distance from the robots. That
@@ -283,6 +304,7 @@ vision_robot_arm/
     output.py              # console printing modes
     pose_tracker.py        # MediaPipe Pose Landmarker wrapper
     recording.py           # CSV pose recordings
+    skeleton.py            # measured bone lengths hold the noisy depth axis
     smoothing.py           # low-pass filters
     state_builder.py       # raw detections -> smoothed pose state
   robot/                   # robot arm control
@@ -315,6 +337,7 @@ tests/
   test_vision_drawing.py
   test_vision_hand_gestures.py
   test_vision_metrics.py
+  test_vision_skeleton.py
   test_vision_smoothing.py
 ```
 
@@ -353,6 +376,7 @@ python main.py --test-mode --robot-backend serial --robot-port COM3
 - `2`: print raw landmarks
 - `3`: print angles and raw landmarks
 - `c`: calibrate the current pose as neutral
+- `b`: measure your skeleton (press again to cancel)
 - `r`: start/stop CSV recording
 - `f`: toggle fullscreen presentation mode
 - `q` or `Esc`: quit
