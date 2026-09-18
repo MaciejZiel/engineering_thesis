@@ -91,6 +91,7 @@ class RobotConfig:
     send_interval: float = 0.05
     max_speed_deg_s: float = 60.0
     tracking_excursion_deg: float = 40.0
+    tracking_acceleration_deg_s2: float = 5.0
     commissioning_joint: str = JOINT_SHOULDER
     commissioning_speed_deg_s: float = 30.0
     commissioning_excursion_deg: float = 80.0
@@ -140,6 +141,7 @@ class RobotConfig:
             ("--robot-send-interval", self.send_interval),
             ("--robot-max-speed", self.max_speed_deg_s),
             ("--robot-tracking-excursion", self.tracking_excursion_deg),
+            ("--robot-tracking-acceleration", self.tracking_acceleration_deg_s2),
             ("--robot-deadband", self.joint_deadband_deg),
             ("--robot-servo-lookahead", self.servo_lookahead_s),
             ("--robot-commissioning-speed", self.commissioning_speed_deg_s),
@@ -192,6 +194,11 @@ class RobotConfig:
             raise SystemExit(
                 "--robot-tracking-excursion must be between 0 and "
                 f"{COMMISSIONING_MAX_EXCURSION_DEG:g} degrees"
+            )
+        if not 0 < self.tracking_acceleration_deg_s2 <= UR7E_MAX_JOINT_SPEED_DEG_S:
+            raise SystemExit(
+                "--robot-tracking-acceleration must be between 0 and "
+                f"{UR7E_MAX_JOINT_SPEED_DEG_S:g} deg/s^2"
             )
         if self.baud_rate <= 0:
             raise SystemExit("--robot-baud must be greater than 0")

@@ -283,6 +283,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum tracking offset from the captured pose in degrees. Default: 40.",
     )
     robot.add_argument(
+        "--robot-tracking-acceleration",
+        type=float,
+        default=5.0,
+        help="Linear joint acceleration/deceleration limit in deg/s^2. Default: 5.",
+    )
+    robot.add_argument(
         "--robot-commissioning-speed",
         type=float,
         default=30.0,
@@ -454,6 +460,7 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         send_interval=args.robot_send_interval,
         max_speed_deg_s=args.robot_max_speed,
         tracking_excursion_deg=args.robot_tracking_excursion,
+        tracking_acceleration_deg_s2=args.robot_tracking_acceleration,
         commissioning_joint=args.robot_commissioning_joint,
         commissioning_speed_deg_s=args.robot_commissioning_speed,
         commissioning_excursion_deg=args.robot_commissioning_excursion,

@@ -134,6 +134,7 @@ class URArm:
         self._feedback_at: float | None = None
         self._rtde: RtdeClient | None = None
         self._armed = False
+        self._tracking_velocities = {name: 0.0 for name in JOINT_NAMES}
         try:
             self._rtde = rtde_factory(host, config.rtde_port) if rtde_factory is not None else None
         except BaseException:
@@ -147,6 +148,7 @@ class URArm:
             raise ControlFault(f"{self.name}: fresh joint feedback is required.")
         self._setpoints.joints.update(actual)
         self._setpoints.targets.update(actual)
+        self._tracking_velocities = {name: 0.0 for name in JOINT_NAMES}
         self._armed = True
         return dict(actual)
 
@@ -198,6 +200,7 @@ class URArm:
 
     def pause(self) -> None:
         self._send(encode_stopj())
+        self._tracking_velocities = {name: 0.0 for name in JOINT_NAMES}
         actual = self.feedback_joints
         if actual is not None:
             self._setpoints.joints.update(actual)
@@ -217,7 +220,10 @@ class URArm:
         if not self._armed:
             return
         self._setpoints.set_targets(targets.joints, targets.gripper)
-        self._setpoints.step(self._config.max_speed_deg_s * max(elapsed_s, 0.0))
+        if self._config.operation == OPERATION_TRACKING:
+            self._step_tracking_setpoints(max(elapsed_s, 0.0))
+        else:
+            self._setpoints.step(self._config.max_speed_deg_s * max(elapsed_s, 0.0))
         self._send(
             encode_servoj(
                 self._setpoints.joints,
@@ -229,6 +235,30 @@ class URArm:
         if targets.gripper is not None and targets.gripper != self._gripper:
             self._send(encode_gripper(targets.gripper == GRIPPER_CLOSE, self._config.tool_output))
             self._gripper = targets.gripper
+
+    def _step_tracking_setpoints(self, elapsed_s: float) -> None:
+        """Ramp velocity linearly and brake smoothly before each target."""
+        if elapsed_s <= 0:
+            return
+        acceleration = self._config.tracking_acceleration_deg_s2
+        max_speed = self._config.max_speed_deg_s
+        for joint, target in self._setpoints.targets.items():
+            current = self._setpoints.joints[joint]
+            error = target - current
+            if abs(error) < 1e-9:
+                self._tracking_velocities[joint] = 0.0
+                continue
+            braking_speed = math.sqrt(2.0 * acceleration * abs(error))
+            desired = math.copysign(min(max_speed, braking_speed), error)
+            velocity = self._tracking_velocities[joint]
+            max_change = acceleration * elapsed_s
+            velocity += max(-max_change, min(max_change, desired - velocity))
+            step = velocity * elapsed_s
+            if abs(step) >= abs(error) or step * error <= 0:
+                self._setpoints.joints[joint] = target
+                self._tracking_velocities[joint] = 0.0
+            else:
+                self._setpoints.joints[joint] = current + step
 
     def poll_feedback(self) -> None:
         if self._rtde is None:

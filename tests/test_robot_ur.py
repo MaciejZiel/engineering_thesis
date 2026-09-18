@@ -681,6 +681,17 @@ class TrackingArmingTests(unittest.TestCase):
         self.assertEqual(bounded.joints["shoulder"], 3.0)
         self.assertEqual(bounded.joints["elbow"], -40.0)
 
+    def test_tracking_accelerates_instead_of_starting_at_full_speed(self) -> None:
+        backend, socket = self.make()
+        backend.arm_tracking()
+
+        backend.send(targets(right={"shoulder": 3.0}))
+
+        command = socket.commands(b"servoj(")[0]
+        shoulder = math.degrees(float(command.split(b"[")[1].split(b",")[1]))
+        self.assertGreater(shoulder, -37.0)
+        self.assertLess(shoulder, -36.9)
+
 
 if __name__ == "__main__":
     unittest.main()
