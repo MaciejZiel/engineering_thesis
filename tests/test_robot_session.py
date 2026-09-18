@@ -270,5 +270,5 @@ class HardwareSessionTests(unittest.TestCase):
         target = backend.send.call_args.args[0].arm("right")
         self.assertEqual(
             target.joints,
-            {"shoulder": -30.0, "elbow": 40.0, "wrist_1": -20.0},
+            {"shoulder": -50.0, "elbow": 40.0, "wrist_1": -20.0},
         )

@@ -650,8 +650,9 @@ The control button (or **H**) advances one deliberate step at a time:
 
 The robot applies the operator joint-angle difference to its measured starting
 pose. It does not jump to an absolute camera angle. The preset limits motion to
-5 deg/s, ramps at 3 deg/s^2 and clamps every joint to +/-40 degrees around the
-captured robot pose. Once both frames are captured, a temporary camera dropout
+20 deg/s, ramps at 7 deg/s^2 and clamps every joint to +/-80 degrees around the
+captured robot pose. Shoulder motion is reversed relative to the captured angle
+difference; elbow and wrist retain their directions. Once both frames are captured, a temporary camera dropout
 does not alter the recorded destination. **P**, **Q**, and the on-screen stop
 control still send `stopj`. This mode writes independent command and robot
 feedback logs to `logs/ur_keyframe_tracking.jsonl` and

@@ -184,7 +184,9 @@ class HardwareSession:
             end = self._latest_targets.arm(side)
             origin = self._keyframe_robot_start[side]
             joints = {
-                joint: origin[joint] + end.joints[joint] - start.joints[joint]
+                joint: origin[joint] + (
+                    -1.0 if joint == "shoulder" else 1.0
+                ) * (end.joints[joint] - start.joints[joint])
                 for joint in MAPPED_JOINTS
             }
             arms[side] = ArmTargets(joints=joints, gripper=end.gripper)
