@@ -118,8 +118,10 @@ PoseState -> RobotMapper -> JointTargets -> RobotBackend
   (`right`, `left`) the current and target shoulder/elbow/wrist angles and
   the gripper, plus the lift-mode flag. `robot/visualization_3d.py` renders it
   into a canvas as two UR7e arms in a perspective workspace, framed by a fixed
-  volume so the view never drifts while you move. `vision/dashboard.py` embeds
-  that canvas beside the camera feed in the application's only window;
+  volume so the view never drifts while you move. The same module renders the
+  tracked operator separately with `draw_body_3d`, shown in its own window;
+  both views mirror with the camera image. `vision/dashboard.py` embeds the
+  workspace canvas beside the camera feed in the main window;
   `vision/drawing.py` labels the body joints with their angles when
   `--test-mode` is on.
 - Angles measured outside the pose model reach the robot through

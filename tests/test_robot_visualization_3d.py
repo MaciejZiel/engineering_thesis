@@ -15,12 +15,15 @@ from vision_robot_arm.robot.visualization_3d import (
     LABEL,
     LABEL_MIN_WIDTH,
     BASE,
+    HUMAN_ARM,
     HUMAN_HEAD,
     HUMAN_TORSO,
     LEFT_ARM,
     RIGHT_ARM,
     Camera3D,
+    _arm_outline,
     _projector,
+    draw_body_3d,
     draw_workspace_3d,
 )
 from vision_robot_arm.robot.targets import ArmState, RobotState, full_joint_pose
@@ -59,22 +62,17 @@ class WorkspaceRendererTests(unittest.TestCase):
 
         flat = np.zeros((320, 480, 3), dtype=np.uint8)
         deep = np.zeros_like(flat)
-        draw_workspace_3d(cv2, np, flat, None, state(0), indices)
-        draw_workspace_3d(cv2, np, deep, None, state(0.35), indices)
+        draw_body_3d(cv2, np, flat, state(0), indices)
+        draw_body_3d(cv2, np, deep, state(0.35), indices)
         self.assertFalse(np.array_equal(flat, deep))
 
     def test_non_finite_tracking_point_is_skipped_without_crashing(self) -> None:
         points = [LandmarkPoint(float("nan"), 0, 0)] * 3
         state = PoseState(1, points, points, {}, {}, {}, (), False)
         canvas = np.zeros((200, 300, 3), dtype=np.uint8)
-        draw_workspace_3d(
-            cv2,
-            np,
-            canvas,
-            None,
-            state,
-            {"LEFT_SHOULDER": 0, "LEFT_ELBOW": 1, "LEFT_WRIST": 2},
-        )
+        indices = {"LEFT_SHOULDER": 0, "LEFT_ELBOW": 1, "LEFT_WRIST": 2}
+        draw_workspace_3d(cv2, np, canvas, None, state, indices)
+        draw_body_3d(cv2, np, canvas, state, indices)
 
     def test_body_forward_axis_changes_rendered_arm_geometry(self) -> None:
         indices = {"LEFT_SHOULDER": 0, "LEFT_ELBOW": 1, "LEFT_WRIST": 2}
@@ -92,16 +90,31 @@ class WorkspaceRendererTests(unittest.TestCase):
 
         flat = np.zeros((320, 480, 3), dtype=np.uint8)
         forward = np.zeros_like(flat)
-        draw_workspace_3d(cv2, np, flat, None, state(0), indices)
-        draw_workspace_3d(cv2, np, forward, None, state(0.45), indices)
+        draw_body_3d(cv2, np, flat, state(0), indices)
+        draw_body_3d(cv2, np, forward, state(0.45), indices)
         self.assertFalse(np.array_equal(flat, forward))
 
 
 def render(
-    width: int, height: int, robot_state=None, pose_state=None, indices=None
+    width: int,
+    height: int,
+    robot_state=None,
+    pose_state=None,
+    indices=None,
+    mirrored: bool = False,
 ) -> np.ndarray:
     canvas = np.zeros((height, width, 3), dtype=np.uint8)
-    draw_workspace_3d(cv2, np, canvas, robot_state, pose_state, indices or {})
+    draw_workspace_3d(
+        cv2, np, canvas, robot_state, pose_state, indices or {}, mirrored=mirrored
+    )
+    return canvas
+
+
+def render_body(
+    width: int, height: int, pose_state=None, indices=None, mirrored: bool = False
+) -> np.ndarray:
+    canvas = np.zeros((height, width, 3), dtype=np.uint8)
+    draw_body_3d(cv2, np, canvas, pose_state, indices or {}, mirrored=mirrored)
     return canvas
 
 
@@ -198,8 +211,8 @@ class ReadabilityTests(unittest.TestCase):
 
     def test_the_small_preview_leaves_the_words_to_the_dashboard(self) -> None:
         pose = tracked_pose()
-        narrow = render(432, 267, arm_state(-60, 40), pose, BODY_INDICES)
-        wide = render(LABEL_MIN_WIDTH, 420, arm_state(-60, 40), pose, BODY_INDICES)
+        narrow = render_body(432, 267, pose, BODY_INDICES)
+        wide = render_body(LABEL_MIN_WIDTH, 420, pose, BODY_INDICES)
 
         def top_band(canvas: np.ndarray) -> np.ndarray:
             return canvas[: round(canvas.shape[0] * 0.25)]
@@ -209,7 +222,7 @@ class ReadabilityTests(unittest.TestCase):
 
     def test_the_tracked_arms_hang_off_a_body_instead_of_floating(self) -> None:
         """Two bare sticks in mid-air do not read as a person."""
-        with_body = render(432, 267, None, tracked_pose(), BODY_INDICES)
+        with_body = render_body(432, 267, tracked_pose(), BODY_INDICES)
 
         invisible = tracked_pose()
         hidden = PoseState(
@@ -226,7 +239,7 @@ class ReadabilityTests(unittest.TestCase):
                 for point in invisible.body_landmarks
             ],
         )
-        without_body = render(432, 267, None, hidden, BODY_INDICES)
+        without_body = render_body(432, 267, hidden, BODY_INDICES)
 
         for color in (HUMAN_TORSO, HUMAN_HEAD):
             with self.subTest(part=color):
@@ -253,3 +266,66 @@ class ReadabilityTests(unittest.TestCase):
                 px, py = project((x, 0.0, 0.0))[:2]
                 patch = canvas[py - 16 : py + 16, px - 16 : px + 16]
                 self.assertTrue(np.any(matches(patch, color)))
+
+
+class SplitViewTests(unittest.TestCase):
+    """The operator used to be drawn over the robots, which tangled both."""
+
+    def test_the_workspace_view_no_longer_draws_the_operator(self) -> None:
+        empty = render(432, 267, arm_state(-70, 55))
+        with_person = render(432, 267, arm_state(-70, 55), tracked_pose(), BODY_INDICES)
+
+        self.assertTrue(np.array_equal(empty, with_person))
+
+    def test_the_body_view_draws_the_operator_and_no_robots(self) -> None:
+        canvas = render_body(432, 267, tracked_pose(), BODY_INDICES)
+
+        self.assertGreater(np.count_nonzero(matches(canvas, HUMAN_ARM)), 100)
+        for color in (LEFT_ARM, RIGHT_ARM):
+            with self.subTest(arm=color):
+                self.assertEqual(np.count_nonzero(matches(canvas, color)), 0)
+
+    def test_mirroring_swaps_which_side_of_the_screen_each_robot_is_on(self) -> None:
+        """The camera image is mirrored, so the hand you see yourself raise has to
+        belong to the robot on that same side of the screen."""
+        bases = (
+            (-BASE_SEPARATION_M / 2, 0.0, 0.0),
+            (BASE_SEPARATION_M / 2, 0.0, 0.0),
+        )
+
+        plain = _projector(np, 432, 267, Camera3D(), False)
+        flipped = _projector(np, 432, 267, Camera3D(), True)
+
+        self.assertLess(plain(bases[0])[0], plain(bases[1])[0])
+        self.assertGreater(flipped(bases[0])[0], flipped(bases[1])[0])
+
+    def test_mirroring_changes_what_is_drawn(self) -> None:
+        plain = render(432, 267, arm_state(-70, 55))
+        flipped = render(432, 267, arm_state(-70, 55), mirrored=True)
+
+        self.assertFalse(np.array_equal(plain, flipped))
+
+    def test_mirroring_the_body_view_swaps_the_arms_too(self) -> None:
+        pose = tracked_pose()
+        plain = render_body(432, 267, pose, BODY_INDICES)
+        flipped = render_body(432, 267, pose, BODY_INDICES, mirrored=True)
+
+        self.assertFalse(np.array_equal(plain, flipped))
+
+
+class ArmOutlineTests(unittest.TestCase):
+    def test_the_tool_is_one_stub_and_not_the_wrist_frame_cluster(self) -> None:
+        """Three near-coincident wrist frames drew a hook at preview size."""
+        points = ur7e_joint_points(UR_HOME_DEG, (0, 0, 0))
+        outline = _arm_outline(points)
+
+        self.assertEqual(len(outline), 5)
+        self.assertEqual(outline[0], points[0])
+        self.assertEqual(outline[-1], points[-1])
+        self.assertNotIn(points[4], outline)
+        self.assertNotIn(points[5], outline)
+
+    def test_a_short_chain_is_passed_through_untouched(self) -> None:
+        short = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.1))
+
+        self.assertEqual(_arm_outline(short), short)

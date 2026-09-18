@@ -11,7 +11,7 @@ from vision_robot_arm.robot.factory import create_robot_controller
 from vision_robot_arm.robot.mapping import RobotMapper
 from vision_robot_arm.robot.session import HardwareSession
 from vision_robot_arm.robot.simulation import SimulationBackend
-from vision_robot_arm.robot.visualization_3d import draw_workspace_3d
+from vision_robot_arm.robot.visualization_3d import draw_body_3d, draw_workspace_3d
 from vision_robot_arm.vision.skeleton import (
     SkeletonCalibrator,
     SkeletonError,
@@ -68,6 +68,8 @@ from vision_robot_arm.vision.camera import (
 )
 
 WINDOW_NAME = "Motion Twin - Dual UR7e Control"
+BODY_WINDOW_NAME = "Motion Twin - Body tracking"
+BODY_WINDOW_SIZE = (640, 480)
 # Some containers refuse to seek. Without a cap the loop would spin without ever
 # repainting or reading a key, and only an outside kill would stop it.
 MAX_REWIND_ATTEMPTS = 3
@@ -146,6 +148,8 @@ def run_app(config: AppConfig) -> int:
                 raise SystemExit(f"--skeleton: {error}") from error
             print(f"Skeleton loaded: {config.skeleton_path}")
         skeleton_calibrator: SkeletonCalibrator | None = None
+        body_window_open = True
+        body_canvas = _simulation_canvas(deps.np, BODY_WINDOW_SIZE)
         state_builder = PoseStateBuilder(
             indices=indices,
             min_visibility=config.visibility_threshold,
@@ -171,8 +175,8 @@ def run_app(config: AppConfig) -> int:
 
         print(_source_started_message(config))
         print(
-            "Keys: 1/2/3 console, c calibrate, b measure skeleton, r record, f fullscreen, "
-            "d details, Tab/Enter navigate, q/Esc quit."
+            "Keys: 1/2/3 console, c calibrate, b measure skeleton, n body window, r record, "
+            "f fullscreen, d details, Tab/Enter navigate, q/Esc quit."
         )
         if config.test_mode:
             print(
@@ -450,7 +454,17 @@ def run_app(config: AppConfig) -> int:
                 preview_state,
                 current_state,
                 indices,
+                mirrored=mirrored,
             )
+            if body_window_open:
+                draw_body_3d(
+                    cv2,
+                    deps.np,
+                    body_canvas,
+                    current_state,
+                    indices,
+                    mirrored=mirrored,
+                )
             can_calibrate = current_state is not None and any(
                 value is not None for value in current_state.angles.values()
             )
@@ -489,6 +503,8 @@ def run_app(config: AppConfig) -> int:
                 ),
             )
             cv2.imshow(WINDOW_NAME, dashboard_frame)
+            if body_window_open:
+                cv2.imshow(BODY_WINDOW_NAME, body_canvas)
 
             key = (
                 cv2.waitKey(
@@ -511,6 +527,8 @@ def run_app(config: AppConfig) -> int:
                     robot_controller.jog(-1)
                 elif key == ord("]") or held_action == ACTION_JOG_POSITIVE:
                     robot_controller.jog(1)
+            if body_window_open and not _window_is_visible(cv2, BODY_WINDOW_NAME):
+                body_window_open = False
             if not _window_is_visible(cv2, WINDOW_NAME):
                 return 0
             if key in (ord("q"), 27) or action == ACTION_QUIT:
@@ -532,6 +550,14 @@ def run_app(config: AppConfig) -> int:
                     f"Calibration captured from {count} angles."
                     if count
                     else "Hold all arm joints steady and visible for 0.8 seconds, then retry calibration."
+                )
+                print(session_message)
+            if key == ord("n"):
+                body_window_open = not body_window_open
+                if not body_window_open:
+                    _close_window(cv2, BODY_WINDOW_NAME)
+                session_message = (
+                    "Body window shown." if body_window_open else "Body window hidden."
                 )
                 print(session_message)
             if key == ord("b"):
@@ -696,6 +722,14 @@ def _frame_wait_delay_ms(cv2: object, capture: object, config: AppConfig) -> int
 def _remaining_frame_delay_ms(period_ms: int, processing_seconds: float) -> int:
     """Pump UI events without adding a second full frame period after inference."""
     return max(1, math.ceil(period_ms - max(0.0, processing_seconds) * 1000))
+
+
+def _close_window(cv2: object, window_name: str) -> None:
+    cv_error = getattr(cv2, "error", Exception)
+    try:
+        cv2.destroyWindow(window_name)
+    except (AttributeError, cv_error):
+        pass
 
 
 def _window_is_visible(cv2: object, window_name: str) -> bool:

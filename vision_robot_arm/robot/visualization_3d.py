@@ -38,7 +38,15 @@ AXIS_X: Color = (90, 110, 238)
 AXIS_Y: Color = (104, 205, 126)
 AXIS_Z: Color = (74, 184, 246)
 
-HUMAN_OFFSET: Point3 = (0.0, -0.62, 0.92)
+# The body view puts the operator in their own frame: origin at the shoulders,
+# x to their right, y forward, z up. Nothing is offset to sit beside the robots.
+BODY_BOX: tuple[tuple[float, float], ...] = (
+    (-0.70, 0.70),
+    (-0.45, 0.35),
+    (-0.70, 0.40),
+)
+BODY_GRID_BOX: tuple[tuple[float, float], ...] = ((-0.42, 0.42), (-0.3, 0.3))
+BODY_FLOOR_Z = -0.70
 
 # The view frames this fixed volume rather than the live pose, so the preview never
 # zooms or pans while you move. It holds the space both arms and the body actually
@@ -98,6 +106,9 @@ class Camera3D:
     margin: float = 0.05
 
 
+BODY_CAMERA = Camera3D(position=(1.25, -3.60, 0.30), target=(0.0, 0.0, -0.14))
+
+
 @dataclass(frozen=True)
 class Segment3D:
     start: Point3
@@ -115,18 +126,74 @@ def draw_workspace_3d(
     pose_state: PoseState | None,
     indices: dict[str, int],
     camera: Camera3D = Camera3D(),
+    mirrored: bool = False,
 ) -> None:
+    """The two cobots in their workspace. The operator is drawn by `draw_body_3d`.
+
+    `mirrored` faces the scene the way a mirrored camera image does, so the arm
+    you see yourself raise belongs to the robot on that same side of the screen.
+    """
     canvas[:] = BACKGROUND
     height, width = canvas.shape[:2]
     scale = _scale(width, height)
-    project = _projector(np, width, height, camera)
+    project = _projector(np, width, height, camera, mirrored)
     segments: list[Segment3D] = []
 
     _append_grid(segments)
     _append_robots(segments, robot_state, scale)
-    _append_tracked_arms(segments, pose_state, indices, scale)
     _append_drop_lines(segments, robot_state, pose_state, indices)
 
+    _draw_segments(cv2, canvas, project, segments)
+
+    _draw_bases(cv2, canvas, project, scale)
+    _draw_joint_markers(cv2, canvas, project, robot_state, scale)
+    _draw_tcp_targets(cv2, canvas, project, robot_state, scale)
+    _draw_axis_gizmo(cv2, canvas, camera, width, height, scale, mirrored)
+
+
+def draw_body_3d(
+    cv2: Any,
+    np: Any,
+    canvas: Any,
+    pose_state: PoseState | None,
+    indices: dict[str, int],
+    camera: Camera3D = BODY_CAMERA,
+    mirrored: bool = False,
+) -> None:
+    """The tracked operator alone, framed on the body rather than on the robots."""
+    canvas[:] = BACKGROUND
+    height, width = canvas.shape[:2]
+    scale = _scale(width, height)
+    project = _projector(np, width, height, camera, mirrored, BODY_BOX)
+    segments: list[Segment3D] = []
+    _append_body_floor(segments)
+    _append_tracked_arms(segments, pose_state, indices, scale)
+    _draw_segments(cv2, canvas, project, segments)
+    _draw_head(cv2, canvas, project, pose_state, indices, scale)
+    _draw_axis_gizmo(cv2, canvas, camera, width, height, scale, mirrored)
+    if width >= LABEL_MIN_WIDTH:
+        _draw_tracking_coordinates(cv2, canvas, pose_state, indices, width, height)
+
+
+def _append_body_floor(segments: list[Segment3D]) -> None:
+    """A shoulder-height reference plane; the body frame has no floor of its own."""
+    (x_min, x_max), (y_min, y_max) = BODY_GRID_BOX
+    step = 0.2
+    for index in range(round((x_max - x_min) / step) + 1):
+        x = x_min + index * step
+        segments.append(
+            Segment3D((x, y_min, BODY_FLOOR_Z), (x, y_max, BODY_FLOOR_Z), GRID)
+        )
+    for index in range(round((y_max - y_min) / step) + 1):
+        y = y_min + index * step
+        segments.append(
+            Segment3D((x_min, y, BODY_FLOOR_Z), (x_max, y, BODY_FLOOR_Z), GRID)
+        )
+
+
+def _draw_segments(
+    cv2: Any, canvas: Any, project: Any, segments: list[Segment3D]
+) -> None:
     visible = []
     for segment in segments:
         projected = project(segment.start), project(segment.end)
@@ -141,14 +208,6 @@ def draw_workspace_3d(
             _dashed_line(cv2, canvas, start, end, segment.color, segment.thickness)
         else:
             cv2.line(canvas, start, end, segment.color, segment.thickness, cv2.LINE_AA)
-
-    _draw_head(cv2, canvas, project, pose_state, indices, scale)
-    _draw_bases(cv2, canvas, project, scale)
-    _draw_joint_markers(cv2, canvas, project, robot_state, scale)
-    _draw_tcp_targets(cv2, canvas, project, robot_state, scale)
-    _draw_axis_gizmo(cv2, canvas, camera, width, height, scale)
-    if width >= LABEL_MIN_WIDTH:
-        _draw_tracking_coordinates(cv2, canvas, pose_state, indices, width, height)
 
 
 def _scale(width: int, height: int) -> float:
@@ -199,12 +258,24 @@ def _append_robots(
         if target != current:
             segments.extend(
                 Segment3D(a, b, TARGET_ARM, max(1, round(1.5 * scale)), True)
-                for a, b in zip(target_points, target_points[1:])
+                for a, b in zip(_arm_outline(target_points), _arm_outline(target_points)[1:])
             )
+        outline = _arm_outline(current_points)
+        # The long links carry the pose; the tool is one short stub, not the
+        # three near-coincident wrist frames that used to knot up at this size.
         segments.extend(
-            Segment3D(a, b, color, link)
-            for a, b in zip(current_points, current_points[1:])
+            Segment3D(a, b, color, link) for a, b in zip(outline[:-1], outline[1:-1])
         )
+        segments.append(
+            Segment3D(outline[-2], outline[-1], color, max(2, round(3 * scale)))
+        )
+
+
+def _arm_outline(points: tuple[Point3, ...]) -> tuple[Point3, ...]:
+    """Base, shoulder, elbow, wrist centre, tool: the shape a UR7e actually reads as."""
+    if len(points) < 7:
+        return points
+    return (points[0], points[1], points[2], points[3], points[6])
 
 
 def _append_tracked_arms(
@@ -374,8 +445,8 @@ def _draw_joint_markers(
         (ARM_RIGHT, BASE_SEPARATION_M / 2, RIGHT_ARM),
     ):
         arm = state.arm(side) if state is not None else None
-        points = ur7e_joint_points(
-            arm.joints if arm is not None else UR_HOME_DEG, (x, 0, 0)
+        points = _arm_outline(
+            ur7e_joint_points(arm.joints if arm is not None else UR_HOME_DEG, (x, 0, 0))
         )
         for point in points[1:]:
             projected = project(point)
@@ -404,15 +475,22 @@ def _draw_tcp_targets(
 
 
 def _draw_axis_gizmo(
-    cv2: Any, canvas: Any, camera: Camera3D, width: int, height: int, scale: float
+    cv2: Any,
+    canvas: Any,
+    camera: Camera3D,
+    width: int,
+    height: int,
+    scale: float,
+    mirrored: bool = False,
 ) -> None:
     """Pinned to a corner: inside the scene the gizmo only tangles with the arms."""
     size = max(13, min(34, round(min(width, height) * 0.1)))
     origin = (round(size * 0.9), height - round(size * 0.9))
     font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = max(0.3, min(0.42, 0.34 * scale))
+    flip = -1.0 if mirrored else 1.0
     for (dx, dy), color, label in zip(
-        _screen_basis(camera), (AXIS_X, AXIS_Y, AXIS_Z), ("X", "Y", "Z")
+        _screen_basis(camera, flip), (AXIS_X, AXIS_Y, AXIS_Z), ("X", "Y", "Z")
     ):
         end = (round(origin[0] + dx * size), round(origin[1] + dy * size))
         cv2.line(canvas, origin, end, color, max(1, round(1.6 * scale)), cv2.LINE_AA)
@@ -421,12 +499,15 @@ def _draw_axis_gizmo(
     cv2.circle(canvas, origin, max(2, round(2 * scale)), LABEL, -1, cv2.LINE_AA)
 
 
-def _screen_basis(camera: Camera3D) -> tuple[tuple[float, float], ...]:
+def _screen_basis(
+    camera: Camera3D, flip: float = 1.0
+) -> tuple[tuple[float, float], ...]:
     forward = _unit(tuple(t - p for t, p in zip(camera.target, camera.position)))
     right = _unit(_cross(forward, (0.0, 0.0, 1.0)))
     up = _cross(right, forward)
     return tuple(
-        (_dot(axis, right), -_dot(axis, up))
+        (_dot((axis[0] * flip, axis[1], axis[2]), right),
+         -_dot((axis[0] * flip, axis[1], axis[2]), up))
         for axis in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
     )
 
@@ -484,20 +565,13 @@ def _draw_tracking_coordinates(
 
 
 def _pose_to_scene(point: Any) -> Point3:
-    return (
-        float(point.x) + HUMAN_OFFSET[0],
-        float(point.z) + HUMAN_OFFSET[1],
-        -float(point.y) + HUMAN_OFFSET[2],
-    )
+    """World landmarks put y downwards; the scene puts z upwards."""
+    return (float(point.x), float(point.z), -float(point.y))
 
 
 def _body_to_scene(point: Any) -> Point3:
     """Body coordinates already use X right, Y forward/depth, Z up."""
-    return (
-        float(point.x) + HUMAN_OFFSET[0],
-        float(point.y) + HUMAN_OFFSET[1],
-        float(point.z) + HUMAN_OFFSET[2],
-    )
+    return (float(point.x), float(point.y), float(point.z))
 
 
 def _cross(a: Point3, b: Point3) -> Point3:
@@ -517,7 +591,14 @@ def _unit(vector: Point3) -> Point3:
     return (vector[0] / length, vector[1] / length, vector[2] / length)
 
 
-def _projector(np: Any, width: int, height: int, camera: Camera3D) -> Any:
+def _projector(
+    np: Any,
+    width: int,
+    height: int,
+    camera: Camera3D,
+    mirrored: bool = False,
+    box: tuple[tuple[float, float], ...] = CONTENT_BOX,
+) -> Any:
     position = np.asarray(camera.position, dtype=float)
     target = np.asarray(camera.target, dtype=float)
     forward = target - position
@@ -526,10 +607,12 @@ def _projector(np: Any, width: int, height: int, camera: Camera3D) -> Any:
     right /= np.linalg.norm(right)
     up = np.cross(right, forward)
 
+    flip = -1.0 if mirrored else 1.0
+
     def normalized(point: Point3) -> tuple[float, float, float] | None:
         if not all(math.isfinite(value) for value in point):
             return None
-        relative = np.asarray(point, dtype=float) - position
+        relative = np.asarray((point[0] * flip, point[1], point[2]), dtype=float) - position
         depth = float(np.dot(relative, forward))
         if not math.isfinite(depth) or depth <= 0.05:
             return None
@@ -539,7 +622,7 @@ def _projector(np: Any, width: int, height: int, camera: Camera3D) -> Any:
             depth,
         )
 
-    focal, offset_x, offset_y = _fit(normalized, width, height, camera.margin)
+    focal, offset_x, offset_y = _fit(normalized, width, height, camera.margin, box)
 
     def project(point: Point3) -> tuple[int, int, float] | None:
         view = normalized(point)
@@ -555,16 +638,20 @@ def _projector(np: Any, width: int, height: int, camera: Camera3D) -> Any:
 
 
 def _fit(
-    normalized: Any, width: int, height: int, margin: float
+    normalized: Any,
+    width: int,
+    height: int,
+    margin: float,
+    box: tuple[tuple[float, float], ...] = CONTENT_BOX,
 ) -> tuple[float, float, float]:
     """Scale and centre the fixed content box to fill the panel, whatever its shape."""
     seen = [
         corner
         for corner in (
             normalized((x, y, z))
-            for x in CONTENT_BOX[0]
-            for y in CONTENT_BOX[1]
-            for z in CONTENT_BOX[2]
+            for x in box[0]
+            for y in box[1]
+            for z in box[2]
         )
         if corner is not None
     ]

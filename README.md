@@ -172,6 +172,17 @@ position. CSV recordings include image and anchored-world coordinates for all 21
 landmarks on both hands plus an angle-source column. A held wrist measurement is
 explicitly marked `hand_world_3d_held`.
 
+### Windows
+
+The main window holds the camera and the robot workspace. The tracked operator
+gets a second window of their own, because drawing a person over two cobots in
+one small panel tangled both. Toggle it with `n`; closing it by hand leaves it
+closed.
+
+Both 3D views are mirrored whenever the camera image is, so the hand you watch
+yourself raise belongs to the robot on that same side of the screen. Without
+that, raising your right hand moved the robot drawn on the opposite side.
+
 ### Skeleton calibration
 
 MediaPipe reads the direction of a limb across the image well and its depth
@@ -377,6 +388,7 @@ python main.py --test-mode --robot-backend serial --robot-port COM3
 - `3`: print angles and raw landmarks
 - `c`: calibrate the current pose as neutral
 - `b`: measure your skeleton (press again to cancel)
+- `n`: show or hide the body tracking window
 - `r`: start/stop CSV recording
 - `f`: toggle fullscreen presentation mode
 - `q` or `Esc`: quit
