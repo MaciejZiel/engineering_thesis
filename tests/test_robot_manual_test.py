@@ -138,6 +138,17 @@ class ManualArmTestSessionTests(unittest.TestCase):
         self.assertEqual(self.session.phase, "disconnected")
         self.assertIsNone(self.session.settings)
 
+    def test_stop_failure_still_closes_and_disables_control(self):
+        self.prepare_and_arm()
+        self.control.pause.side_effect = OSError("connection lost")
+
+        with self.assertRaisesRegex(RuntimeError, "shutdown"):
+            self.session.stop_and_disconnect()
+
+        self.control.close.assert_called_once()
+        self.assertEqual(self.session.phase, "disconnected")
+        self.assertFalse(self.session.can_jog)
+
     def test_fault_is_latched_and_closes_the_backend(self):
         self.prepare_and_arm()
         self.control.robot_state.side_effect = RuntimeError("feedback expired")

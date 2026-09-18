@@ -104,6 +104,8 @@ class ManualArmTestSession:
         self._jog_direction = direction
 
     def end_jog(self) -> None:
+        if self._jog_direction == 0:
+            return
         self._jog_direction = 0
         if self.phase != "armed" or self._backend is None:
             return
@@ -143,15 +145,22 @@ class ManualArmTestSession:
     def stop_and_disconnect(self) -> None:
         self._jog_direction = 0
         backend, self._backend = self._backend, None
+        failure: BaseException | None = None
         if backend is not None:
             try:
                 if self.phase in ("prepared", "armed"):
                     backend.pause()
-            finally:
+            except BaseException as error:
+                failure = error
+            try:
                 backend.close()
+            except BaseException as error:
+                failure = failure or error
         self.phase = "disconnected"
         self.settings = None
         self.error = None
+        if failure is not None:
+            raise RuntimeError(f"Robot shutdown reported an error: {failure}") from failure
 
     def close(self) -> None:
         try:
@@ -191,8 +200,9 @@ class ManualArmTestSession:
         if self._backend is not None:
             try:
                 self._backend.close()
-            finally:
-                self._backend = None
+            except BaseException:
+                pass
+            self._backend = None
 
     def _require_phase(self, expected: str) -> None:
         if self.phase != expected:
