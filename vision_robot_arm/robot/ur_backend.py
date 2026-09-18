@@ -68,13 +68,20 @@ def encode_stopj(accel_deg_s2: float = STOP_DECELERATION_DEG_S2) -> bytes:
     return f"stopj({math.radians(accel_deg_s2):.3f})\n".encode("ascii")
 
 
-def encode_speedj(joint: str, speed_deg_s: float, duration_s: float) -> bytes:
+def encode_speedj_vector(
+    speeds_deg_s: dict[str, float], duration_s: float
+) -> bytes:
     velocities = [0.0] * len(JOINT_NAMES)
-    velocities[JOINT_NAMES.index(joint)] = math.radians(speed_deg_s)
+    for joint, speed_deg_s in speeds_deg_s.items():
+        velocities[JOINT_NAMES.index(joint)] = math.radians(speed_deg_s)
     vector = "[" + ", ".join(f"{value:.5f}" for value in velocities) + "]"
     # A gentle acceleration lets the controller blend repeated dead-man
     # updates instead of settling a new servoj position every UI frame.
     return f"speedj({vector}, {math.radians(10.0):.5f}, {duration_s:.3f})\n".encode("ascii")
+
+
+def encode_speedj(joint: str, speed_deg_s: float, duration_s: float) -> bytes:
+    return encode_speedj_vector({joint: speed_deg_s}, duration_s)
 
 
 def encode_gripper(closed: bool, tool_output: int = 0) -> bytes:
@@ -156,34 +163,37 @@ class URArm:
             for index, name in enumerate(JOINT_NAMES)
         }
 
-    def commissioning_step(
+    def commissioning_step_multi(
         self,
-        joint: str,
-        direction: int,
+        speeds_deg_s: dict[str, float],
         origin: dict[str, float],
-        speed_deg_s: float,
+        excursion_deg: float,
         watchdog_s: float,
     ) -> None:
-        if joint not in JOINT_NAMES or direction not in (-1, 1):
-            raise ControlFault("Invalid commissioning jog request.")
-        lower = max(
-            self._config.limit_for(joint).minimum,
-            origin[joint] - self._config.commissioning_excursion_deg,
-        )
-        upper = min(
-            self._config.limit_for(joint).maximum,
-            origin[joint] + self._config.commissioning_excursion_deg,
-        )
         actual = self.feedback_joints
         if actual is None:
             raise ControlFault(f"{self.name}: fresh joint feedback is required.")
-        at_limit = actual[joint] >= upper if direction > 0 else actual[joint] <= lower
-        if at_limit:
+        allowed: dict[str, float] = {}
+        for joint, speed in speeds_deg_s.items():
+            if joint not in JOINT_NAMES or not math.isfinite(speed):
+                raise ControlFault("Invalid commissioning jog request.")
+            lower = max(
+                self._config.limit_for(joint).minimum,
+                origin[joint] - excursion_deg,
+            )
+            upper = min(
+                self._config.limit_for(joint).maximum,
+                origin[joint] + excursion_deg,
+            )
+            at_limit = actual[joint] >= upper if speed > 0 else actual[joint] <= lower
+            if speed and not at_limit:
+                allowed[joint] = speed
+        if not allowed:
             self.pause()
             return
         self._setpoints.joints.update(actual)
         self._setpoints.targets.update(actual)
-        self._send(encode_speedj(joint, direction * speed_deg_s, watchdog_s))
+        self._send(encode_speedj_vector(allowed, watchdog_s))
 
     def pause(self) -> None:
         self._send(encode_stopj())
@@ -363,6 +373,7 @@ class URBackend:
         self._last_send_at: float | None = None
         self._commissioning_origins: dict[str, dict[str, float]] = {}
         self._jog_direction = 0
+        self._jog_speeds: dict[str, float] = {}
         self._jog_deadline = 0.0
         self._commissioning_last_step: float | None = None
         self._commissioning_speed_deg_s = config.commissioning_speed_deg_s
@@ -426,6 +437,29 @@ class URBackend:
         if direction not in (-1, 1):
             raise ControlFault("Jog direction must be -1 or +1.")
         self._jog_direction = direction
+        self._jog_speeds = {
+            self._config.commissioning_joint: (
+                direction * self._commissioning_speed_deg_s
+            )
+        }
+        self._jog_deadline = self._clock() + self._config.commissioning_watchdog_s
+
+    def refresh_joint_jogs(self, speeds_deg_s: dict[str, float]) -> None:
+        if not self._commissioning_origins:
+            raise ControlFault("Capture the commissioning origin before jogging.")
+        cleaned = {
+            joint: float(speed)
+            for joint, speed in speeds_deg_s.items()
+            if joint in JOINT_NAMES and math.isfinite(speed) and speed != 0.0
+        }
+        if not cleaned or len(cleaned) != len(speeds_deg_s):
+            raise ControlFault("Select at least one valid joint velocity.")
+        if any(abs(speed) > COMMISSIONING_MAX_SPEED_DEG_S for speed in cleaned.values()):
+            raise ControlFault(
+                f"Joint speed must not exceed {COMMISSIONING_MAX_SPEED_DEG_S:g} deg/s."
+            )
+        self._jog_direction = 0
+        self._jog_speeds = cleaned
         self._jog_deadline = self._clock() + self._config.commissioning_watchdog_s
 
     def set_commissioning_speed(self, speed_deg_s: float) -> None:
@@ -446,7 +480,10 @@ class URBackend:
         if self._jog_direction and now > self._jog_deadline:
             self.pause()
             return
-        if not self._jog_direction:
+        if self._jog_speeds and now > self._jog_deadline:
+            self.pause()
+            return
+        if not self._jog_speeds:
             return
         if (
             self._commissioning_last_step is not None
@@ -466,11 +503,10 @@ class URBackend:
                 arm.poll_feedback()
                 self._check_commissioning_health(arm)
             for name, arm in self._arms.items():
-                arm.commissioning_step(
-                    self._config.commissioning_joint,
-                    self._jog_direction,
+                arm.commissioning_step_multi(
+                    self._jog_speeds,
                     self._commissioning_origins[name],
-                    self._commissioning_speed_deg_s,
+                    self._config.commissioning_excursion_deg,
                     self._config.commissioning_watchdog_s,
                 )
             self._commissioning_last_step = now
@@ -512,6 +548,7 @@ class URBackend:
 
     def pause(self) -> None:
         self._jog_direction = 0
+        self._jog_speeds = {}
         self._jog_deadline = 0.0
         self._tracker = TargetTracker()
         self._last_send_at = None

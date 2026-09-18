@@ -13,6 +13,7 @@ from vision_robot_arm.robot.ur_backend import (
     encode_gripper,
     encode_servoj,
     encode_speedj,
+    encode_speedj_vector,
     encode_stopj,
 )
 from vision_robot_arm.robot.ur_dashboard import DashboardStatus
@@ -122,6 +123,16 @@ class EncodeTests(unittest.TestCase):
             encode_speedj("shoulder", 0.5, 0.15),
             b"speedj([0.00000, 0.00873, 0.00000, 0.00000, 0.00000, 0.00000], 0.17453, 0.150)\n",
         )
+
+    def test_encodes_multiple_joint_velocities_in_one_command(self) -> None:
+        command = encode_speedj_vector(
+            {"base": -2.0, "elbow": 3.0, "wrist_3": 1.0}, 0.15
+        )
+
+        values = command.split(b"[")[1].split(b"]")[0].split(b", ")
+        self.assertAlmostEqual(math.degrees(float(values[0])), -2.0, delta=0.01)
+        self.assertAlmostEqual(math.degrees(float(values[2])), 3.0, delta=0.01)
+        self.assertAlmostEqual(math.degrees(float(values[5])), 1.0, delta=0.01)
 
     def test_servoj_uses_ur_joint_order_in_radians_with_home_for_held_joints(self) -> None:
         frame = encode_servoj({"shoulder": -45.0, "elbow": 90.0}, 0.05, 0.1, 300)
@@ -566,6 +577,21 @@ class CommissioningTests(unittest.TestCase):
         clock.now = 0.16
         backend.robot_state()
         self.assertEqual(len(socket.commands(b"stopj(")), 1)
+
+    def test_multiple_joints_share_one_speed_command(self) -> None:
+        backend, socket, clock = self.make()
+        backend.arm_commissioning()
+        backend.refresh_joint_jogs({"base": -1.0, "elbow": 2.5, "wrist_2": 0.5})
+
+        clock.now = 0.05
+        backend.robot_state()
+
+        commands = socket.commands(b"speedj(")
+        self.assertEqual(len(commands), 1)
+        values = commands[0].split(b"[")[1].split(b"]")[0].split(b", ")
+        self.assertAlmostEqual(math.degrees(float(values[0])), -1.0, delta=0.01)
+        self.assertAlmostEqual(math.degrees(float(values[2])), 2.5, delta=0.01)
+        self.assertAlmostEqual(math.degrees(float(values[4])), 0.5, delta=0.01)
 
     def test_normal_safety_mode_is_refused_before_command_socket_opens(self) -> None:
         connector = FakeConnector()
