@@ -49,6 +49,7 @@ class DashboardResolutionTests(unittest.TestCase):
                 for rect in (
                     layout.camera,
                     layout.preview,
+                    layout.body,
                     layout.status,
                     layout.footer,
                 ):
@@ -59,6 +60,8 @@ class DashboardResolutionTests(unittest.TestCase):
                     self.assertLessEqual(rect.right, width)
                     self.assertLessEqual(rect.bottom, height)
                 self.assertLess(layout.camera.right, layout.preview.x)
+                self.assertLess(layout.preview.right, layout.body.x)
+                self.assertEqual(layout.preview.y, layout.body.y)
                 self.assertLess(layout.preview.bottom, layout.status.y)
                 self.assertLess(layout.status.bottom, layout.footer.y)
                 for i, button in enumerate(ui.buttons):

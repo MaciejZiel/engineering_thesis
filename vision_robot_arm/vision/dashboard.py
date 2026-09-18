@@ -72,15 +72,34 @@ class DashboardLayout:
     header: int
     camera: Rect
     preview: Rect
+    body: Rect
     status: Rect
     footer: Rect
 
 
+def _caption_width(
+    p: Painter, rect: Rect, title: str, pad: int, size: float = 16
+) -> int:
+    """Room left for a right-aligned caption once the title has taken its share."""
+    return max(0, rect.width - 2 * pad - p.measure(title, size, True) - p.px(10))
+
+
+def body_target_rect(rect: Rect, px: Any) -> Rect:
+    """Area inside the body panel that shows the tracked operator."""
+    pad = px(12)
+    return Rect(
+        rect.x + pad,
+        rect.y + px(30),
+        max(1, rect.width - pad * 2),
+        max(1, rect.height - px(38)),
+    )
+
+
 def preview_target_rect(rect: Rect, px: Any) -> Rect:
     """Area inside the arm preview panel that shows the simulation image."""
-    pad = px(20)
+    pad = px(16)
     return Rect(
-        rect.x + pad, rect.y + px(82), rect.width - 2 * pad, rect.height - px(127)
+        rect.x + pad, rect.y + px(48), rect.width - 2 * pad, rect.height - px(86)
     )
 
 
@@ -97,24 +116,38 @@ def dashboard_layout(width: int, height: int) -> DashboardLayout:
     margin, gap = px(24), px(20)
     header, body_top, footer_height = px(64), px(152), px(100)
     body_height = height - body_top - footer_height - margin
-    sidebar_width = min(px(400), max(px(340), round(width * 0.28)))
+    # Three panels share this column now, so it earns more width; the camera
+    # keeps a 16:9 frame with room to spare at every size we target.
+    sidebar_width = min(px(520), max(px(360), round(width * 0.33)))
     camera = Rect(
         margin, body_top, width - margin * 2 - gap - sidebar_width, body_height
     )
-    preview_height = max(px(190), round(body_height * 0.56))
-    preview = Rect(camera.right + gap, body_top, sidebar_width, preview_height)
-    status = Rect(
-        preview.x,
-        preview.bottom + gap,
-        sidebar_width,
-        body_height - preview_height - gap,
-    )
+    # The cobots and the tracked operator sit side by side above the session.
+    # The operator used to be drawn over the cobots, which tangled both, and
+    # stacking three full-width panels left each 3D view a letterboxed strip.
+    # The session rows are text and clip when squeezed, so they are served first.
+    # Enough for every session row including the gestures, which the panel
+    # drops rather than clips when it runs short.
+    status_height = max(px(275), round(body_height * 0.30))
+    panels_height = max(px(220), body_height - status_height - gap)
+    if panels_height + status_height + gap > body_height:
+        # Too short a window for both minimums: share what there is instead of
+        # letting the column run into the footer.
+        available = max(px(80), body_height - gap)
+        panels_height = max(px(70), round(available * 0.45))
+        status_height = max(px(50), available - panels_height)
+    panel_width = max(px(150), (sidebar_width - gap) // 2)
+    sidebar_x = camera.right + gap
+    preview = Rect(sidebar_x, body_top, panel_width, panels_height)
+    body = Rect(preview.right + gap, body_top, panel_width, panels_height)
+    status = Rect(sidebar_x, preview.bottom + gap, sidebar_width, status_height)
     return DashboardLayout(
         scale,
         margin,
         header,
         camera,
         preview,
+        body,
         status,
         Rect(0, height - footer_height, width, footer_height),
     )
@@ -272,6 +305,7 @@ class DashboardUi:
         self,
         camera_frame: Any,
         simulation_frame: Any,
+        body_frame: Any = None,
         *,
         mode: str,
         person_detected: bool,
@@ -338,6 +372,7 @@ class DashboardUi:
             self._preview(
                 p, layout.preview, simulation_frame, robot_label, robot_state_available
             )
+        self._body(p, layout.body, body_frame, person_detected)
         self._status(
             p,
             layout.status,
@@ -452,14 +487,16 @@ class DashboardUi:
     ) -> None:
         p.box(rect)
         pad = p.px(20)
-        p.text("3D workspace", rect.x + pad, rect.y + p.px(19), size=16, strong=True)
+        title = "3D workspace"
+        p.text(title, rect.x + pad, rect.y + p.px(19), size=16, strong=True)
         p.text(
-            "2 × UR7e · BODY XYZ",
+            "2 × UR7e",
             rect.right - pad,
             rect.y + p.px(22),
             size=12,
             color=MUTED,
             align="right",
+            width=_caption_width(p, rect, title, pad),
         )
         target = preview_target_rect(rect, p.px)
         if available:
@@ -485,6 +522,36 @@ class DashboardUi:
         x = rect.x + pad + p.px(22) + p.measure(label, 11) + p.px(20)
         p.line((x, y + p.px(5)), (x + p.px(14), y + p.px(5)), DISABLED, 2)
         p.text("Target", x + p.px(22), y, size=11, color=MUTED)
+
+    def _body(
+        self, p: Painter, rect: Rect, body: Any, detected: bool
+    ) -> None:
+        """The tracked operator, beside the cobots rather than drawn over them."""
+        p.box(rect)
+        pad = p.px(16)
+        title = "Body tracking"
+        p.text(title, rect.x + pad, rect.y + p.px(10), size=14, strong=True)
+        p.text(
+            "BODY XYZ",
+            rect.right - pad,
+            rect.y + p.px(12),
+            size=11,
+            color=MUTED,
+            align="right",
+            width=_caption_width(p, rect, title, pad, size=14),
+        )
+        target = body_target_rect(rect, p.px)
+        if body is not None and detected:
+            self._place_image(p.canvas, body, target)
+        else:
+            p.text(
+                "Waiting for a person",
+                rect.x + rect.width // 2,
+                target.y + target.height // 2 - p.px(6),
+                color=DISABLED,
+                size=12,
+                align="center",
+            )
 
     def _status(
         self,
@@ -784,6 +851,15 @@ class DashboardUi:
         rect = layout.camera if self._workspace_focus else layout.preview
         target = preview_target_rect(
             rect, lambda value: max(1, round(value * layout.scale))
+        )
+        return max(2, target.width), max(2, target.height)
+
+    def body_target_size(self) -> tuple[int, int]:
+        """Pixel size of the body panel, so the operator renders without rescaling."""
+        width, height = self._canvas_size or (1280, 720)
+        layout = dashboard_layout(width, height)
+        target = body_target_rect(
+            layout.body, lambda value: max(1, round(value * layout.scale))
         )
         return max(2, target.width), max(2, target.height)
 

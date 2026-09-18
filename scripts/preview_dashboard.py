@@ -17,7 +17,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from vision_robot_arm.robot.targets import ArmState, RobotState, full_joint_pose
-from vision_robot_arm.robot.visualization_3d import draw_workspace_3d
+from vision_robot_arm.robot.visualization_3d import draw_body_3d, draw_workspace_3d
+from vision_robot_arm.core.pose_state import LandmarkPoint, PoseState
 from vision_robot_arm.vision.dashboard import DashboardUi
 from vision_robot_arm.vision.ui_style import ACCENT, MUTED, Painter
 
@@ -53,6 +54,26 @@ def sample_camera() -> np.ndarray:
     return frame
 
 
+BODY_INDICES = {
+    "NOSE": 0, "LEFT_SHOULDER": 11, "RIGHT_SHOULDER": 12, "LEFT_ELBOW": 13,
+    "RIGHT_ELBOW": 14, "LEFT_WRIST": 15, "RIGHT_WRIST": 16,
+    "LEFT_HIP": 23, "RIGHT_HIP": 24,
+}
+
+
+def sample_body() -> PoseState:
+    """A sample tracked pose, in body coordinates."""
+    points = [LandmarkPoint(0.0, 0.0, 0.0, visibility=0.0) for _ in range(33)]
+    for index, value in (
+        (0, (0.0, 0.06, 0.26)), (11, (-0.19, 0.0, 0.0)), (12, (0.19, 0.0, 0.0)),
+        (13, (-0.34, 0.08, -0.18)), (14, (0.35, 0.06, -0.16)),
+        (15, (-0.28, 0.30, -0.02)), (16, (0.30, 0.28, 0.04)),
+        (23, (-0.13, 0.0, -0.52)), (24, (0.13, 0.0, -0.52)),
+    ):
+        points[index] = LandmarkPoint(*value, visibility=1.0)
+    return PoseState(1, points, points, {}, {}, {}, (), False, body_landmarks=points)
+
+
 def render_previews(output: Path, sizes: list[tuple[int, int]]) -> None:
     output.mkdir(parents=True, exist_ok=True)
     camera = sample_camera()
@@ -72,13 +93,17 @@ def render_previews(output: Path, sizes: list[tuple[int, int]]) -> None:
         # rendering once and letting the dashboard downscale hides every detail flaw.
         panel_width, panel_height = ui.simulation_target_size()
         sim = np.zeros((panel_height, panel_width, 3), np.uint8)
-        draw_workspace_3d(cv2, np, sim, state, None, {})
+        draw_workspace_3d(cv2, np, sim, state, None, {}, mirrored=True)
+        body_width, body_height = ui.body_target_size()
+        body = np.zeros((body_height, body_width, 3), np.uint8)
+        draw_body_3d(cv2, np, body, sample_body(), BODY_INDICES, mirrored=True)
         for name in ("tracking", "waiting", "recording", "details"):
             ui._details = name == "details"
             detected = name != "waiting"
             frame = ui.render(
                 camera if detected else np.full_like(camera, (43, 41, 38)),
                 sim,
+                body,
                 mode="angles",
                 person_detected=detected,
                 calibrated=name == "recording",
