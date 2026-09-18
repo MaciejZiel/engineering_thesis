@@ -74,9 +74,17 @@ class RobotMapper:
             mapping = self._config.mapping_for(joint)
             if mapping is None:
                 continue
-            source = state.relative_angles if state.calibrated else state.angles
+            source = (
+                state.angles if self._config.tracking_space == "2d"
+                else state.relative_angles if state.calibrated else state.angles
+            )
             body_angle = source.get(f"{arm}_{mapping.source}")
             if body_angle is None or not math.isfinite(body_angle):
+                continue
+            if self._config.tracking_space == "2d":
+                # These are signed image angles, not absolute robot positions.
+                # The hardware session applies their delta to an RTDE origin.
+                joints[joint] = self._apply_deadband(f"{arm}_{joint}", body_angle)
                 continue
             target = (mapping.limit.clamp(self._config.home_for(joint) + mapping.sign * body_angle)
                       if state.calibrated else mapping.to_robot(body_angle))

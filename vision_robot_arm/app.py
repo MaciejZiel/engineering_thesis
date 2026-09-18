@@ -64,6 +64,8 @@ from vision_robot_arm.vision.smoothing import (
     LandmarkSmoother,
 )
 from vision_robot_arm.vision.state_builder import PoseStateBuilder
+from vision_robot_arm.vision.planar_tracking import PlanarArmTracker
+from vision_robot_arm.robot.visualization_2d import draw_planar_robot, draw_planar_body
 from vision_robot_arm.vision.camera import (
     configure_camera,
     open_camera_capture,
@@ -92,6 +94,8 @@ def run_app(config: AppConfig, *, web=None) -> int:
     enable_high_dpi_awareness()
     deps = load_runtime_dependencies()
     cv2 = deps.cv2
+    planar = config.robot.tracking_space == "2d"
+    planar_tracker = PlanarArmTracker()
     indices = build_landmark_indices(deps.vision)
     names = build_landmark_names(deps.vision)
 
@@ -141,7 +145,7 @@ def run_app(config: AppConfig, *, web=None) -> int:
         recorder = CsvPoseRecorder(config.recording_dir)
         robot_controller = create_robot_controller(config.robot)
         preview_controller = MappedRobotController(
-            RobotMapper(config.robot, cartesian=True), SimulationBackend(config.robot)
+            RobotMapper(config.robot, cartesian=not planar), SimulationBackend(config.robot)
         )
         skeleton = None
         if config.skeleton_path is not None:
@@ -209,6 +213,7 @@ def run_app(config: AppConfig, *, web=None) -> int:
                 # derive their time constants from these stamps.
                 timestamp_offset_ms = last_timestamp_ms + wait_delay_ms
                 state_builder.reset_tracking()
+                planar_tracker.reset()
                 robot_controller.reset()
                 wrist_hold.reset()
                 gesture_filter.reset()
@@ -251,6 +256,8 @@ def run_app(config: AppConfig, *, web=None) -> int:
             else:
                 detection = tracker.detect(rgb_frame, timestamp_ms)
                 hand_detection = None
+            if planar:
+                detection = PoseDetection(detection.landmarks, None)
             frame_aspect_ratio = frame.shape[1] / max(1, frame.shape[0])
             hand_gestures: tuple[str, ...] = ()
             extra_angles: dict[str, float] = {}
@@ -276,7 +283,7 @@ def run_app(config: AppConfig, *, web=None) -> int:
                 local_world_hands = {
                     side: hand_detection.world_landmarks[index]
                     for side, index in hand_indices.items()
-                    if index < len(hand_detection.world_landmarks)
+                    if not planar and index < len(hand_detection.world_landmarks)
                 }
                 hands_by_side = _smooth_hands(
                     image_hands,
@@ -336,6 +343,12 @@ def run_app(config: AppConfig, *, web=None) -> int:
                 extra_angle_sources.update(
                     {name: "pose_world_3d" for name in elevation_angles}
                 )
+            if planar and pose_landmarks:
+                extra_angles = planar_tracker.measure(
+                    pose_landmarks, hands_by_side, indices,
+                    frame_aspect_ratio, config.visibility_threshold, mirrored,
+                )
+                extra_angle_sources = {name: "image_2d_signed" for name in extra_angles}
             if mirrored:
                 frame = cv2.flip(frame, 1)
 
@@ -353,7 +366,8 @@ def run_app(config: AppConfig, *, web=None) -> int:
                     hand_tracking_enabled=hand_tracker is not None,
                     hand_landmarks=hands_by_side,
                     hand_world_landmarks=hand_world_by_side,
-                    world_only=True,
+                    world_only=not planar,
+                    planar=planar,
                     extra_angle_sources=extra_angle_sources,
                 )
                 display_landmarks = (
@@ -419,6 +433,7 @@ def run_app(config: AppConfig, *, web=None) -> int:
                 preview_controller.reset()
                 if timestamp_ms - pose_missing_since_ms > config.robot.tracking_loss_grace_s * 1000:
                     state_builder.reset_tracking()
+                    planar_tracker.reset()
                     wrist_hold.reset()
                     gesture_filter.reset()
                     hand_smoothers.clear()
@@ -477,7 +492,7 @@ def run_app(config: AppConfig, *, web=None) -> int:
                     simulation_canvas.shape[0],
                 ) != simulation_size:
                     simulation_canvas = _simulation_canvas(deps.np, simulation_size)
-                draw_workspace_views(
+                (draw_planar_robot if planar else draw_workspace_views)(
                     cv2,
                     deps.np,
                     simulation_canvas,
@@ -492,7 +507,7 @@ def run_app(config: AppConfig, *, web=None) -> int:
                     or (body_canvas.shape[1], body_canvas.shape[0]) != body_size
                 ):
                     body_canvas = _simulation_canvas(deps.np, body_size)
-                draw_body_3d(
+                (draw_planar_body if planar else draw_body_3d)(
                     cv2, deps.np, body_canvas, current_state, indices, mirrored=mirrored
                 )
                 dashboard_frame = dashboard.render(
@@ -513,6 +528,7 @@ def run_app(config: AppConfig, *, web=None) -> int:
                     source_label=_source_label(config, actual_camera_index),
                     robot_state_available=True,
                     can_calibrate=can_calibrate,
+                    planar=planar,
                     control_label=(
                         robot_controller.action_label
                         if isinstance(robot_controller, HardwareSession)

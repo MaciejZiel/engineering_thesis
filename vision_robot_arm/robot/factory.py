@@ -32,7 +32,7 @@ def create_robot_controller(config: RobotConfig) -> RobotController:
             factory = lambda: URBackend(config, require_feedback=True)
         return HardwareSession(config, factory)
     return MappedRobotController(
-        RobotMapper(config, cartesian=config.backend == BACKEND_SIM),
+        RobotMapper(config, cartesian=config.backend == BACKEND_SIM and config.tracking_space != "2d"),
         create_robot_backend(config),
     )
 

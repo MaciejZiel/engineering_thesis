@@ -57,6 +57,10 @@ def build_parser() -> argparse.ArgumentParser:
         description="Webcam pose tracker for the vision robot arm prototype (two UR7e cobots)."
     )
     parser.add_argument(
+        "--tracking-space", choices=("2d", "3d"), default=None,
+        help="Camera measurement space. Test mode defaults to 2d; otherwise 3d.",
+    )
+    parser.add_argument(
         "--list-cameras",
         action="store_true",
         help="List available video cameras on the system and exit.",
@@ -474,6 +478,7 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
 
     robot = RobotConfig(
         backend=backend,
+        tracking_space=args.tracking_space or ("2d" if args.test_mode else "3d"),
         operation=args.robot_operation,
         print_interval=args.robot_print_interval,
         right_host=args.robot_right_host,

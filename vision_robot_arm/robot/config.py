@@ -80,6 +80,7 @@ DEFAULT_WRIST_MAPPING = JointMapping(
 class RobotConfig:
     backend: str = BACKEND_NONE
     operation: str = OPERATION_MONITOR
+    tracking_space: str = "3d"
     print_interval: float = 0.5
     right_host: str | None = None
     left_host: str | None = None
@@ -148,6 +149,8 @@ class RobotConfig:
         return self.limit_for(joint).clamp(UR_HOME_DEG.get(joint, 0.0))
 
     def validate(self) -> None:
+        if self.tracking_space not in ("2d", "3d"):
+            raise SystemExit("--tracking-space must be 2d or 3d")
         for flag, value in (
             ("--robot-print-interval", self.print_interval),
             ("--robot-send-interval", self.send_interval),

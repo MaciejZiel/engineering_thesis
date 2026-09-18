@@ -32,6 +32,7 @@ class HardwareSession:
         self._keyframe_start: JointTargets | None = None
         self._keyframe_robot_start: dict[str, dict[str, float]] = {}
         self._keyframe_final: JointTargets | None = None
+        self._latest_pose_at: float | None = None
 
     def _fail(self, error: BaseException) -> None:
         self.error = str(error)
@@ -42,6 +43,8 @@ class HardwareSession:
     def advance(self) -> None:
         """Each step requires a separate operator action; faults cannot auto-resume."""
         try:
+            if self._latest_pose_at is None or self._clock() - self._latest_pose_at > 0.5:
+                self._usable = False
             if self.phase == "disconnected":
                 self._backend = self._factory()
                 self.phase = (
@@ -66,6 +69,12 @@ class HardwareSession:
                 self._capture_keyframe_end()
             elif self.phase in ("ready", "paused") and self._usable:
                 if self._backend.ready():
+                    if self._config.tracking_space == "2d":
+                        self._capture_keyframe_start()
+                        if self.phase != "keyframe_end":
+                            return
+                        if self._config.operation == OPERATION_KEYFRAME:
+                            return
                     self._mapper.reset()
                     self.phase = "active"
             elif self.phase == "active":
@@ -95,6 +104,7 @@ class HardwareSession:
         if self.phase in ("monitoring", "commissioning"):
             return
         targets = self._mapper.map(state)
+        self._latest_pose_at = self._clock()
         self._latest_targets = targets
         self._usable = all(
             all(joint in targets.arm(side).joints
@@ -113,6 +123,8 @@ class HardwareSession:
                     if self._tracking_lost_at is not None:
                         self._note_tracking("tracking_recovered", self._clock() - self._tracking_lost_at)
                     self._tracking_lost_at = None
+                    if self._config.tracking_space == "2d":
+                        targets = self._relative_targets(targets)
                     self._last_targets = targets
                     self._backend.send(targets)
         except (Exception, SystemExit) as error:
@@ -129,6 +141,7 @@ class HardwareSession:
 
     def tracking_lost(self) -> None:
         """Bridge short vision gaps, then fail closed if tracking does not recover."""
+        self._usable = False
         if self.phase != "active":
             return
         if self._config.operation == OPERATION_KEYFRAME and self._keyframe_final is not None:
@@ -162,6 +175,7 @@ class HardwareSession:
     def _capture_keyframe_start(self) -> None:
         if self._latest_targets is None or not self._backend.ready():
             return
+        self._backend.arm_tracking()
         robot_state = self._backend.robot_state()
         if robot_state is None:
             return
@@ -178,10 +192,15 @@ class HardwareSession:
     def _capture_keyframe_end(self) -> None:
         if self._latest_targets is None or self._keyframe_start is None:
             return
+        self._keyframe_final = self._relative_targets(self._latest_targets)
+        self._last_targets = self._keyframe_final
+        self.phase = "active"
+
+    def _relative_targets(self, targets: JointTargets) -> JointTargets:
         arms: dict[str, ArmTargets] = {}
         for side in self._config.hosts:
             start = self._keyframe_start.arm(side)
-            end = self._latest_targets.arm(side)
+            end = targets.arm(side)
             origin = self._keyframe_robot_start[side]
             joints = {
                 joint: origin[joint] + (
@@ -190,12 +209,10 @@ class HardwareSession:
                 for joint in MAPPED_JOINTS
             }
             arms[side] = ArmTargets(joints=joints, gripper=end.gripper)
-        self._keyframe_final = JointTargets(
-            timestamp_ms=self._latest_targets.timestamp_ms,
+        return JointTargets(
+            timestamp_ms=targets.timestamp_ms,
             arms=arms,
         )
-        self._last_targets = self._keyframe_final
-        self.phase = "active"
 
     def jog(self, direction: int) -> None:
         if self.phase != "commissioning":
@@ -228,6 +245,8 @@ class HardwareSession:
 
     @property
     def action_label(self) -> str:
+        if self._config.operation == OPERATION_KEYFRAME and self.phase == "paused" and self._config.tracking_space == "2d":
+            return "Capture new start frame"
         return {
             "disconnected": "Connect robot",
             "monitoring": "Read-only monitoring",

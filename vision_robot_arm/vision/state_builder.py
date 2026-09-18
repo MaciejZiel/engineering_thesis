@@ -68,8 +68,12 @@ class PoseStateBuilder:
         hand_landmarks: dict[str, list[Any]] | None = None,
         hand_world_landmarks: dict[str, list[Any]] | None = None,
         world_only: bool = False,
+        planar: bool = False,
         extra_angle_sources: dict[str, str] | None = None,
     ) -> PoseState:
+        if planar:
+            world_landmarks = None
+            hand_world_landmarks = {}
         raw_landmarks = [
             LandmarkPoint.from_landmark(landmark) for landmark in landmarks
         ]
@@ -106,6 +110,11 @@ class PoseStateBuilder:
         )
         if world_only and world_landmarks is None:
             raw_angles = {name: None for name in raw_angles}
+        if planar:
+            # Never substitute unsigned pose angles for a missing signed measurement.
+            for side in ("left", "right"):
+                for joint in ("shoulder_elevation", "elbow", "wrist"):
+                    raw_angles[f"{side}_{joint}"] = None
         # Smooth once in angle space. Filtering coordinates AND angles caused
         # extra latency and distorted joint geometry during movement.
         if hand_tracking_enabled:

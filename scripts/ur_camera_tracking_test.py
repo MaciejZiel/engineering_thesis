@@ -31,6 +31,7 @@ def run() -> int:
         "--inference-width", "640",
         "--inference-height", "360",
         "--test-mode",
+        "--tracking-space", "2d",
         "--robot-backend", "ur",
         "--robot-operation", "tracking",
         "--robot-right-host", args.host,

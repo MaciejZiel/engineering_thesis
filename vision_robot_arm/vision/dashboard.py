@@ -322,7 +322,9 @@ class DashboardUi:
         control_label: str | None = None,
         commissioning_joint: str | None = None,
         alert: str | None = None,
+        planar: bool = False,
     ) -> Any:
+        self._planar = planar
         camera_height, camera_width = camera_frame.shape[:2]
         width, height = self._canvas_size or (
             max(1280, camera_width),
@@ -487,7 +489,7 @@ class DashboardUi:
     ) -> None:
         p.box(rect)
         pad = p.px(20)
-        title = "3D workspace"
+        title = "2D joint diagram" if self._planar else "3D workspace"
         p.text(title, rect.x + pad, rect.y + p.px(19), size=16, strong=True)
         p.text(
             "2 × UR7e",
@@ -532,7 +534,7 @@ class DashboardUi:
         title = "Body tracking"
         p.text(title, rect.x + pad, rect.y + p.px(10), size=14, strong=True)
         p.text(
-            "BODY XYZ",
+            "CAMERA XY" if self._planar else "BODY XYZ",
             rect.right - pad,
             rect.y + p.px(12),
             size=11,
@@ -744,7 +746,7 @@ class DashboardUi:
             ),
             (
                 ACTION_VIEW,
-                "Camera focus" if self._workspace_focus else "3D focus",
+                "Camera focus" if self._workspace_focus else "2D focus" if self._planar else "3D focus",
                 "V",
                 145,
                 self._workspace_focus,
