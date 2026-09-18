@@ -437,11 +437,6 @@ class URBackend:
                 "Commissioning speed must be between 0 and "
                 f"{COMMISSIONING_MAX_SPEED_DEG_S:g} deg/s."
             )
-        if speed_deg_s > 5.0 and not self._config.commissioning_require_reduced:
-            raise ControlFault(
-                "Speeds above 5 deg/s require REDUCED mode; disconnect, set the "
-                "speed first, and reconnect so the safety preflight can verify it."
-            )
         self._commissioning_speed_deg_s = speed_deg_s
 
     def _commissioning_tick(self) -> None:

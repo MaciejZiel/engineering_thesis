@@ -27,6 +27,7 @@ class ManualTestSettings:
     joint: str = "shoulder"
     speed_deg_s: float = 1.0
     excursion_deg: float = 1.0
+    allow_extended_normal: bool = False
 
     def config(self, operation: str) -> RobotConfig:
         host = self.host.strip()
@@ -47,10 +48,7 @@ class ManualTestSettings:
             # The standalone laboratory jogger may run in the controller's
             # NORMAL state. Its one-joint, low-speed and bounded-motion guards
             # remain independent from the safety-mode check used elsewhere.
-            commissioning_require_reduced=(
-                self.speed_deg_s > NORMAL_MODE_MAX_SPEED_DEG_S
-                or self.excursion_deg > NORMAL_MODE_MAX_EXCURSION_DEG
-            ),
+            commissioning_require_reduced=False,
             send_interval=0.05,
             **kwargs,
         )
@@ -58,6 +56,15 @@ class ManualTestSettings:
             config.validate()
         except SystemExit as error:
             raise ValueError(str(error)) from error
+        extended = (
+            self.speed_deg_s > NORMAL_MODE_MAX_SPEED_DEG_S
+            or self.excursion_deg > NORMAL_MODE_MAX_EXCURSION_DEG
+        )
+        if extended and not self.allow_extended_normal:
+            raise ValueError(
+                "Extended motion in NORMAL requires confirming that the robot "
+                "workspace is clear."
+            )
         return config
 
 

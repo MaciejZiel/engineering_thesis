@@ -48,12 +48,20 @@ class ManualTestSettingsTests(unittest.TestCase):
                 OPERATION_COMMISSIONING
             )
 
-    def test_large_manual_motion_requires_reduced_safety_mode(self):
+    def test_large_manual_motion_requires_workspace_confirmation(self):
+        with self.assertRaisesRegex(ValueError, "workspace is clear"):
+            ManualTestSettings(
+                host="robot", speed_deg_s=30, excursion_deg=80
+            ).config(OPERATION_COMMISSIONING)
+
         config = ManualTestSettings(
-            host="robot", speed_deg_s=30, excursion_deg=80
+            host="robot",
+            speed_deg_s=30,
+            excursion_deg=80,
+            allow_extended_normal=True,
         ).config(OPERATION_COMMISSIONING)
 
-        self.assertTrue(config.commissioning_require_reduced)
+        self.assertFalse(config.commissioning_require_reduced)
 
 
 class ManualArmTestSessionTests(unittest.TestCase):
