@@ -1,0 +1,9 @@
+# Top-level runtime dependencies for this project.
+# Versions match the local environment used to test the current code.
+langchain-ollama==1.1.0
+numpy==2.4.4
+openai-whisper==20250625
+opencv-contrib-python==4.13.0.92
+sounddevice==0.5.5
+ur-rtde==1.6.3
+websockets==16.0
