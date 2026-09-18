@@ -125,6 +125,16 @@ class ManualArmTestSessionTests(unittest.TestCase):
         self.control.pause.assert_called_once()
         self.assertEqual(self.session.phase, "armed")
 
+    def test_entered_targets_are_latched_and_release_cancels_motion(self):
+        self.prepare_and_arm()
+        self.session.begin_positions({"elbow": 30}, {"elbow": 5}, relative=True)
+        self.session.tick()
+        self.session.end_jog()
+        self.session.tick()
+        self.control.start_joint_positions.assert_called_once_with({"elbow": 30}, {"elbow": 5}, relative=True)
+        self.control.refresh_position_move.assert_called_once()
+        self.control.pause.assert_called_once()
+
     def test_speed_can_be_changed_after_control_is_prepared(self):
         self.session.connect_monitor(self.settings)
         self.session.prepare_control()

@@ -249,13 +249,13 @@ class URArm:
             return None
         return {name: math.degrees(actual[index]) for index, name in enumerate(JOINT_NAMES)}
 
-    def update(self, targets: ArmTargets, elapsed_s: float) -> None:
+    def update(self, targets: ArmTargets, elapsed_s: float, *, speed_limits=None) -> None:
         """Move the setpoint toward the mapped pose, then command that setpoint."""
         if not self._armed:
             return
         self._setpoints.set_targets(targets.joints, targets.gripper)
-        if self._config.operation in (OPERATION_TRACKING, OPERATION_KEYFRAME):
-            self._step_tracking_setpoints(max(elapsed_s, 0.0))
+        if speed_limits is not None or self._config.operation in (OPERATION_TRACKING, OPERATION_KEYFRAME):
+            self._step_tracking_setpoints(max(elapsed_s, 0.0), speed_limits)
         else:
             self._setpoints.step(self._config.max_speed_deg_s * max(elapsed_s, 0.0))
         self._send(
@@ -280,13 +280,13 @@ class URArm:
             self._send(command)
             self._gripper = targets.gripper
 
-    def _step_tracking_setpoints(self, elapsed_s: float) -> None:
+    def _step_tracking_setpoints(self, elapsed_s: float, speed_limits=None) -> None:
         """Ramp velocity linearly and brake smoothly before each target."""
         if elapsed_s <= 0:
             return
         acceleration = self._config.tracking_acceleration_deg_s2
-        max_speed = self._config.max_speed_deg_s
         for joint, target in self._setpoints.targets.items():
+            max_speed = speed_limits.get(joint, 0.0) if speed_limits is not None else self._config.max_speed_deg_s
             current = self._setpoints.joints[joint]
             error = target - current
             if abs(error) < 1e-9:
@@ -298,11 +298,12 @@ class URArm:
             max_change = acceleration * elapsed_s
             velocity += max(-max_change, min(max_change, desired - velocity))
             step = velocity * elapsed_s
-            if abs(step) >= abs(error) or step * error <= 0:
+            if step * error > 0 and abs(step) >= abs(error):
                 self._setpoints.joints[joint] = target
                 self._tracking_velocities[joint] = 0.0
             else:
-                self._setpoints.joints[joint] = current + step
+                self._setpoints.joints[joint] = self._config.limit_for(joint).clamp(current + step)
+                self._tracking_velocities[joint] = velocity
 
     def poll_feedback(self) -> dict[str, Any] | None:
         if self._rtde is None:
@@ -455,6 +456,8 @@ class URBackend:
         self._tracking_origins: dict[str, dict[str, float]] = {}
         self._jog_direction = 0
         self._jog_speeds: dict[str, float] = {}
+        self._position_targets: dict[str, float] = {}
+        self._position_speeds: dict[str, float] = {}
         self._jog_deadline = 0.0
         self._commissioning_last_step: float | None = None
         self._commissioning_speed_deg_s = config.commissioning_speed_deg_s
@@ -566,10 +569,71 @@ class URBackend:
             )
         self._commissioning_speed_deg_s = speed_deg_s
 
+    def start_joint_positions(self, joints: dict[str, float], speeds: dict[str, float], *, relative=False) -> None:
+        """Validate the complete request before a held manual position move."""
+        if not self._commissioning or len(self._commissioning_origins) != 1:
+            raise ValueError("Capture the stationary robot pose before entering targets.")
+        if not joints or set(joints) != set(speeds) or not set(joints) <= set(JOINT_NAMES):
+            raise ValueError("Enter at least one joint target and its speed.")
+        if any(not math.isfinite(v) for v in joints.values()) or any(not math.isfinite(v) or not 0 < v <= COMMISSIONING_MAX_SPEED_DEG_S for v in speeds.values()):
+            raise ValueError("Targets must be finite; speeds must be between 0 and 30 deg/s.")
+        name, arm = next(iter(self._arms.items()))
+        arm.poll_feedback()
+        self._check_commissioning_health(arm, require_stationary=True)
+        actual = arm.feedback_joints
+        targets = {}
+        for joint, value in joints.items():
+            target = actual[joint] + value if relative else value
+            origin = self._commissioning_origins[name][joint]
+            limit = self._config.limit_for(joint)
+            low = max(limit.minimum, origin - self._config.commissioning_excursion_deg)
+            high = min(limit.maximum, origin + self._config.commissioning_excursion_deg)
+            if not low <= target <= high:
+                raise ValueError(f"{joint}: target {target:.1f} is outside {low:.1f} .. {high:.1f} deg.")
+            targets[joint] = target
+        arm.capture_current_as_setpoint()
+        self._position_targets = targets
+        self._position_speeds = dict(speeds)
+        self._jog_direction = 0
+        self._jog_speeds = {}
+        self._commissioning_last_step = self._clock()
+        self.refresh_position_move()
+
+    def refresh_position_move(self) -> None:
+        if self._position_targets:
+            self._jog_deadline = self._clock() + self._config.commissioning_watchdog_s
+
+    @property
+    def position_move_active(self) -> bool:
+        return bool(self._position_targets)
+
     def _commissioning_tick(self) -> None:
         if not self._commissioning or not self._commissioning_origins:
             return
         now = self._clock()
+        if self._position_targets:
+            if now > self._jog_deadline:
+                self.pause()
+                return
+            elapsed = now - self._commissioning_last_step
+            if elapsed < self._config.send_interval:
+                return
+            try:
+                arm = next(iter(self._arms.values()))
+                arm.poll_feedback()
+                self._check_commissioning_health(arm)
+                actual = arm.feedback_joints
+                settled = all(abs(actual[j] - v) <= 0.3 for j, v in self._position_targets.items())
+                if settled and max(abs(v) for v in arm.feedback_speeds_deg_s.values()) < 0.5:
+                    self.pause()
+                    return
+                arm.update(ArmTargets(joints=self._position_targets), min(elapsed, self._config.send_interval * MAX_CATCHUP_INTERVALS), speed_limits=self._position_speeds)
+                self._commissioning_last_step = now
+            except BaseException as error:
+                self._fault = str(error)
+                self.close()
+                raise
+            return
         if self._jog_direction and now > self._jog_deadline:
             self.pause()
             return
@@ -641,6 +705,8 @@ class URBackend:
 
     def pause(self) -> None:
         self._jog_direction = 0
+        self._position_targets = {}
+        self._position_speeds = {}
         self._jog_speeds = {}
         self._jog_deadline = 0.0
         self._tracker = TargetTracker()

@@ -39,6 +39,11 @@ class ManualTestWindow:
         self.joint_values = {name: tk.StringVar(value="—") for name in JOINT_NAMES}
         self.joint_speeds = {name: tk.StringVar(value="30.0") for name in JOINT_NAMES}
         self.joint_directions = {name: 0 for name in JOINT_NAMES}
+        self.target_angles = {name: tk.StringVar(value="") for name in JOINT_NAMES}
+        self.target_mode = tk.StringVar(value="Offset from current pose")
+        self.target_message = tk.StringVar(value="Blank targets keep their current position. Values are degrees.")
+        self._last_arm = None
+        self._position_mode = False
         self.direction_buttons = {}
         self.speed_controls, self.locked_controls = [], []
         self._moving = self._closed = False
@@ -49,8 +54,8 @@ class ManualTestWindow:
 
     def _configure_window(self) -> None:
         self.root.title("Motion Twin · UR7e Multi-Joint Control")
-        self.root.geometry("1400x860")
-        self.root.minsize(1370, 800)
+        self.root.geometry("1400x980")
+        self.root.minsize(1370, 900)
         self.root.configure(background=BG)
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         style = ttk.Style(self.root)
@@ -152,6 +157,29 @@ class ManualTestWindow:
         self.move_button.bind("<ButtonPress-1>", lambda _event: self._begin_multi_jog())
         self.move_button.bind("<ButtonRelease-1>", lambda _event: self._end_jog())
         self.move_button.bind("<Leave>", lambda _event: self._end_jog())
+        targets = tk.Frame(parent, bg=PANEL, padx=18)
+        targets.pack(fill="x")
+        self._label(targets, "ANGLE TARGETS · SHOULDER / ELBOW / WRIST 1")
+        fields = tk.Frame(targets, bg=PANEL)
+        fields.pack(fill="x", pady=8)
+        for name in ("shoulder", "elbow", "wrist_1"):
+            group = tk.Frame(fields, bg=PANEL)
+            group.pack(side="left", fill="x", expand=True, padx=(0, 10))
+            self._label(group, JOINT_LABELS[name])
+            ttk.Entry(group, textvariable=self.target_angles[name], width=12, font=(MONO, 11)).pack(fill="x", pady=4)
+        options = tk.Frame(targets, bg=PANEL)
+        options.pack(fill="x")
+        ttk.Combobox(options, textvariable=self.target_mode, state="readonly", width=25,
+                     values=("Offset from current pose", "Absolute joint angles"), style="Control.TCombobox").pack(side="left")
+        self._button(options, "Fill +45 / +30 / +60", self._fill_test_angles).pack(side="left", padx=8)
+        self._button(options, "Copy current angles", self._copy_angles).pack(side="left")
+        self.position_button = self._button(targets, "HOLD TO MOVE TO ENTERED ANGLES", None, bg=ACCENT, fg="#241a13")
+        self.position_button.pack(fill="x", pady=8)
+        self.position_button.bind("<ButtonPress-1>", lambda _event: self._begin_positions())
+        self.position_button.bind("<ButtonRelease-1>", lambda _event: self._end_jog())
+        self.position_button.bind("<Leave>", lambda _event: self._end_jog())
+        tk.Label(targets, textvariable=self.target_message, bg=PANEL, fg=MUTED, anchor="w",
+                 wraplength=800, font=(FONT, 9)).pack(fill="x")
         footer = tk.Frame(parent, bg=PANEL, padx=18, pady=10)
         footer.pack(fill="x")
         tk.Label(footer, textvariable=self.hint, bg=PANEL, fg=MUTED,
@@ -260,6 +288,7 @@ class ManualTestWindow:
             return
         try:
             self.session.begin_multi_jog(self._selected_velocities())
+            self._position_mode = False
             self._moving = True
             self.move_button.configure(bg=SUCCESS, activebackground=SUCCESS)
         except (ValueError, RuntimeError) as error:
@@ -270,7 +299,40 @@ class ManualTestWindow:
             self._moving = False
             self.session.end_jog()
             self.move_button.configure(bg=ACCENT, activebackground="#efbd90")
+            self.position_button.configure(bg=ACCENT, activebackground="#efbd90")
             self._refresh_ui()
+
+    def _fill_test_angles(self):
+        if self._moving:
+            return
+        self.target_mode.set("Offset from current pose")
+        for name, value in (("shoulder", "45"), ("elbow", "30"), ("wrist_1", "60")):
+            self.target_angles[name].set(value)
+        self.target_message.set("Loaded offsets +45 / +30 / +60 degrees. Hold the angle button to move.")
+
+    def _copy_angles(self):
+        if self._moving or self._last_arm is None:
+            return
+        self.target_mode.set("Absolute joint angles")
+        for name in ("shoulder", "elbow", "wrist_1"):
+            self.target_angles[name].set(f"{self._last_arm.joints[name]:.2f}")
+        self.target_message.set("Copied current robot angles. Edit the desired destination before moving.")
+
+    def _begin_positions(self):
+        if not self.session.can_jog or self._moving:
+            return
+        try:
+            joints = {name: float(value.get().replace(",", ".")) for name, value in self.target_angles.items() if value.get().strip()}
+            speeds = {name: self._speed_for(name) for name in joints}
+            self.session.begin_positions(joints, speeds, relative=self.target_mode.get() == "Offset from current pose")
+            if self.session.error:
+                self.target_message.set(self.session.error)
+                return
+            self._moving = self._position_mode = True
+            self.position_button.configure(bg=SUCCESS, activebackground=SUCCESS)
+            self.target_message.set("Moving to captured targets. Release to stop; another press captures a new relative origin.")
+        except (ValueError, RuntimeError) as error:
+            self.target_message.set(str(error))
 
     def _space_down(self, event):
         if not isinstance(event.widget, (tk.Entry, ttk.Spinbox, ttk.Combobox)):
@@ -289,6 +351,7 @@ class ManualTestWindow:
         state = self.session.tick()
         side = self.session.settings.side if self.session.settings else self.side.get()
         arm = state.arm(side) if state is not None else None
+        self._last_arm = arm
         for name, value in self.joint_values.items():
             angle = arm.joints.get(name) if arm is not None else None
             value.set("—" if angle is None else f"{angle:+8.2f}°")
@@ -320,6 +383,7 @@ class ManualTestWindow:
         self.arm_button.configure(state="normal" if phase == "prepared" else "disabled")
         jog_state = "normal" if self.session.can_jog else "disabled"
         self.move_button.configure(state=jog_state)
+        self.position_button.configure(state=jog_state)
         for buttons in self.direction_buttons.values():
             for button in buttons:
                 button.configure(state=jog_state)

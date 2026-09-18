@@ -526,6 +526,45 @@ class PreflightTests(unittest.TestCase):
 
 
 class CommissioningTests(unittest.TestCase):
+    def test_position_move_is_relative_bounded_and_requires_refresh(self):
+        backend, socket, clock = self.make()
+        backend.arm_commissioning()
+        backend.start_joint_positions({"shoulder": 1.0, "elbow": -1.0}, {"shoulder": 2.0, "elbow": 1.0}, relative=True)
+        self.assertEqual(socket.sent, [])
+        self.assertAlmostEqual(backend._position_targets["shoulder"], -39)
+        clock.now = .05
+        backend.robot_state()
+        self.assertEqual(len(socket.commands(b"servoj(")), 1)
+        command = socket.commands(b"servoj(")[0]
+        values = [float(v) for v in command.split(b"[")[1].split(b"]")[0].split(b",")]
+        self.assertEqual(values[0], 0)
+        self.assertEqual(values[4:], [0, 0])
+        self.assertGreater(math.degrees(values[1]), -40)
+        self.assertLess(math.degrees(values[2]), 20)
+        clock.now = .16
+        backend.robot_state()
+        self.assertFalse(backend.position_move_active)
+        self.assertEqual(len(socket.commands(b"stopj(")), 1)
+
+    def test_position_move_rejects_entire_request_if_one_joint_is_invalid(self):
+        backend, socket, clock = self.make()
+        backend.arm_commissioning()
+        for joints in ({"shoulder": -39, "elbow": 30}, {"shoulder": float("nan")}):
+            with self.assertRaises(ValueError):
+                backend.start_joint_positions(joints, {j: 2 for j in joints})
+        self.assertEqual(socket.sent, [])
+        self.assertFalse(backend.position_move_active)
+
+    def test_position_move_stops_once_feedback_reaches_destination(self):
+        backend, socket, clock = self.make()
+        backend.arm_commissioning()
+        backend.start_joint_positions({"shoulder": -39}, {"shoulder": 2})
+        backend._arms["right"]._rtde.sample["actual_q"] = (0, math.radians(-39), math.radians(20), math.radians(-80), 0, 0)
+        clock.now = .05
+        backend.robot_state()
+        self.assertFalse(backend.position_move_active)
+        self.assertEqual(len(socket.commands(b"stopj(")), 1)
+
     def make(self):
         connector = FakeConnector()
         factory = FakeRtdeFactory()
@@ -642,6 +681,19 @@ class CommissioningTests(unittest.TestCase):
 
 
 class TrackingArmingTests(unittest.TestCase):
+    def test_velocity_accumulates_and_reversal_never_teleports(self):
+        backend, _ = self.make()
+        backend.arm_tracking()
+        arm = backend._arms["right"]
+        arm._setpoints.targets["shoulder"] = -10
+        for _ in range(10):
+            arm._step_tracking_setpoints(.05)
+        self.assertAlmostEqual(arm._tracking_velocities["shoulder"], 3.5)
+        before = arm._setpoints.joints["shoulder"]
+        arm._setpoints.targets["shoulder"] = -60
+        arm._step_tracking_setpoints(.05)
+        self.assertLess(abs(arm._setpoints.joints["shoulder"] - before), .2)
+        self.assertNotEqual(arm._setpoints.joints["shoulder"], -60)
     def make(self, velocity: float = 0.0, **overrides):
         connector = FakeConnector()
         factory = FakeRtdeFactory()

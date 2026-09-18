@@ -72,6 +72,7 @@ class ManualArmTestSession:
         self.error: str | None = None
         self._jog_direction = 0
         self._joint_speeds: dict[str, float] = {}
+        self._position_moving = False
 
     def connect_monitor(self, settings: ManualTestSettings) -> None:
         self._require_phase("disconnected")
@@ -104,11 +105,13 @@ class ManualArmTestSession:
         self._require_phase("armed")
         if direction not in (-1, 1):
             raise ValueError("Jog direction must be -1 or +1.")
+        self.end_jog()
         self._jog_direction = direction
         self._joint_speeds = {}
 
     def begin_multi_jog(self, speeds_deg_s: dict[str, float]) -> None:
         self._require_phase("armed")
+        self.end_jog()
         cleaned = {
             joint: float(speed)
             for joint, speed in speeds_deg_s.items()
@@ -120,8 +123,9 @@ class ManualArmTestSession:
         self._joint_speeds = cleaned
 
     def end_jog(self) -> None:
-        if self._jog_direction == 0 and not self._joint_speeds:
+        if self._jog_direction == 0 and not self._joint_speeds and not self._position_moving:
             return
+        self._position_moving = False
         self._jog_direction = 0
         self._joint_speeds = {}
         if self.phase != "armed" or self._backend is None:
@@ -141,6 +145,17 @@ class ManualArmTestSession:
         except (Exception, SystemExit) as error:
             self._fault(error)
 
+    def begin_positions(self, joints, speeds, *, relative=False) -> None:
+        self._require_phase("armed")
+        self.end_jog()
+        try:
+            self._backend.start_joint_positions(joints, speeds, relative=relative)
+            self._position_moving = True
+        except ValueError:
+            raise
+        except (Exception, SystemExit) as error:
+            self._fault(error)
+
     def tick(self) -> RobotState | None:
         if self._backend is None or self.phase not in (
             "monitoring",
@@ -149,7 +164,9 @@ class ManualArmTestSession:
         ):
             return None
         try:
-            if self.phase == "armed" and self._jog_direction:
+            if self.phase == "armed" and self._position_moving:
+                self._backend.refresh_position_move()
+            elif self.phase == "armed" and self._jog_direction:
                 self._backend.refresh_jog(self._jog_direction)
             elif self.phase == "armed" and self._joint_speeds:
                 self._backend.refresh_joint_jogs(self._joint_speeds)
@@ -170,6 +187,7 @@ class ManualArmTestSession:
             return [str(error)]
 
     def stop_and_disconnect(self) -> None:
+        self._position_moving = False
         self._jog_direction = 0
         self._joint_speeds = {}
         backend, self._backend = self._backend, None
@@ -222,6 +240,7 @@ class ManualArmTestSession:
             self._fault(error)
 
     def _fault(self, error: BaseException) -> None:
+        self._position_moving = False
         self._jog_direction = 0
         self._joint_speeds = {}
         self.error = str(error)
