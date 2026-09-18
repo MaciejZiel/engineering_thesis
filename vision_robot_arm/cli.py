@@ -290,6 +290,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Linear joint acceleration/deceleration limit in deg/s^2. Default: 7.",
     )
     robot.add_argument(
+        "--robot-tracking-loss-grace",
+        type=float,
+        default=0.4,
+        help="Keep the last valid target through brief camera dropouts. Default: 0.4 s.",
+    )
+    robot.add_argument(
         "--robot-telemetry-log",
         default=None,
         help="Optional JSONL file for targets, setpoints and RTDE feedback.",
@@ -481,6 +487,7 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         max_speed_deg_s=args.robot_max_speed,
         tracking_excursion_deg=args.robot_tracking_excursion,
         tracking_acceleration_deg_s2=args.robot_tracking_acceleration,
+        tracking_loss_grace_s=args.robot_tracking_loss_grace,
         telemetry_log_path=args.robot_telemetry_log,
         gripper_gesture_frames=args.robot_gripper_gesture_frames,
         gripper_driver=args.robot_gripper_driver,

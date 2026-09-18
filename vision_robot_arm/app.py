@@ -176,6 +176,7 @@ def run_app(config: AppConfig, *, web=None) -> int:
         display_fps = 0.0
         frame_number = 0
         last_hand_detection = None
+        pose_missing_since_ms: int | None = None
 
         print(_source_started_message(config))
         print(
@@ -341,6 +342,7 @@ def run_app(config: AppConfig, *, web=None) -> int:
             current_state = None
             tracking_quality = 0.0
             if pose_landmarks:
+                pose_missing_since_ms = None
                 current_state = state_builder.build(
                     timestamp_ms,
                     pose_landmarks,
@@ -408,13 +410,19 @@ def run_app(config: AppConfig, *, web=None) -> int:
                             print(line)
                     next_print_at = now + config.print_interval
             else:
-                state_builder.reset_tracking()
-                robot_controller.reset()
+                if pose_missing_since_ms is None:
+                    pose_missing_since_ms = timestamp_ms
+                if isinstance(robot_controller, HardwareSession):
+                    robot_controller.tracking_lost()
+                else:
+                    robot_controller.reset()
                 preview_controller.reset()
-                wrist_hold.reset()
-                gesture_filter.reset()
-                hand_smoothers.clear()
-                hand_world_smoothers.clear()
+                if timestamp_ms - pose_missing_since_ms > config.robot.tracking_loss_grace_s * 1000:
+                    state_builder.reset_tracking()
+                    wrist_hold.reset()
+                    gesture_filter.reset()
+                    hand_smoothers.clear()
+                    hand_world_smoothers.clear()
 
             now = time.monotonic()
             frame_elapsed = now - last_frame_at

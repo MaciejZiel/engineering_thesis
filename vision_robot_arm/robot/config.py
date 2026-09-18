@@ -95,6 +95,7 @@ class RobotConfig:
     max_speed_deg_s: float = 60.0
     tracking_excursion_deg: float = 40.0
     tracking_acceleration_deg_s2: float = 7.0
+    tracking_loss_grace_s: float = 0.4
     telemetry_log_path: str | None = None
     gripper_gesture_frames: int = 3
     gripper_driver: str = GRIPPER_DIGITAL
@@ -150,6 +151,7 @@ class RobotConfig:
             ("--robot-max-speed", self.max_speed_deg_s),
             ("--robot-tracking-excursion", self.tracking_excursion_deg),
             ("--robot-tracking-acceleration", self.tracking_acceleration_deg_s2),
+            ("--robot-tracking-loss-grace", self.tracking_loss_grace_s),
             ("--robot-deadband", self.joint_deadband_deg),
             ("--robot-servo-lookahead", self.servo_lookahead_s),
             ("--robot-commissioning-speed", self.commissioning_speed_deg_s),
@@ -214,6 +216,8 @@ class RobotConfig:
                 "--robot-tracking-acceleration must be between 0 and "
                 f"{UR7E_MAX_JOINT_SPEED_DEG_S:g} deg/s^2"
             )
+        if not 0 <= self.tracking_loss_grace_s <= 1.0:
+            raise SystemExit("--robot-tracking-loss-grace must be between 0 and 1 second")
         if self.baud_rate <= 0:
             raise SystemExit("--robot-baud must be greater than 0")
         if self.joint_deadband_deg < 0:

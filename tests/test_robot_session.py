@@ -66,6 +66,41 @@ class HardwareSessionTests(unittest.TestCase):
         self.session.update(pose())
         self.backend.send.assert_called_once()
 
+    def test_brief_tracking_loss_repeats_last_target_before_stopping(self):
+        now = [10.0]
+        backend = Mock()
+        backend.ready.return_value = True
+        session = HardwareSession(
+            RobotConfig(
+                backend="ur",
+                operation=OPERATION_TRACKING,
+                right_host="test",
+                tracking_loss_grace_s=0.4,
+            ),
+            Mock(return_value=backend),
+            clock=lambda: now[0],
+        )
+        session.advance()
+        session.advance()
+        session.update(pose())
+        session.advance()
+        session.update(pose())
+        valid_target = backend.send.call_args.args[0]
+
+        session.tracking_lost()
+        now[0] += 0.3
+        session.tracking_lost()
+
+        self.assertEqual(session.phase, "active")
+        self.assertEqual(backend.send.call_args.args[0], valid_target)
+        backend.pause.assert_not_called()
+
+        now[0] += 0.11
+        session.tracking_lost()
+
+        self.assertEqual(session.phase, "paused")
+        backend.pause.assert_called_once()
+
     def test_fault_is_latched_and_closes_backend(self):
         self.prepare()
         self.session.advance()

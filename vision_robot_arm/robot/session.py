@@ -1,6 +1,7 @@
 """Explicit, fail-closed hardware session; preview never authorizes motion."""
 
 import math
+import time
 from typing import Callable
 
 from vision_robot_arm.core.pose_state import PoseState
@@ -15,7 +16,7 @@ from vision_robot_arm.robot.targets import MAPPED_JOINTS
 
 
 class HardwareSession:
-    def __init__(self, config: RobotConfig, factory: Callable):
+    def __init__(self, config: RobotConfig, factory: Callable, clock: Callable[[], float] = time.monotonic):
         self._config = config
         self._factory = factory
         self._backend = None
@@ -23,6 +24,9 @@ class HardwareSession:
         self.phase = "disconnected"
         self.error: str | None = None
         self._usable = False
+        self._clock = clock
+        self._last_targets = None
+        self._tracking_lost_at: float | None = None
 
     def _fail(self, error: BaseException) -> None:
         self.error = str(error)
@@ -69,6 +73,8 @@ class HardwareSession:
                 else "paused"
             )
             self._mapper.reset()
+            self._tracking_lost_at = None
+            self._last_targets = None
         except (Exception, SystemExit) as error:
             self._fail(error)
 
@@ -84,8 +90,10 @@ class HardwareSession:
         try:
             if self.phase == "active":
                 if not self._usable:
-                    self.pause()
+                    self.tracking_lost()
                 else:
+                    self._tracking_lost_at = None
+                    self._last_targets = targets
                     self._backend.send(targets)
         except (Exception, SystemExit) as error:
             self._fail(error)
@@ -94,7 +102,27 @@ class HardwareSession:
         if self._config.operation != OPERATION_TRACKING:
             return
         self._usable = False
+        self._tracking_lost_at = None
+        self._last_targets = None
         self._mapper.reset()
+        self.pause()
+
+    def tracking_lost(self) -> None:
+        """Bridge short vision gaps, then fail closed if tracking does not recover."""
+        if self.phase != "active":
+            return
+        now = self._clock()
+        if self._tracking_lost_at is None:
+            self._tracking_lost_at = now
+        if (
+            self._last_targets is not None
+            and now - self._tracking_lost_at <= self._config.tracking_loss_grace_s
+        ):
+            try:
+                self._backend.send(self._last_targets)
+            except (Exception, SystemExit) as error:
+                self._fail(error)
+            return
         self.pause()
 
     def jog(self, direction: int) -> None:
