@@ -1,5 +1,8 @@
 import math
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from vision_robot_arm.robot.config import (
     OPERATION_COMMISSIONING,
@@ -628,14 +631,16 @@ class CommissioningTests(unittest.TestCase):
 
 
 class TrackingArmingTests(unittest.TestCase):
-    def make(self, velocity: float = 0.0):
+    def make(self, velocity: float = 0.0, **overrides):
         connector = FakeConnector()
         factory = FakeRtdeFactory()
-        config = RobotConfig(
+        settings = dict(
             backend="ur",
             operation=OPERATION_TRACKING,
             right_host="10.0.0.2",
         )
+        settings.update(overrides)
+        config = RobotConfig(**settings)
         backend = URBackend(
             config,
             connector=connector,
@@ -691,6 +696,23 @@ class TrackingArmingTests(unittest.TestCase):
         shoulder = math.degrees(float(command.split(b"[")[1].split(b",")[1]))
         self.assertGreater(shoulder, -37.0)
         self.assertLess(shoulder, -36.9)
+
+    def test_tracking_telemetry_records_targets_setpoint_and_rtde(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tracking.jsonl"
+            backend, _ = self.make(telemetry_log_path=str(path))
+            backend.arm_tracking()
+            backend.send(targets(right={"shoulder": 3.0}))
+            backend.close()
+
+            records = [json.loads(line) for line in path.read_text().splitlines()]
+
+        sample = next(record for record in records if record["event"] == "tracking_sample")
+        self.assertEqual(sample["robot_mode"], "RUNNING")
+        self.assertEqual(sample["safety_status"], "NORMAL")
+        self.assertIn("shoulder", sample["raw_target_deg"])
+        self.assertIn("shoulder", sample["sent_setpoint_deg"])
+        self.assertEqual(sample["settings"]["excursion_deg"], 40.0)
 
 
 if __name__ == "__main__":

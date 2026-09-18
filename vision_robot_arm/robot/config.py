@@ -91,7 +91,8 @@ class RobotConfig:
     send_interval: float = 0.05
     max_speed_deg_s: float = 60.0
     tracking_excursion_deg: float = 40.0
-    tracking_acceleration_deg_s2: float = 5.0
+    tracking_acceleration_deg_s2: float = 7.0
+    telemetry_log_path: str | None = None
     commissioning_joint: str = JOINT_SHOULDER
     commissioning_speed_deg_s: float = 30.0
     commissioning_excursion_deg: float = 80.0

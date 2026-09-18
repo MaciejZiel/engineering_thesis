@@ -7,9 +7,11 @@ decelerates on shutdown. Feedback comes from RTDE, so the on-screen twin shows t
 robot, not the wish.
 """
 
+import json
 import math
 import socket
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from vision_robot_arm.robot.backend import Clock, TargetTracker
@@ -379,6 +381,8 @@ class URBackend:
         self._require_feedback = require_feedback
         self._status_query = status_query
         self._commissioning = config.operation == OPERATION_COMMISSIONING
+        self._telemetry = None
+        self._next_telemetry_at = 0.0
         if require_feedback and not config.feedback:
             raise ControlFault("Hardware control requires RTDE feedback.")
         if config.preflight:
@@ -409,6 +413,12 @@ class URBackend:
         self._jog_deadline = 0.0
         self._commissioning_last_step: float | None = None
         self._commissioning_speed_deg_s = config.commissioning_speed_deg_s
+        if config.telemetry_log_path:
+            path = Path(config.telemetry_log_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._telemetry = path.open("a", encoding="utf-8", buffering=1)
+            self._write_telemetry("session_started")
+
     def arm_commissioning(self) -> None:
         if not self._commissioning:
             raise ControlFault("This backend is not in commissioning mode.")
@@ -619,7 +629,10 @@ class URBackend:
                 arm.poll_feedback()
                 arm.check_control_health()
             for name, arm in self._arms.items():
-                arm.update(self._bounded_tracking_targets(name, accumulated.arm(name)), elapsed)
+                raw = accumulated.arm(name)
+                bounded = self._bounded_tracking_targets(name, raw)
+                arm.update(bounded, elapsed)
+                self._log_tracking_sample(name, raw, bounded, arm, now)
         except ControlFault as error:
             self._fault = str(error)
             self.close()
@@ -649,6 +662,45 @@ class URBackend:
             tcp_target=targets.tcp_target,
         )
 
+    def _log_tracking_sample(
+        self,
+        name: str,
+        raw: ArmTargets,
+        bounded: ArmTargets,
+        arm: URArm,
+        now: float,
+    ) -> None:
+        if self._telemetry is None or now < self._next_telemetry_at:
+            return
+        self._next_telemetry_at = now + 0.2
+        actual = arm.feedback_joints
+        speeds = arm.feedback_speeds_deg_s
+        self._write_telemetry(
+            "tracking_sample",
+            arm=name,
+            raw_target_deg=raw.joints,
+            bounded_target_deg=bounded.joints,
+            sent_setpoint_deg=dict(arm._setpoints.joints),
+            actual_joint_deg=actual,
+            actual_speed_deg_s=speeds,
+            robot_mode=ROBOT_MODES.get(arm._feedback.get("robot_mode"), "UNKNOWN"),
+            safety_status=SAFETY_STATUSES.get(
+                arm._feedback.get("safety_status"), "UNKNOWN"
+            ),
+            settings={
+                "max_speed_deg_s": self._config.max_speed_deg_s,
+                "acceleration_deg_s2": self._config.tracking_acceleration_deg_s2,
+                "excursion_deg": self._config.tracking_excursion_deg,
+                "deadband_deg": self._config.joint_deadband_deg,
+            },
+        )
+
+    def _write_telemetry(self, event: str, **fields: Any) -> None:
+        if self._telemetry is None:
+            return
+        record = {"time_unix_s": time.time(), "event": event, **fields}
+        self._telemetry.write(json.dumps(record, separators=(",", ":")) + "\n")
+
     def robot_state(self) -> RobotState | None:
         if not self._arms:
             return None
@@ -674,6 +726,10 @@ class URBackend:
     def close(self) -> None:
         for arm in self._arms.values():
             arm.close()
+        if self._telemetry is not None:
+            self._write_telemetry("session_closed")
+            self._telemetry.close()
+            self._telemetry = None
 
 
 def _preflight(

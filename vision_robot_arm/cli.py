@@ -285,8 +285,13 @@ def build_parser() -> argparse.ArgumentParser:
     robot.add_argument(
         "--robot-tracking-acceleration",
         type=float,
-        default=5.0,
-        help="Linear joint acceleration/deceleration limit in deg/s^2. Default: 5.",
+        default=7.0,
+        help="Linear joint acceleration/deceleration limit in deg/s^2. Default: 7.",
+    )
+    robot.add_argument(
+        "--robot-telemetry-log",
+        default=None,
+        help="Optional JSONL file for targets, setpoints and RTDE feedback.",
     )
     robot.add_argument(
         "--robot-commissioning-speed",
@@ -461,6 +466,7 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         max_speed_deg_s=args.robot_max_speed,
         tracking_excursion_deg=args.robot_tracking_excursion,
         tracking_acceleration_deg_s2=args.robot_tracking_acceleration,
+        telemetry_log_path=args.robot_telemetry_log,
         commissioning_joint=args.robot_commissioning_joint,
         commissioning_speed_deg_s=args.robot_commissioning_speed,
         commissioning_excursion_deg=args.robot_commissioning_excursion,
