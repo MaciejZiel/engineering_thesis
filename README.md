@@ -540,7 +540,7 @@ For a camera-free connection and single-joint test, use the standalone manual
 test window. It does not load MediaPipe, open a camera, or accept pose targets:
 
 ```powershell
-.venv\Scripts\python scripts\ur_manual_test.py --host 192.168.1.10 --side right
+.venv\Scripts\python scripts\ur_manual_test.py --host 10.20.3.20 --side right
 ```
 
 The window deliberately tests one robot at a time. Select the joint, speed and
@@ -557,7 +557,8 @@ actions:
 Only then can the `-` or `+` button be held to jog the selected joint. Releasing
 the button sends `stopj` immediately; the existing 150 ms watchdog remains
 active. The application enforces at most 5 deg/s and +/-5 degrees from the
-captured origin, with conservative defaults of 1 deg/s and +/-1 degree. Press
+captured origin, with first-connection defaults of 0.5 deg/s and +/-0.5 degree.
+The laboratory robot address `10.20.3.20` is prefilled but remains editable. Press
 **Escape** or **STOP AND DISCONNECT** to stop, disarm and close the connection.
 Change the IP, side, joint or limits only while disconnected.
 

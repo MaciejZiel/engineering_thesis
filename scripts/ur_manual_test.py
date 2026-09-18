@@ -28,6 +28,7 @@ MUTED = "#959ba3"
 ACCENT = "#dfac80"
 SUCCESS = "#96c4ac"
 DANGER = "#e88f8f"
+DEFAULT_ROBOT_HOST = "10.20.3.20"
 
 PHASE_LABELS = {
     "disconnected": "DISCONNECTED",
@@ -45,8 +46,8 @@ class ManualTestWindow:
         self.host = tk.StringVar(value=host)
         self.side = tk.StringVar(value=side)
         self.joint = tk.StringVar(value="shoulder")
-        self.speed = tk.StringVar(value="1.0")
-        self.excursion = tk.StringVar(value="1.0")
+        self.speed = tk.StringVar(value="0.5")
+        self.excursion = tk.StringVar(value="0.5")
         self.phase = tk.StringVar(value=PHASE_LABELS["disconnected"])
         self.hint = tk.StringVar(value=self.session.action_hint)
         self.detail = tk.StringVar(value="No robot connection.")
@@ -453,7 +454,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Camera-free, single-joint UR7e connection and commissioning test."
     )
-    parser.add_argument("--host", default="", help="Prefill the robot IP address.")
+    parser.add_argument(
+        "--host",
+        default=DEFAULT_ROBOT_HOST,
+        help=f"Prefill the robot IP address (default: {DEFAULT_ROBOT_HOST}).",
+    )
     parser.add_argument(
         "--side", choices=("right", "left"), default="right", help="Robot label."
     )
