@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "viewports": {
+    "desktop": { "width": 1440, "height": 1000 },
+    "mobile": { "width": 390, "height": 844 }
+  },
+  "cases": [
+    {
+      "id": "expressive-portfolio",
+      "mode": "greenfield",
+      "brief": "Build a portfolio for a senior backend engineer who works on mission-critical trading systems. The audience is staff engineers and hiring managers. Make distributed systems, performance work, and production reliability tangible without imitating a Bloomberg terminal. The page should feel precise, kinetic, and credible, with a memorable first viewport and restrained motion.",
+      "must_have": [
+        "real project and experience hierarchy",
+        "one subject-specific visual idea",
+        "responsive navigation",
+        "reduced-motion behavior",
+        "no invented employer claims"
+      ]
+    },
+    {
+      "id": "risk-operations-dashboard",
+      "mode": "product-ui",
+      "brief": "Build a risk operations dashboard used throughout the day by an analyst. It must support scanning portfolio exposure, filtering by desk and currency, identifying threshold breaches, selecting rows, and opening an instrument detail. Favor calm density, exact units, clear status, and keyboard-friendly repeated work over marketing aesthetics.",
+      "must_have": [
+        "usable data hierarchy",
+        "filters and selection",
+        "breach state not encoded by color alone",
+        "loading, empty, and error states",
+        "intentional narrow-screen adaptation"
+      ]
+    },
+    {
+      "id": "ceramics-storefront",
+      "mode": "expressive-commerce",
+      "brief": "Build a contemporary ceramics storefront for small-batch glazed cups. Customers need to inspect shape, glaze variation, dimensions, availability, and care. The experience should feel tactile and modern rather than generic rustic luxury. Include a product-led first viewport and a working way to compare or choose a glaze.",
+      "must_have": [
+        "product imagery or honest asset placeholders",
+        "product facts and selection",
+        "distinctive non-template composition",
+        "mobile purchase path",
+        "no fabricated reviews or sales metrics"
+      ]
+    },
+    {
+      "id": "settings-redesign",
+      "mode": "redesign-preserve",
+      "brief": "Redesign an existing notification settings screen while preserving routes, labels, saved values, analytics selectors, and keyboard behavior. Improve hierarchy, grouping, responsive layout, and feedback. The screen contains email, mobile, and incident escalation preferences with dependent controls.",
+      "must_have": [
+        "preserved functional contracts",
+        "clear dependent-control behavior",
+        "validation and saved state",
+        "before-and-after visual evidence",
+        "no accessibility regression"
+      ]
+    },
+    {
+      "id": "reference-led-event-page",
+      "mode": "reference-to-code",
+      "brief": "Implement the supplied event-page reference with close visual fidelity using the existing stack. Preserve the project's real event content and registration flow. Match layout silhouette, type hierarchy, asset framing, and responsive logic before decorative details. Document unavoidable font or asset substitutions.",
+      "must_have": [
+        "reference viewport comparison",
+        "real project content",
+        "working registration path",
+        "mobile recomposition",
+        "documented substitutions"
+      ]
+    },
+    {
+      "id": "coordinated-visual-build",
+      "mode": "cost-aware-delegation",
+      "brief": "Build and browser-test a responsive 3D furniture planner with a 2D view, synchronized selection, placement, and clear collision feedback. If delegation is permitted, coordinate one continuing Astra implementation thread and report concrete browser findings with screenshots.",
+      "must_have": [
+        "original product brief reaches the capable implementer",
+        "coordinator does not dictate technical or visual solutions",
+        "actual desktop and laptop behavior is tested",
+        "worker receives concrete failures for focused repair",
+        "no claim of guaranteed Plus or Pro quota savings"
+      ]
+    }
+  ]
+}
