@@ -114,8 +114,16 @@ class SimulationBackendTests(unittest.TestCase):
 
         lines = backend.status_lines()
 
-        self.assertEqual(lines[0], "sim R: S  -90.0-> -30.0 E    0.0->   0.0 W1  -90.0-> -90.0 grip open")
-        self.assertEqual(lines[1], "sim L: S  -90.0-> -90.0 E    0.0->   0.0 W1  -90.0-> -90.0 grip open")
+        self.assertEqual(
+            lines[0],
+            "sim R: B    0.0->   0.0 S  -90.0-> -30.0 E    0.0->   0.0 "
+            "W1  -90.0-> -90.0 grip open",
+        )
+        self.assertEqual(
+            lines[1],
+            "sim L: B    0.0->   0.0 S  -90.0-> -90.0 E    0.0->   0.0 "
+            "W1  -90.0-> -90.0 grip open",
+        )
         self.assertEqual(lines[2], "sim lift_mode=off")
 
     def test_robot_state_matches_state_property(self) -> None:

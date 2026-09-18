@@ -33,6 +33,8 @@ HUMAN_HEAD: Color = (84, 148, 120)
 DROP_LINE: Color = (70, 66, 62)
 JOINT: Color = (238, 236, 233)
 BASE: Color = (88, 82, 77)
+# Its own colour, so the heading tick never reads as one more arm link.
+BASE_HEADING: Color = (196, 214, 226)
 LABEL: Color = (176, 169, 161)
 AXIS_X: Color = (90, 110, 238)
 AXIS_Y: Color = (104, 205, 126)
@@ -64,6 +66,9 @@ GRID_BOX: tuple[tuple[float, float], ...] = ((-1.0, 1.0), (-0.9, 0.5))
 LABEL_MIN_WIDTH = 720
 GRID_STEP_M = 0.25
 GRID_MAJOR_EVERY = 2
+# Long enough to read at preview size, short enough not to reach the other base.
+BASE_TICK_M = 0.20
+BASE_TICK_Z = 0.02
 
 # Two arms with nothing between them read as sticks floating in the air.
 TORSO_LINKS = (
@@ -153,6 +158,7 @@ def draw_workspace_3d(
     _draw_segments(cv2, canvas, project, segments)
 
     _draw_bases(cv2, canvas, project, scale)
+    _draw_base_heading(cv2, canvas, project, robot_state, scale)
     _draw_joint_markers(cv2, canvas, project, robot_state, scale)
     _draw_tcp_targets(cv2, canvas, project, robot_state, scale)
     _draw_axis_gizmo(cv2, canvas, camera, width, height, scale, mirrored)
@@ -492,6 +498,52 @@ def _draw_bases(cv2: Any, canvas: Any, project: Any, scale: float) -> None:
         cv2.circle(canvas, point[:2], radius, BASE, -1, cv2.LINE_AA)
         cv2.circle(canvas, point[:2], radius, color, max(1, round(1.6 * scale)), cv2.LINE_AA)
         cv2.circle(canvas, point[:2], max(2, round(3 * scale)), JOINT, -1, cv2.LINE_AA)
+
+
+def _draw_base_heading(
+    cv2: Any, canvas: Any, project: Any, state: RobotState | None, scale: float
+) -> None:
+    """Which way each base is turned.
+
+    Base rotation is about the vertical axis, so it barely shows in an elevation
+    and it foreshortens in a plan: with the arm folded above its own base you
+    cannot tell a turned base from a straight one. A pale tick on the floor can
+    only mean the joint angle, and drawing it in its own colour on top keeps it
+    from reading as one more link of the arm.
+    """
+    for side, x in (
+        (ARM_LEFT, -BASE_SEPARATION_M / 2),
+        (ARM_RIGHT, BASE_SEPARATION_M / 2),
+    ):
+        arm = state.arm(side) if state is not None else None
+        joints = arm.joints if arm is not None else UR_HOME_DEG
+        angle = joints.get("base")
+        if angle is None or not math.isfinite(angle):
+            continue
+        radians = math.radians(angle)
+        # The shoulder link points this way across the floor; see the UR7e DH chain.
+        heading = (-math.cos(radians), -math.sin(radians))
+        start = project((x, 0.0, BASE_TICK_Z))
+        end = project(
+            (
+                x + heading[0] * BASE_TICK_M,
+                heading[1] * BASE_TICK_M,
+                BASE_TICK_Z,
+            )
+        )
+        if start is None or end is None:
+            continue
+        cv2.line(
+            canvas,
+            start[:2],
+            end[:2],
+            BASE_HEADING,
+            max(2, round(2.2 * scale)),
+            cv2.LINE_AA,
+        )
+        cv2.circle(
+            canvas, end[:2], max(2, round(2.6 * scale)), BASE_HEADING, -1, cv2.LINE_AA
+        )
 
 
 def _draw_joint_markers(

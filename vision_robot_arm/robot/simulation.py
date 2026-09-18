@@ -7,7 +7,7 @@ from vision_robot_arm.robot.targets import (
     ARM_NAMES,
     GRIPPER_OPEN,
     JOINT_NAMES,
-    MAPPED_JOINTS,
+    REPORTED_JOINTS,
     ArmState,
     JointTargets,
     RobotState,
@@ -113,7 +113,7 @@ class SimulationBackend:
         for name, arm in self._arms.items():
             joints = " ".join(
                 f"{JOINT_SHORT_NAMES[joint]} {arm.joints[joint]:6.1f}->{arm.targets[joint]:6.1f}"
-                for joint in MAPPED_JOINTS
+                for joint in REPORTED_JOINTS
             )
             lines.append(f"sim {name[0].upper()}: {joints} grip {arm.gripper}")
         lines.append(f"sim lift_mode={'on' if self._lift_mode else 'off'}")

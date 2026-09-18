@@ -23,6 +23,9 @@ JOINT_NAMES = (
     JOINT_WRIST_3,
 )
 MAPPED_JOINTS = (JOINT_SHOULDER, JOINT_ELBOW, JOINT_WRIST_1)
+# Cartesian tracking drives the base too, so a status line that hides it
+# cannot answer whether the arm is turning.
+REPORTED_JOINTS = (JOINT_BASE, JOINT_SHOULDER, JOINT_ELBOW, JOINT_WRIST_1)
 HELD_JOINTS = (JOINT_BASE, JOINT_WRIST_2, JOINT_WRIST_3)
 
 UR_HOME_DEG = {

@@ -15,6 +15,7 @@ from vision_robot_arm.robot.visualization_3d import (
     LABEL,
     LABEL_MIN_WIDTH,
     BASE,
+    BASE_HEADING,
     HUMAN_ARM,
     HUMAN_HEAD,
     HUMAN_TORSO,
@@ -382,3 +383,52 @@ class OrthogonalViewTests(unittest.TestCase):
 
         background = np.asarray(BACKGROUND, dtype=np.uint8)
         self.assertGreater(np.count_nonzero(np.any(canvas != background, axis=2)), 0)
+
+
+class BaseRotationTests(unittest.TestCase):
+    """Turning the base moved nothing you could see, so it read as no joint at all."""
+
+    def heading_pixels(self, base_deg: float) -> np.ndarray:
+        joints = full_joint_pose({"base": base_deg, "shoulder": -90, "elbow": 60})
+        state = RobotState(
+            {
+                "left": ArmState(joints, joints, "open"),
+                "right": ArmState(joints, joints, "open"),
+            },
+            False,
+        )
+        canvas = render(432, 267, state)
+        return np.argwhere(matches(canvas, BASE_HEADING, tolerance=24))
+
+    def centroid(self, pixels: np.ndarray) -> tuple[float, float]:
+        return float(pixels[:, 1].mean()), float(pixels[:, 0].mean())
+
+    def test_the_heading_tick_turns_with_the_base(self) -> None:
+        straight = self.heading_pixels(0.0)
+        self.assertGreater(len(straight), 20, "no heading tick was drawn")
+        origin = self.centroid(straight)
+
+        shifts = []
+        for base_deg in (30.0, 60.0, 90.0, 140.0):
+            with self.subTest(base=base_deg):
+                turned = self.heading_pixels(base_deg)
+                self.assertGreater(len(turned), 20)
+                moved = self.centroid(turned)
+                shift = abs(moved[0] - origin[0]) + abs(moved[1] - origin[1])
+                self.assertGreater(shift, 3.0)
+                shifts.append(shift)
+
+        # Further round means further from where it started.
+        self.assertGreater(shifts[-1], shifts[0] * 2)
+
+    def test_the_arm_above_a_turned_base_alone_cannot_show_it(self) -> None:
+        """Why the tick exists: with the upper arm on the rotation axis, the links
+        themselves are identical whatever the base angle."""
+        for base_deg in (0.0, 70.0):
+            with self.subTest(base=base_deg):
+                points = ur7e_joint_points(
+                    full_joint_pose({"base": base_deg, "shoulder": -90, "elbow": 0}),
+                    (0.0, 0.0, 0.0),
+                )
+                self.assertAlmostEqual(points[2][0], 0.0, places=6)
+                self.assertAlmostEqual(points[2][1], 0.0, places=6)

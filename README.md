@@ -179,7 +179,10 @@ two 3D views side by side, `3D workspace` for the cobots and `Body tracking`
 for the operator, with the session panel underneath.
 
 The workspace panel is split into a plan and an elevation, labelled `TOP` and
-`FRONT`. A single perspective view cannot answer both how far an arm reaches
+`FRONT`. A pale tick on the floor at each base shows which way that base is
+turned: base rotation is about the vertical axis, so it barely shows in the
+elevation, and when the upper arm stands above its own base the links are
+identical whatever the base angle. The status line reports the base too. A single perspective view cannot answer both how far an arm reaches
 across the table and how high it holds the tool, because depth and height
 trade off against each other in the same pixels; two orthogonal views each
 answer one question. Both are drawn from far back, so they are nearly

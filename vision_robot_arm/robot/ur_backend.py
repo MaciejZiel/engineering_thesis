@@ -20,6 +20,7 @@ from vision_robot_arm.robot.targets import (
     GRIPPER_OPEN,
     JOINT_NAMES,
     MAPPED_JOINTS,
+    REPORTED_JOINTS,
     ArmState,
     ArmTargets,
     JointTargets,
@@ -35,7 +36,7 @@ STOP_DECELERATION_DEG_S2 = 120.0
 MAX_CATCHUP_INTERVALS = 3.0
 FEEDBACK_MAX_AGE_S = 0.5
 COMMISSIONING_STATIONARY_DEG_S = 0.5
-JOINT_SHORT_NAMES = {"shoulder": "S", "elbow": "E", "wrist_1": "W1"}
+JOINT_SHORT_NAMES = {"base": "B", "shoulder": "S", "elbow": "E", "wrist_1": "W1"}
 
 Connector = Callable[[str, int], Any]
 RtdeFactory = Callable[[str, int], RtdeClient | None]
@@ -243,7 +244,7 @@ class URArm:
         joints = self.feedback_joints or self._setpoints.joints
         detail = " ".join(
             f"{JOINT_SHORT_NAMES[joint]} {joints[joint]:6.1f}"
-            for joint in MAPPED_JOINTS
+            for joint in REPORTED_JOINTS
             if joint in joints
         )
         return f"ur {self.name[0].upper()} {self.host} {health} {detail} grip {self._gripper or 'n/a'}"
