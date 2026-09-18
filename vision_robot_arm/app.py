@@ -86,7 +86,7 @@ def update_mode_from_key(key: int, current_mode: str) -> str:
     return current_mode
 
 
-def run_app(config: AppConfig) -> int:
+def run_app(config: AppConfig, *, web=None) -> int:
     enable_high_dpi_awareness()
     deps = load_runtime_dependencies()
     cv2 = deps.cv2
@@ -165,7 +165,8 @@ def run_app(config: AppConfig) -> int:
         mirrored = config.mirror and config.video_path is None
         timestamp_offset_ms = 0
         dashboard = DashboardUi(cv2, deps.np, WINDOW_NAME)
-        dashboard.open()
+        if web is None:
+            dashboard.open()
         simulation_canvas = _simulation_canvas(
             deps.np, dashboard.simulation_target_size()
         )
@@ -186,7 +187,7 @@ def run_app(config: AppConfig) -> int:
 
         rewind_attempts = 0
         session_message: str | None = None
-        while True:
+        while web is None or not web.closed:
             frame_started_at = time.monotonic()
             ok, frame = capture.read()
             if not ok:
@@ -442,81 +443,99 @@ def run_app(config: AppConfig) -> int:
 
             robot_state = robot_controller.robot_state()
             preview_state = robot_state or preview_controller.robot_state()
-            simulation_size = dashboard.simulation_target_size()
-            if (
-                simulation_canvas.shape[1],
-                simulation_canvas.shape[0],
-            ) != simulation_size:
-                simulation_canvas = _simulation_canvas(deps.np, simulation_size)
-            draw_workspace_views(
-                cv2,
-                deps.np,
-                simulation_canvas,
-                preview_state,
-                current_state,
-                indices,
-                mirrored=mirrored,
-            )
-            body_size = dashboard.body_target_size()
-            if (
-                body_canvas is None
-                or (body_canvas.shape[1], body_canvas.shape[0]) != body_size
-            ):
-                body_canvas = _simulation_canvas(deps.np, body_size)
-            draw_body_3d(
-                cv2, deps.np, body_canvas, current_state, indices, mirrored=mirrored
-            )
             can_calibrate = current_state is not None and any(
                 value is not None for value in current_state.angles.values()
             )
-            dashboard_frame = dashboard.render(
-                frame,
-                simulation_canvas,
-                body_canvas,
-                mode=mode,
-                person_detected=detection.has_pose,
-                calibrated=state_builder.calibrated,
-                recording=recorder.is_recording,
-                robot_label=config.robot.backend if config.robot.enabled else "off",
-                gestures=current_state.gestures if current_state else (),
-                status_lines=tuple(robot_controller.status_lines())
-                + skeleton_lines
-                + ((recorder.last_error,) if recorder.last_error else ()),
-                tracking_quality=tracking_quality,
-                fps=display_fps,
-                source_label=_source_label(config, actual_camera_index),
-                robot_state_available=True,
-                can_calibrate=can_calibrate,
-                control_label=(
-                    robot_controller.action_label
-                    if isinstance(robot_controller, HardwareSession)
-                    else None
-                ),
-                commissioning_joint=(
-                    config.robot.commissioning_joint
-                    if isinstance(robot_controller, HardwareSession)
-                    and robot_controller.phase == "commissioning"
-                    else None
-                ),
-                alert=(
-                    getattr(robot_controller, "error", None)
-                    or recorder.last_error
-                    or session_message
-                ),
-            )
-            cv2.imshow(WINDOW_NAME, dashboard_frame)
-
-            key = (
-                cv2.waitKey(
-                    _remaining_frame_delay_ms(
-                        wait_delay_ms, time.monotonic() - frame_started_at
-                    )
+            if web is not None:
+                web.publish(
+                    cv2, frame, current_state, preview_state,
+                    fps=display_fps, quality=tracking_quality,
+                    calibrated=state_builder.calibrated, recording=recorder.is_recording,
+                    source=_source_label(config, actual_camera_index),
+                    message=recorder.last_error or session_message or "",
+                    skeleton_status=" ".join(skeleton_lines), mirrored=mirrored,
                 )
-                & 0xFF
-            )
-            dashboard.sync_window_size()
-            dashboard.handle_key(key)
-            action = dashboard.consume_action()
+                key = web.poll_key()
+                action = None
+                time.sleep(max(0.001, _remaining_frame_delay_ms(
+                    wait_delay_ms, time.monotonic() - frame_started_at
+                ) / 1000))
+            else:
+                simulation_size = dashboard.simulation_target_size()
+                if (
+                    simulation_canvas.shape[1],
+                    simulation_canvas.shape[0],
+                ) != simulation_size:
+                    simulation_canvas = _simulation_canvas(deps.np, simulation_size)
+                draw_workspace_views(
+                    cv2,
+                    deps.np,
+                    simulation_canvas,
+                    preview_state,
+                    current_state,
+                    indices,
+                    mirrored=mirrored,
+                )
+                body_size = dashboard.body_target_size()
+                if (
+                    body_canvas is None
+                    or (body_canvas.shape[1], body_canvas.shape[0]) != body_size
+                ):
+                    body_canvas = _simulation_canvas(deps.np, body_size)
+                draw_body_3d(
+                    cv2, deps.np, body_canvas, current_state, indices, mirrored=mirrored
+                )
+                can_calibrate = current_state is not None and any(
+                    value is not None for value in current_state.angles.values()
+                )
+                dashboard_frame = dashboard.render(
+                    frame,
+                    simulation_canvas,
+                    body_canvas,
+                    mode=mode,
+                    person_detected=detection.has_pose,
+                    calibrated=state_builder.calibrated,
+                    recording=recorder.is_recording,
+                    robot_label=config.robot.backend if config.robot.enabled else "off",
+                    gestures=current_state.gestures if current_state else (),
+                    status_lines=tuple(robot_controller.status_lines())
+                    + skeleton_lines
+                    + ((recorder.last_error,) if recorder.last_error else ()),
+                    tracking_quality=tracking_quality,
+                    fps=display_fps,
+                    source_label=_source_label(config, actual_camera_index),
+                    robot_state_available=True,
+                    can_calibrate=can_calibrate,
+                    control_label=(
+                        robot_controller.action_label
+                        if isinstance(robot_controller, HardwareSession)
+                        else None
+                    ),
+                    commissioning_joint=(
+                        config.robot.commissioning_joint
+                        if isinstance(robot_controller, HardwareSession)
+                        and robot_controller.phase == "commissioning"
+                        else None
+                    ),
+                    alert=(
+                        getattr(robot_controller, "error", None)
+                        or recorder.last_error
+                        or session_message
+                    ),
+                )
+                cv2.imshow(WINDOW_NAME, dashboard_frame)
+
+                key = (
+                    cv2.waitKey(
+                        _remaining_frame_delay_ms(
+                            wait_delay_ms, time.monotonic() - frame_started_at
+                        )
+                    )
+                    & 0xFF
+                )
+                dashboard.sync_window_size()
+                dashboard.handle_key(key)
+                action = dashboard.consume_action()
             if isinstance(robot_controller, HardwareSession):
                 if key == ord("h") or action == ACTION_CONTROL:
                     robot_controller.advance()
@@ -527,7 +546,7 @@ def run_app(config: AppConfig) -> int:
                     robot_controller.jog(-1)
                 elif key == ord("]") or held_action == ACTION_JOG_POSITIVE:
                     robot_controller.jog(1)
-            if not _window_is_visible(cv2, WINDOW_NAME):
+            if web is None and not _window_is_visible(cv2, WINDOW_NAME):
                 return 0
             if key in (ord("q"), 27) or action == ACTION_QUIT:
                 return 0
@@ -605,7 +624,8 @@ def run_app(config: AppConfig) -> int:
             ("pose tracker", None if tracker is None else tracker.close),
             ("camera", None if capture is None else capture.release),
         )
-        cv2.destroyAllWindows()
+        if web is None:
+            cv2.destroyAllWindows()
 
 
 def _skeleton_points(detection: PoseDetection) -> list[LandmarkPoint] | None:
