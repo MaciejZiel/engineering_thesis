@@ -221,9 +221,10 @@ class ManualArmTestSession:
 
     def _start_sequence_step(self) -> None:
         step = self._sequence_steps[self.sequence_index]
-        self._backend.start_joint_positions(
-            self._sequence_targets[self.sequence_index],
-            {step.joint: step.speed_deg_s},
+        # One movej per step: the controller plans the whole path itself and
+        # this side only watches feedback to decide when the step is done.
+        self._backend.start_joint_move(
+            self._sequence_targets[self.sequence_index], step.speed_deg_s
         )
         acceleration = RobotConfig().tracking_acceleration_deg_s2
         timeout = 5 + 2 * abs(step.delta_deg) / step.speed_deg_s + 2 * step.speed_deg_s / acceleration

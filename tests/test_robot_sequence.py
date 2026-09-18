@@ -1,6 +1,7 @@
 """Exercise the sequence runner through the real backend with fake RTDE/sockets."""
 
 import math
+import re
 import unittest
 from unittest.mock import Mock
 
@@ -8,6 +9,15 @@ from tests.test_robot_ur import FakeClock, FakeConnector, FakeRtdeFactory, ready
 from vision_robot_arm.robot.manual_test import ManualArmTestSession, ManualTestSettings, SequenceStep
 from vision_robot_arm.robot.targets import JOINT_NAMES
 from vision_robot_arm.robot.ur_backend import URBackend
+
+MOVEJ = re.compile(rb"movej\(\[([^\]]*)\], ([0-9.]+), ([0-9.]+)\)")
+
+
+def parse_movej(frame: bytes) -> tuple[list[float], float, float]:
+    match = MOVEJ.match(frame)
+    assert match, frame
+    joints = [float(value) for value in match.group(1).split(b",")]
+    return joints, float(match.group(2)), float(match.group(3))
 
 
 class ManualSequenceTests(unittest.TestCase):
@@ -37,20 +47,62 @@ class ManualSequenceTests(unittest.TestCase):
     def tearDown(self):
         self.session.close()
 
-    def tick_following_setpoint(self):
-        points = self.backend._arms["right"]._setpoints.joints
-        self.rtde.clients["robot"].sample["actual_q"] = tuple(math.radians(points[j]) for j in JOINT_NAMES)
+    @property
+    def socket(self):
+        return self.connector.sockets["robot"]
+
+    def tick_robot_still(self):
+        """The UI keeps ticking but the robot has not moved yet."""
+        self.clock.now += .051
+        self.session.tick()
+
+    def tick_robot_reaches_target(self):
+        """The controller has executed the movej: feedback now sits on the target."""
+        goal = self.backend._arms["right"]._setpoints.targets
+        self.rtde.clients["robot"].sample["actual_q"] = tuple(math.radians(goal[j]) for j in JOINT_NAMES)
         self.clock.now += .051
         self.session.tick()
 
     def test_plan_is_relative_and_validated_before_any_command(self):
         plan = self.backend.plan_joint_sequence((("shoulder", 5, 10), ("elbow", -15, 5), ("shoulder", -2, 10)))
         self.assertEqual(plan, ({"shoulder": -85}, {"elbow": 5}, {"shoulder": -87}))
-        self.assertEqual(self.connector.sockets["robot"].sent, [])
+        self.assertEqual(self.socket.sent, [])
         with self.assertRaisesRegex(ValueError, "Step 2"):
             self.session.start_sequence([SequenceStep("shoulder", 50), SequenceStep("shoulder", 50)])
         self.assertFalse(self.session.sequence_running)
-        self.assertEqual(self.connector.sockets["robot"].sent, [])
+        self.assertEqual(self.socket.sent, [])
+
+    def test_each_step_is_exactly_one_movej_and_nothing_is_streamed(self):
+        self.session.start_sequence([SequenceStep("shoulder", 3, 5), SequenceStep("elbow", -2, 2)])
+
+        # Step one is on the wire immediately, once, as a single move.
+        self.assertEqual(len(self.socket.commands(b"movej(")), 1)
+        for _ in range(6):
+            self.tick_robot_still()
+        self.assertEqual(len(self.socket.commands(b"movej(")), 1, "ticking must not re-send the move")
+        self.assertEqual(self.socket.commands(b"servoj("), [])
+        self.assertEqual(self.socket.commands(b"speedj("), [])
+
+        for _ in range(300):
+            self.tick_robot_reaches_target()
+            if not self.session.sequence_running:
+                break
+
+        self.assertEqual(self.session.sequence_state, "completed")
+        self.assertEqual(len(self.socket.commands(b"movej(")), 2, "one movej per step")
+        self.assertEqual(self.socket.commands(b"servoj("), [])
+
+    def test_the_movej_carries_the_target_the_step_speed_and_the_acceleration(self):
+        self.session.start_sequence([SequenceStep("shoulder", 5, 10)])
+
+        joints, acceleration, speed = parse_movej(self.socket.commands(b"movej(")[0])
+        self.assertEqual(len(joints), 6)
+        self.assertAlmostEqual(joints[1], math.radians(-85), places=3)
+        # Untouched joints are commanded at their measured position, so they hold.
+        self.assertAlmostEqual(joints[2], math.radians(20), places=3)
+        self.assertAlmostEqual(joints[3], math.radians(-80), places=3)
+        self.assertAlmostEqual(speed, math.radians(10), places=3)
+        self.assertAlmostEqual(acceleration, math.radians(7.0), places=3)
 
     def test_steps_run_once_in_order_and_wait_for_actual_feedback(self):
         queue = [SequenceStep("shoulder", 3, 5), SequenceStep("elbow", -2, 2)]
@@ -58,13 +110,12 @@ class ManualSequenceTests(unittest.TestCase):
         queue.clear()  # Editing the caller's list cannot change a running sequence.
         self.assertEqual(self.session.sequence_index, 0)
         self.assertFalse(self.session.can_jog)
-        # Setpoints moving alone must never advance the queue.
+        # Time passing alone must never advance the queue.
         for _ in range(4):
-            self.clock.now += .051
-            self.session.tick()
+            self.tick_robot_still()
         self.assertEqual(self.session.sequence_index, 0)
         for _ in range(300):
-            self.tick_following_setpoint()
+            self.tick_robot_reaches_target()
             if not self.session.sequence_running:
                 break
         self.assertEqual(self.session.sequence_state, "completed")
@@ -73,29 +124,32 @@ class ManualSequenceTests(unittest.TestCase):
         self.assertAlmostEqual(pose["shoulder"], -87, delta=.3)
         self.assertAlmostEqual(pose["elbow"], 18, delta=.3)
         self.assertEqual(pose["base"], 0)
-        before = len(self.connector.sockets["robot"].sent)
+        before = len(self.socket.sent)
         self.session.tick()
-        self.assertEqual(before, len(self.connector.sockets["robot"].sent))
+        self.assertEqual(before, len(self.socket.sent))
 
     def test_stop_cancels_pending_steps_without_auto_resume(self):
         self.session.start_sequence([SequenceStep("shoulder", 30), SequenceStep("elbow", -15)])
-        self.tick_following_setpoint()
+        self.tick_robot_still()
         self.session.stop_sequence()
-        before = len(self.connector.sockets["robot"].sent)
+        before = len(self.socket.sent)
         for _ in range(3):
-            self.tick_following_setpoint()
+            self.tick_robot_reaches_target()
         self.assertEqual(self.session.sequence_state, "stopped")
         self.assertEqual(self.session.sequence_index, 0)
-        self.assertEqual(before, len(self.connector.sockets["robot"].sent))
-        self.assertTrue(self.connector.sockets["robot"].sent[-1].startswith(b"stopj("))
+        self.assertEqual(before, len(self.socket.sent))
+        self.assertTrue(self.socket.sent[-1].startswith(b"stopj("))
+        self.assertEqual(len(self.socket.commands(b"movej(")), 1, "the second step was never sent")
 
-    def test_expired_watchdog_cannot_be_revived_or_counted_as_completion(self):
+    def test_expired_watchdog_stops_the_move_and_cannot_be_revived(self):
         self.session.start_sequence([SequenceStep("shoulder", 30), SequenceStep("elbow", -15)])
         self.clock.now += .2
         self.session.tick()
         self.assertEqual(self.session.sequence_state, "stopped")
         self.assertEqual(self.session.sequence_index, 0)
-        self.assertEqual(self.connector.sockets["robot"].commands(b"servoj("), [])
+        self.assertEqual(len(self.socket.commands(b"movej(")), 1)
+        self.assertTrue(self.socket.sent[-1].startswith(b"stopj("), "a missed tick interrupts the move")
+        self.assertEqual(self.socket.commands(b"servoj("), [])
 
     def test_manual_motion_is_blocked_while_sequence_runs(self):
         self.session.start_sequence([SequenceStep("shoulder", 30)])
@@ -113,7 +167,7 @@ class ManualSequenceTests(unittest.TestCase):
         self.session.tick()
         self.assertEqual(self.session.sequence_state, "fault")
         self.assertEqual(self.session.phase, "fault")
-        self.assertTrue(self.connector.sockets["robot"].closed)
+        self.assertTrue(self.socket.closed)
 
     def test_stuck_robot_times_out_instead_of_starting_next_step(self):
         self.session.start_sequence([SequenceStep("shoulder", 1), SequenceStep("elbow", -15)])
@@ -122,6 +176,7 @@ class ManualSequenceTests(unittest.TestCase):
         self.assertEqual(self.session.sequence_state, "stopped")
         self.assertIn("timed out", self.session.sequence_message)
         self.assertEqual(self.session.sequence_index, 0)
+        self.assertEqual(len(self.socket.commands(b"movej(")), 1)
 
     def test_disconnect_cancels_pending_steps(self):
         self.session.start_sequence([SequenceStep("shoulder", 1), SequenceStep("elbow", -15)])
@@ -135,3 +190,7 @@ class ManualSequenceTests(unittest.TestCase):
                                     ("elbow", 30, 31), ("elbow", 30, -1)):
             with self.assertRaises(ValueError):
                 SequenceStep(joint, delta, speed)
+
+
+if __name__ == "__main__":
+    unittest.main()

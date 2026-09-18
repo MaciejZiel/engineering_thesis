@@ -73,6 +73,16 @@ def encode_stopj(accel_deg_s2: float = STOP_DECELERATION_DEG_S2) -> bytes:
     return f"stopj({math.radians(accel_deg_s2):.3f})\n".encode("ascii")
 
 
+def encode_movej(
+    joints_deg: dict[str, float], accel_deg_s2: float, speed_deg_s: float
+) -> bytes:
+    """One complete joint move; the controller plans and executes the whole path."""
+    return (
+        f"movej({_joint_vector(joints_deg)}, "
+        f"{math.radians(accel_deg_s2):.4f}, {math.radians(speed_deg_s):.4f})\n"
+    ).encode("ascii")
+
+
 def encode_speedj_vector(
     speeds_deg_s: dict[str, float], duration_s: float
 ) -> bytes:
@@ -231,6 +241,23 @@ class URArm:
         self._setpoints.joints.update(actual)
         self._setpoints.targets.update(actual)
         self._send(encode_speedj_vector(allowed, watchdog_s))
+
+    def move_joints(
+        self, targets: dict[str, float], speed_deg_s: float, accel_deg_s2: float
+    ) -> None:
+        """Send exactly one movej. Nothing is streamed afterwards; feedback decides arrival.
+
+        Joints not named in `targets` are commanded at their measured position, so
+        the controller holds them while the named joint travels.
+        """
+        actual = self.feedback_joints
+        if actual is None:
+            raise ControlFault(f"{self.name}: fresh joint feedback is required.")
+        self._setpoints.joints.update(actual)
+        self._setpoints.targets.update(actual)
+        self._setpoints.targets.update(targets)
+        self._tracking_velocities = {name: 0.0 for name in JOINT_NAMES}
+        self._send(encode_movej(self._setpoints.targets, accel_deg_s2, speed_deg_s))
 
     def pause(self) -> None:
         self._send(encode_stopj())
@@ -459,6 +486,9 @@ class URBackend:
         self._position_targets: dict[str, float] = {}
         self._position_speeds: dict[str, float] = {}
         self._position_status = "idle"
+        # "stream": setpoints ramped and re-sent as servoj every tick.
+        # "movej": one command already on the controller; the tick only watches.
+        self._position_mode = "stream"
         self._jog_deadline = 0.0
         self._commissioning_last_step: float | None = None
         self._commissioning_speed_deg_s = config.commissioning_speed_deg_s
@@ -590,6 +620,42 @@ class URBackend:
         arm.capture_current_as_setpoint()
         self._position_targets = targets
         self._position_speeds = dict(speeds)
+        self._position_mode = "stream"
+        self._jog_direction = 0
+        self._jog_speeds = {}
+        self._commissioning_last_step = self._clock()
+        self._position_status = "running"
+        self._jog_deadline = self._clock() + self._config.commissioning_watchdog_s
+
+    def start_joint_move(self, joints: dict[str, float], speed_deg_s: float) -> None:
+        """Validate, then send ONE movej. The controller owns the trajectory from here.
+
+        Unlike start_joint_positions this streams nothing: a sequence step is a
+        single bounded move to an already validated target, and the only later
+        command is a stopj from stop, timeout, fault or a missed UI tick.
+        """
+        if not self._commissioning or len(self._commissioning_origins) != 1:
+            raise ValueError("Capture the stationary robot pose before entering targets.")
+        if not joints or not set(joints) <= set(JOINT_NAMES):
+            raise ValueError("Enter at least one joint target.")
+        if any(not math.isfinite(value) for value in joints.values()):
+            raise ValueError("Targets must be finite.")
+        if not math.isfinite(speed_deg_s) or not 0 < speed_deg_s <= COMMISSIONING_MAX_SPEED_DEG_S:
+            raise ValueError(
+                f"Speed must be between 0 and {COMMISSIONING_MAX_SPEED_DEG_S:g} deg/s."
+            )
+        name, arm = next(iter(self._arms.items()))
+        arm.poll_feedback()
+        self._check_commissioning_health(arm, require_stationary=True)
+        for joint, target in joints.items():
+            self._validate_position_target(name, joint, target)
+        arm.capture_current_as_setpoint()
+        arm.move_joints(
+            dict(joints), speed_deg_s, self._config.tracking_acceleration_deg_s2
+        )
+        self._position_targets = dict(joints)
+        self._position_speeds = {}
+        self._position_mode = "movej"
         self._jog_direction = 0
         self._jog_speeds = {}
         self._commissioning_last_step = self._clock()
@@ -662,6 +728,11 @@ class URBackend:
                 if settled and max(abs(v) for v in arm.feedback_speeds_deg_s.values()) < 0.5:
                     self.pause()
                     self._position_status = "completed"
+                    return
+                if self._position_mode == "movej":
+                    # The controller is executing the single movej. Re-sending
+                    # anything here would turn one move back into a stream.
+                    self._commissioning_last_step = now
                     return
                 arm.update(ArmTargets(joints=self._position_targets), min(elapsed, self._config.send_interval * MAX_CATCHUP_INTERVALS), speed_limits=self._position_speeds)
                 self._commissioning_last_step = now

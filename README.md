@@ -587,6 +587,17 @@ The six speed fields remain editable after manual control is prepared. Manual
 jogging uses a velocity command with gentle acceleration rather than a sequence
 of short position corrections; changes take effect when the next hold begins.
 
+#### Sequence tab
+
+Each queued step is sent to the controller as **one `movej`**: a single,
+complete joint move at the step's speed with the configured acceleration
+(`--robot-tracking-acceleration`, default 7 deg/s²). Nothing is streamed while
+it runs. This side only reads RTDE feedback and advances to the next step once
+the joint sits within 0.3 deg of its target and is stationary. The whole queue
+is validated against the excursion limits before the first command leaves.
+**Stop sequence**, a step timeout, a controller fault or a missed UI tick send
+`stopj`, which interrupts the move where it is; nothing resumes on its own.
+
 Test the two arms in separate runs. If the displayed joint values, direction,
 stopping response or selected robot identity is wrong, disconnect and resolve
 that issue before testing another joint.
