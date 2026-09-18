@@ -19,6 +19,7 @@ from vision_robot_arm.robot.config import (
     COMMISSIONING_MAX_SPEED_DEG_S,
     GRIPPER_ROBOTIQ,
     OPERATION_COMMISSIONING,
+    OPERATION_KEYFRAME,
     OPERATION_TRACKING,
     RobotConfig,
 )
@@ -253,7 +254,7 @@ class URArm:
         if not self._armed:
             return
         self._setpoints.set_targets(targets.joints, targets.gripper)
-        if self._config.operation == OPERATION_TRACKING:
+        if self._config.operation in (OPERATION_TRACKING, OPERATION_KEYFRAME):
             self._step_tracking_setpoints(max(elapsed_s, 0.0))
         else:
             self._setpoints.step(self._config.max_speed_deg_s * max(elapsed_s, 0.0))
@@ -696,7 +697,7 @@ class URBackend:
         return min(now - self._last_send_at, self._config.send_interval * MAX_CATCHUP_INTERVALS)
 
     def _bounded_tracking_targets(self, name: str, targets: ArmTargets) -> ArmTargets:
-        if self._config.operation != OPERATION_TRACKING:
+        if self._config.operation not in (OPERATION_TRACKING, OPERATION_KEYFRAME):
             return targets
         origin = self._tracking_origins.get(name)
         if origin is None:

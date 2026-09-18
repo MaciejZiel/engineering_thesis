@@ -19,10 +19,12 @@ BACKEND_CHOICES = (BACKEND_NONE, BACKEND_DEBUG, BACKEND_SIM, BACKEND_UR, BACKEND
 OPERATION_MONITOR = "monitor"
 OPERATION_COMMISSIONING = "commissioning"
 OPERATION_TRACKING = "tracking"
+OPERATION_KEYFRAME = "keyframe"
 OPERATION_CHOICES = (
     OPERATION_MONITOR,
     OPERATION_COMMISSIONING,
     OPERATION_TRACKING,
+    OPERATION_KEYFRAME,
 )
 
 UR_SECONDARY_PORT = 30002
@@ -255,10 +257,10 @@ class RobotConfig:
                 raise SystemExit(
                     "Commissioning requires RTDE feedback and dashboard preflight"
                 )
-        if self.backend == BACKEND_UR and self.operation == OPERATION_TRACKING:
+        if self.backend == BACKEND_UR and self.operation in (OPERATION_TRACKING, OPERATION_KEYFRAME):
             if not self.feedback or not self.preflight:
                 raise SystemExit(
-                    "Vision tracking requires RTDE feedback and dashboard preflight"
+                    "Vision control requires RTDE feedback and dashboard preflight"
                 )
         if self.backend == BACKEND_SERIAL and not self.port:
             raise SystemExit("--robot-port is required with --robot-backend serial")

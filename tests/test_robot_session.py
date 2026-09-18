@@ -4,10 +4,12 @@ from unittest.mock import Mock
 from vision_robot_arm.core.pose_state import PoseState
 from vision_robot_arm.robot.config import (
     OPERATION_COMMISSIONING,
+    OPERATION_KEYFRAME,
     OPERATION_TRACKING,
     RobotConfig,
 )
 from vision_robot_arm.robot.session import HardwareSession
+from vision_robot_arm.robot.targets import ArmState, RobotState
 
 
 def pose(complete=True):
@@ -196,3 +198,77 @@ class HardwareSessionTests(unittest.TestCase):
 
         backend.pause.assert_called_once()
         self.assertEqual(session.phase, "connected")
+
+    def test_keyframe_mode_moves_by_the_captured_body_pose_delta(self):
+        backend = Mock()
+        backend.ready.return_value = True
+        backend.robot_state.return_value = RobotState(
+            arms={
+                "right": ArmState(
+                    joints={
+                        "base": 0.0,
+                        "shoulder": -40.0,
+                        "elbow": 20.0,
+                        "wrist_1": -30.0,
+                        "wrist_2": 0.0,
+                        "wrist_3": 0.0,
+                    },
+                    targets={},
+                    gripper="open",
+                )
+            },
+            lift_mode=False,
+        )
+        session = HardwareSession(
+            RobotConfig(
+                backend="ur",
+                operation=OPERATION_KEYFRAME,
+                right_host="test",
+            ),
+            Mock(return_value=backend),
+        )
+        start = PoseState(
+            1,
+            [],
+            None,
+            start_angles := {
+                "right_shoulder_elevation": 90.0,
+                "right_elbow": 120.0,
+                "right_wrist": 180.0,
+            },
+            start_angles,
+            {},
+            (),
+            False,
+        )
+        end = PoseState(
+            2,
+            [],
+            None,
+            end_angles := {
+                "right_shoulder_elevation": 100.0,
+                "right_elbow": 100.0,
+                "right_wrist": 170.0,
+            },
+            end_angles,
+            {},
+            (),
+            False,
+        )
+
+        session.advance()
+        session.advance()
+        self.assertEqual(session.phase, "keyframe_start")
+        session.update(start)
+        session.advance()
+        self.assertEqual(session.phase, "keyframe_end")
+        session.update(end)
+        session.advance()
+        self.assertEqual(session.phase, "active")
+        session.update(end)
+
+        target = backend.send.call_args.args[0].arm("right")
+        self.assertEqual(
+            target.joints,
+            {"shoulder": -30.0, "elbow": 40.0, "wrist_1": -20.0},
+        )
