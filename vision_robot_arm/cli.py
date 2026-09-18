@@ -25,6 +25,7 @@ from vision_robot_arm.robot.config import (
     UR_DASHBOARD_PORT,
     UR_RTDE_PORT,
     UR_SECONDARY_PORT,
+    GRIPPER_DRIVER_CHOICES,
     JointLimit,
     JointMapping,
     RobotConfig,
@@ -54,6 +55,10 @@ def _parse_camera_target(val: str) -> int | str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Webcam pose tracker for the vision robot arm prototype (two UR7e cobots)."
+    )
+    parser.add_argument(
+        "--tracking-space", choices=("2d", "3d"), default=None,
+        help="Camera measurement space. Test mode defaults to 2d; otherwise 3d.",
     )
     parser.add_argument(
         "--list-cameras",
@@ -277,16 +282,58 @@ def build_parser() -> argparse.ArgumentParser:
         help="Single joint enabled in commissioning mode. Default: shoulder.",
     )
     robot.add_argument(
+        "--robot-tracking-excursion",
+        type=float,
+        default=40.0,
+        help="Maximum tracking offset from the captured pose in degrees. Default: 40.",
+    )
+    robot.add_argument(
+        "--robot-tracking-acceleration",
+        type=float,
+        default=7.0,
+        help="Linear joint acceleration/deceleration limit in deg/s^2. Default: 7.",
+    )
+    robot.add_argument(
+        "--robot-tracking-loss-grace",
+        type=float,
+        default=0.4,
+        help="Keep the last valid target through brief camera dropouts. Default: 0.4 s.",
+    )
+    robot.add_argument(
+        "--robot-telemetry-log",
+        default=None,
+        help="Optional JSONL file for targets, setpoints and RTDE feedback.",
+    )
+    robot.add_argument(
+        "--robot-feedback-log",
+        default=None,
+        help="Optional separate JSONL file containing only values received from robot RTDE.",
+    )
+    robot.add_argument(
+        "--robot-gripper-gesture-frames",
+        type=int,
+        default=3,
+        help="Consecutive open/fist results required before a gripper command. Default: 3.",
+    )
+    robot.add_argument(
+        "--robot-gripper-driver",
+        choices=GRIPPER_DRIVER_CHOICES,
+        default="digital",
+        help="Gripper transport: tool digital output or Robotiq URCap socket.",
+    )
+    robot.add_argument("--robot-gripper-speed", type=int, default=80)
+    robot.add_argument("--robot-gripper-force", type=int, default=50)
+    robot.add_argument(
         "--robot-commissioning-speed",
         type=float,
-        default=2.0,
-        help=f"Commissioning speed in deg/s, at most {COMMISSIONING_MAX_SPEED_DEG_S:g}. Default: 2.",
+        default=30.0,
+        help=f"Commissioning speed in deg/s, at most {COMMISSIONING_MAX_SPEED_DEG_S:g}. Default: 30.",
     )
     robot.add_argument(
         "--robot-commissioning-excursion",
         type=float,
-        default=2.0,
-        help=f"Maximum offset from captured position in degrees, at most {COMMISSIONING_MAX_EXCURSION_DEG:g}. Default: 2.",
+        default=80.0,
+        help=f"Maximum offset from captured position in degrees, at most {COMMISSIONING_MAX_EXCURSION_DEG:g}. Default: 80.",
     )
     robot.add_argument(
         "--robot-commissioning-watchdog",
@@ -431,6 +478,7 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
 
     robot = RobotConfig(
         backend=backend,
+        tracking_space=args.tracking_space or ("2d" if args.test_mode else "3d"),
         operation=args.robot_operation,
         print_interval=args.robot_print_interval,
         right_host=args.robot_right_host,
@@ -447,6 +495,15 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         baud_rate=args.robot_baud,
         send_interval=args.robot_send_interval,
         max_speed_deg_s=args.robot_max_speed,
+        tracking_excursion_deg=args.robot_tracking_excursion,
+        tracking_acceleration_deg_s2=args.robot_tracking_acceleration,
+        tracking_loss_grace_s=args.robot_tracking_loss_grace,
+        telemetry_log_path=args.robot_telemetry_log,
+        feedback_log_path=args.robot_feedback_log,
+        gripper_gesture_frames=args.robot_gripper_gesture_frames,
+        gripper_driver=args.robot_gripper_driver,
+        gripper_speed_percent=args.robot_gripper_speed,
+        gripper_force_percent=args.robot_gripper_force,
         commissioning_joint=args.robot_commissioning_joint,
         commissioning_speed_deg_s=args.robot_commissioning_speed,
         commissioning_excursion_deg=args.robot_commissioning_excursion,

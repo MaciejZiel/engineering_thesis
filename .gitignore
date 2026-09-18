@@ -37,3 +37,10 @@ artifacts/
 # OS files
 Thumbs.db
 .DS_Store
+
+# Web frontend dependencies and browser test output
+node_modules/
+playwright-report/
+test-results/
+*.tsbuildinfo
+logs/

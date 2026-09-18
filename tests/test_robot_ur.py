@@ -1,5 +1,8 @@
 import math
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from vision_robot_arm.robot.config import (
     OPERATION_COMMISSIONING,
@@ -11,7 +14,10 @@ from vision_robot_arm.robot.ur_backend import (
     URBackend,
     ControlFault,
     encode_gripper,
+    encode_robotiq_gripper,
     encode_servoj,
+    encode_speedj,
+    encode_speedj_vector,
     encode_stopj,
 )
 from vision_robot_arm.robot.ur_dashboard import DashboardStatus
@@ -116,6 +122,22 @@ def targets(
 
 
 class EncodeTests(unittest.TestCase):
+    def test_encodes_single_joint_speed_command(self) -> None:
+        self.assertEqual(
+            encode_speedj("shoulder", 0.5, 0.15),
+            b"speedj([0.00000, 0.00873, 0.00000, 0.00000, 0.00000, 0.00000], 0.17453, 0.150)\n",
+        )
+
+    def test_encodes_multiple_joint_velocities_in_one_command(self) -> None:
+        command = encode_speedj_vector(
+            {"base": -2.0, "elbow": 3.0, "wrist_3": 1.0}, 0.15
+        )
+
+        values = command.split(b"[")[1].split(b"]")[0].split(b", ")
+        self.assertAlmostEqual(math.degrees(float(values[0])), -2.0, delta=0.01)
+        self.assertAlmostEqual(math.degrees(float(values[2])), 3.0, delta=0.01)
+        self.assertAlmostEqual(math.degrees(float(values[5])), 1.0, delta=0.01)
+
     def test_servoj_uses_ur_joint_order_in_radians_with_home_for_held_joints(self) -> None:
         frame = encode_servoj({"shoulder": -45.0, "elbow": 90.0}, 0.05, 0.1, 300)
 
@@ -130,6 +152,16 @@ class EncodeTests(unittest.TestCase):
     def test_gripper_uses_the_configured_tool_output(self) -> None:
         self.assertEqual(encode_gripper(True), b"set_tool_digital_out(0, True)\n")
         self.assertEqual(encode_gripper(False, tool_output=1), b"set_tool_digital_out(1, False)\n")
+
+    def test_robotiq_gripper_uses_urcap_socket_with_scaled_settings(self) -> None:
+        opened = encode_robotiq_gripper(False, speed_percent=80, force_percent=50)
+        closed = encode_robotiq_gripper(True, speed_percent=80, force_percent=50)
+
+        self.assertIn(b'socket_open("127.0.0.1", 63352', opened)
+        self.assertIn(b'socket_set_var("SPE", 204', opened)
+        self.assertIn(b'socket_set_var("FOR", 127', opened)
+        self.assertIn(b'socket_set_var("POS", 0', opened)
+        self.assertIn(b'socket_set_var("POS", 255', closed)
 
 
 class URBackendTests(unittest.TestCase):
@@ -494,6 +526,45 @@ class PreflightTests(unittest.TestCase):
 
 
 class CommissioningTests(unittest.TestCase):
+    def test_position_move_is_relative_bounded_and_requires_refresh(self):
+        backend, socket, clock = self.make()
+        backend.arm_commissioning()
+        backend.start_joint_positions({"shoulder": 1.0, "elbow": -1.0}, {"shoulder": 2.0, "elbow": 1.0}, relative=True)
+        self.assertEqual(socket.sent, [])
+        self.assertAlmostEqual(backend._position_targets["shoulder"], -39)
+        clock.now = .05
+        backend.robot_state()
+        self.assertEqual(len(socket.commands(b"servoj(")), 1)
+        command = socket.commands(b"servoj(")[0]
+        values = [float(v) for v in command.split(b"[")[1].split(b"]")[0].split(b",")]
+        self.assertEqual(values[0], 0)
+        self.assertEqual(values[4:], [0, 0])
+        self.assertGreater(math.degrees(values[1]), -40)
+        self.assertLess(math.degrees(values[2]), 20)
+        clock.now = .16
+        backend.robot_state()
+        self.assertFalse(backend.position_move_active)
+        self.assertEqual(len(socket.commands(b"stopj(")), 1)
+
+    def test_position_move_rejects_entire_request_if_one_joint_is_invalid(self):
+        backend, socket, clock = self.make()
+        backend.arm_commissioning()
+        for joints in ({"shoulder": -39, "elbow": 30}, {"shoulder": float("nan")}):
+            with self.assertRaises(ValueError):
+                backend.start_joint_positions(joints, {j: 2 for j in joints})
+        self.assertEqual(socket.sent, [])
+        self.assertFalse(backend.position_move_active)
+
+    def test_position_move_stops_once_feedback_reaches_destination(self):
+        backend, socket, clock = self.make()
+        backend.arm_commissioning()
+        backend.start_joint_positions({"shoulder": -39}, {"shoulder": 2})
+        backend._arms["right"]._rtde.sample["actual_q"] = (0, math.radians(-39), math.radians(20), math.radians(-80), 0, 0)
+        clock.now = .05
+        backend.robot_state()
+        self.assertFalse(backend.position_move_active)
+        self.assertEqual(len(socket.commands(b"stopj(")), 1)
+
     def make(self):
         connector = FakeConnector()
         factory = FakeRtdeFactory()
@@ -548,15 +619,32 @@ class CommissioningTests(unittest.TestCase):
         clock.now = 0.05
         backend.robot_state()
 
-        commands = socket.commands(b"servoj(")
+        commands = socket.commands(b"speedj(")
         self.assertEqual(len(commands), 1)
-        shoulder = math.degrees(float(commands[0].split(b"[")[1].split(b",")[1]))
-        self.assertAlmostEqual(shoulder, -39.9, delta=0.01)
+        shoulder_speed = math.degrees(
+            float(commands[0].split(b"[")[1].split(b",")[1])
+        )
+        self.assertAlmostEqual(shoulder_speed, 2.0, delta=0.01)
         self.assertEqual(socket.commands(b"movej("), [])
 
         clock.now = 0.16
         backend.robot_state()
         self.assertEqual(len(socket.commands(b"stopj(")), 1)
+
+    def test_multiple_joints_share_one_speed_command(self) -> None:
+        backend, socket, clock = self.make()
+        backend.arm_commissioning()
+        backend.refresh_joint_jogs({"base": -1.0, "elbow": 2.5, "wrist_2": 0.5})
+
+        clock.now = 0.05
+        backend.robot_state()
+
+        commands = socket.commands(b"speedj(")
+        self.assertEqual(len(commands), 1)
+        values = commands[0].split(b"[")[1].split(b"]")[0].split(b", ")
+        self.assertAlmostEqual(math.degrees(float(values[0])), -1.0, delta=0.01)
+        self.assertAlmostEqual(math.degrees(float(values[2])), 2.5, delta=0.01)
+        self.assertAlmostEqual(math.degrees(float(values[4])), 0.5, delta=0.01)
 
     def test_normal_safety_mode_is_refused_before_command_socket_opens(self) -> None:
         connector = FakeConnector()
@@ -593,14 +681,29 @@ class CommissioningTests(unittest.TestCase):
 
 
 class TrackingArmingTests(unittest.TestCase):
-    def make(self, velocity: float = 0.0):
+    def test_velocity_accumulates_and_reversal_never_teleports(self):
+        backend, _ = self.make()
+        backend.arm_tracking()
+        arm = backend._arms["right"]
+        arm._setpoints.targets["shoulder"] = -10
+        for _ in range(10):
+            arm._step_tracking_setpoints(.05)
+        self.assertAlmostEqual(arm._tracking_velocities["shoulder"], 3.5)
+        before = arm._setpoints.joints["shoulder"]
+        arm._setpoints.targets["shoulder"] = -60
+        arm._step_tracking_setpoints(.05)
+        self.assertLess(abs(arm._setpoints.joints["shoulder"] - before), .2)
+        self.assertNotEqual(arm._setpoints.joints["shoulder"], -60)
+    def make(self, velocity: float = 0.0, **overrides):
         connector = FakeConnector()
         factory = FakeRtdeFactory()
-        config = RobotConfig(
+        settings = dict(
             backend="ur",
             operation=OPERATION_TRACKING,
             right_host="10.0.0.2",
         )
+        settings.update(overrides)
+        config = RobotConfig(**settings)
         backend = URBackend(
             config,
             connector=connector,
@@ -634,6 +737,64 @@ class TrackingArmingTests(unittest.TestCase):
             backend.arm_tracking()
 
         self.assertEqual(socket.commands(b"movej("), [])
+
+    def test_tracking_targets_are_bounded_from_the_captured_pose(self) -> None:
+        backend, _ = self.make()
+        backend.arm_tracking()
+
+        bounded = backend._bounded_tracking_targets(
+            "right", ArmTargets(joints={"shoulder": 120.0, "elbow": -100.0})
+        )
+
+        self.assertEqual(bounded.joints["shoulder"], 3.0)
+        self.assertEqual(bounded.joints["elbow"], -40.0)
+
+    def test_tracking_accelerates_instead_of_starting_at_full_speed(self) -> None:
+        backend, socket = self.make()
+        backend.arm_tracking()
+
+        backend.send(targets(right={"shoulder": 3.0}))
+
+        command = socket.commands(b"servoj(")[0]
+        shoulder = math.degrees(float(command.split(b"[")[1].split(b",")[1]))
+        self.assertGreater(shoulder, -37.0)
+        self.assertLess(shoulder, -36.9)
+
+    def test_tracking_telemetry_records_targets_setpoint_and_rtde(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tracking.jsonl"
+            backend, _ = self.make(telemetry_log_path=str(path))
+            backend.arm_tracking()
+            backend.send(targets(right={"shoulder": 3.0}))
+            backend.close()
+
+            records = [json.loads(line) for line in path.read_text().splitlines()]
+
+        sample = next(record for record in records if record["event"] == "tracking_sample")
+        self.assertEqual(sample["robot_mode"], "RUNNING")
+        self.assertEqual(sample["safety_status"], "NORMAL")
+        self.assertIn("shoulder", sample["raw_target_deg"])
+        self.assertIn("shoulder", sample["sent_setpoint_deg"])
+        self.assertEqual(sample["settings"]["excursion_deg"], 40.0)
+
+    def test_robot_feedback_is_written_to_a_separate_rtde_log(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "robot-feedback.jsonl"
+            backend, _ = self.make(feedback_log_path=str(path))
+            backend.arm_tracking()
+            backend.send(targets(right={"shoulder": 3.0}))
+            backend.close()
+
+            records = [json.loads(line) for line in path.read_text().splitlines()]
+
+        sample = next(record for record in records if record["event"] == "rtde_sample")
+        self.assertEqual(sample["arm"], "right")
+        self.assertEqual(sample["robot_mode_name"], "RUNNING")
+        self.assertEqual(sample["safety_status_name"], "NORMAL")
+        self.assertIn("shoulder", sample["actual_joint_deg"])
+        self.assertIn("actual_tcp_pose", sample)
+        self.assertEqual(records[0]["event"], "session_started")
+        self.assertEqual(records[-1]["event"], "session_closed")
 
 
 if __name__ == "__main__":

@@ -65,7 +65,9 @@ class FactoryTests(unittest.TestCase):
         self.assertIsInstance(controller, MappedRobotController)
 
     def test_mapped_controller_prints_commands_through_debug_backend(self) -> None:
-        controller = create_robot_controller(RobotConfig(backend="debug"))
+        controller = create_robot_controller(
+            RobotConfig(backend="debug", gripper_gesture_frames=1)
+        )
         output = io.StringIO()
 
         with contextlib.redirect_stdout(output):

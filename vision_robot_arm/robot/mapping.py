@@ -25,6 +25,9 @@ class RobotMapper:
         self._cartesian = cartesian
         self._last_joints: dict[str, float] = {}
         self._ik_solutions = {arm: dict(UR_HOME_DEG) for arm in ARM_NAMES}
+        self._gripper_candidates: dict[str, str] = {}
+        self._gripper_counts: dict[str, int] = {}
+        self._gripper_states: dict[str, str] = {}
 
     def map(self, state: PoseState) -> JointTargets:
         arms = {
@@ -44,10 +47,13 @@ class RobotMapper:
     def reset(self) -> None:
         self._last_joints.clear()
         self._ik_solutions = {arm: dict(UR_HOME_DEG) for arm in ARM_NAMES}
+        self._gripper_candidates.clear()
+        self._gripper_counts.clear()
+        self._gripper_states.clear()
 
     def _map_cartesian_arm(self, arm: str, state: PoseState) -> ArmTargets:
         target = tracked_tcp_target(state, arm)
-        gripper = _gripper_from_gestures(arm, state.gestures)
+        gripper = self._gripper_target(arm, state.gestures)
         if target is None:
             return ArmTargets(gripper=gripper)
         solution = solve_position_ik(
@@ -68,14 +74,38 @@ class RobotMapper:
             mapping = self._config.mapping_for(joint)
             if mapping is None:
                 continue
-            source = state.relative_angles if state.calibrated else state.angles
+            source = (
+                state.angles if self._config.tracking_space == "2d"
+                else state.relative_angles if state.calibrated else state.angles
+            )
             body_angle = source.get(f"{arm}_{mapping.source}")
             if body_angle is None or not math.isfinite(body_angle):
+                continue
+            if self._config.tracking_space == "2d":
+                # These are signed image angles, not absolute robot positions.
+                # The hardware session applies their delta to an RTDE origin.
+                joints[joint] = self._apply_deadband(f"{arm}_{joint}", body_angle)
                 continue
             target = (mapping.limit.clamp(self._config.home_for(joint) + mapping.sign * body_angle)
                       if state.calibrated else mapping.to_robot(body_angle))
             joints[joint] = self._apply_deadband(f"{arm}_{joint}", target)
-        return ArmTargets(joints=joints, gripper=_gripper_from_gestures(arm, state.gestures))
+        return ArmTargets(joints=joints, gripper=self._gripper_target(arm, state.gestures))
+
+    def _gripper_target(self, arm: str, gestures: tuple[str, ...]) -> str | None:
+        observed = _gripper_from_gestures(arm, gestures)
+        if observed is None:
+            return None
+        if self._gripper_candidates.get(arm) == observed:
+            self._gripper_counts[arm] = self._gripper_counts.get(arm, 0) + 1
+        else:
+            self._gripper_candidates[arm] = observed
+            self._gripper_counts[arm] = 1
+        if self._gripper_counts[arm] < self._config.gripper_gesture_frames:
+            return None
+        if self._gripper_states.get(arm) == observed:
+            return None
+        self._gripper_states[arm] = observed
+        return observed
 
     def _apply_deadband(self, key: str, value: float) -> float:
         previous = self._last_joints.get(key)

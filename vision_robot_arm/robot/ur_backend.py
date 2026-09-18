@@ -7,13 +7,22 @@ decelerates on shutdown. Feedback comes from RTDE, so the on-screen twin shows t
 robot, not the wish.
 """
 
+import json
 import math
 import socket
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from vision_robot_arm.robot.backend import Clock, TargetTracker
-from vision_robot_arm.robot.config import OPERATION_COMMISSIONING, RobotConfig
+from vision_robot_arm.robot.config import (
+    COMMISSIONING_MAX_SPEED_DEG_S,
+    GRIPPER_ROBOTIQ,
+    OPERATION_COMMISSIONING,
+    OPERATION_KEYFRAME,
+    OPERATION_TRACKING,
+    RobotConfig,
+)
 from vision_robot_arm.robot.simulation import SimulatedArm
 from vision_robot_arm.robot.targets import (
     GRIPPER_CLOSE,
@@ -64,9 +73,55 @@ def encode_stopj(accel_deg_s2: float = STOP_DECELERATION_DEG_S2) -> bytes:
     return f"stopj({math.radians(accel_deg_s2):.3f})\n".encode("ascii")
 
 
+def encode_speedj_vector(
+    speeds_deg_s: dict[str, float], duration_s: float
+) -> bytes:
+    velocities = [0.0] * len(JOINT_NAMES)
+    for joint, speed_deg_s in speeds_deg_s.items():
+        velocities[JOINT_NAMES.index(joint)] = math.radians(speed_deg_s)
+    vector = "[" + ", ".join(f"{value:.5f}" for value in velocities) + "]"
+    # A gentle acceleration lets the controller blend repeated dead-man
+    # updates instead of settling a new servoj position every UI frame.
+    return f"speedj({vector}, {math.radians(10.0):.5f}, {duration_s:.3f})\n".encode("ascii")
+
+
+def encode_speedj(joint: str, speed_deg_s: float, duration_s: float) -> bytes:
+    return encode_speedj_vector({joint: speed_deg_s}, duration_s)
+
+
 def encode_gripper(closed: bool, tool_output: int = 0) -> bytes:
     value = "True" if closed else "False"
     return f"set_tool_digital_out({tool_output}, {value})\n".encode("ascii")
+
+
+def encode_robotiq_gripper(
+    closed: bool, speed_percent: int = 80, force_percent: int = 50
+) -> bytes:
+    """Build a non-blocking Robotiq URCap command for the controller's local daemon."""
+    position = 255 if closed else 0
+    speed = round(max(0, min(100, speed_percent)) * 2.55)
+    force = round(max(0, min(100, force_percent)) * 2.55)
+    commands = (("ACT", 1), ("SPE", speed), ("FOR", force), ("POS", position), ("GTO", 1))
+    lines = [
+        "def motion_twin_gripper():",
+        '  if (socket_open("127.0.0.1", 63352, "motion_twin_gripper")):',
+    ]
+    for variable, value in commands:
+        lines.extend(
+            (
+                f'    socket_set_var("{variable}", {value}, "motion_twin_gripper")',
+                '    socket_read_byte_list(3, "motion_twin_gripper", 0.2)',
+            )
+        )
+    lines.extend(
+        (
+            '    socket_close("motion_twin_gripper")',
+            "  end",
+            "end",
+            "",
+        )
+    )
+    return "\n".join(lines).encode("ascii")
 
 
 def default_connector(host: str, port: int) -> Any:
@@ -113,6 +168,7 @@ class URArm:
         self._feedback_at: float | None = None
         self._rtde: RtdeClient | None = None
         self._armed = False
+        self._tracking_velocities = {name: 0.0 for name in JOINT_NAMES}
         try:
             self._rtde = rtde_factory(host, config.rtde_port) if rtde_factory is not None else None
         except BaseException:
@@ -126,6 +182,7 @@ class URArm:
             raise ControlFault(f"{self.name}: fresh joint feedback is required.")
         self._setpoints.joints.update(actual)
         self._setpoints.targets.update(actual)
+        self._tracking_velocities = {name: 0.0 for name in JOINT_NAMES}
         self._armed = True
         return dict(actual)
 
@@ -143,39 +200,41 @@ class URArm:
             for index, name in enumerate(JOINT_NAMES)
         }
 
-    def commissioning_step(
+    def commissioning_step_multi(
         self,
-        joint: str,
-        direction: int,
+        speeds_deg_s: dict[str, float],
         origin: dict[str, float],
-        elapsed_s: float,
+        excursion_deg: float,
+        watchdog_s: float,
     ) -> None:
-        if joint not in JOINT_NAMES or direction not in (-1, 1):
-            raise ControlFault("Invalid commissioning jog request.")
-        lower = max(
-            self._config.limit_for(joint).minimum,
-            origin[joint] - self._config.commissioning_excursion_deg,
-        )
-        upper = min(
-            self._config.limit_for(joint).maximum,
-            origin[joint] + self._config.commissioning_excursion_deg,
-        )
-        requested = self._setpoints.joints[joint] + (
-            direction * self._config.commissioning_speed_deg_s * max(0.0, elapsed_s)
-        )
-        self._setpoints.joints[joint] = max(lower, min(upper, requested))
-        self._setpoints.targets.update(self._setpoints.joints)
-        self._send(
-            encode_servoj(
-                self._setpoints.joints,
-                self._config.send_interval,
-                self._config.servo_lookahead_s,
-                self._config.servo_gain,
+        actual = self.feedback_joints
+        if actual is None:
+            raise ControlFault(f"{self.name}: fresh joint feedback is required.")
+        allowed: dict[str, float] = {}
+        for joint, speed in speeds_deg_s.items():
+            if joint not in JOINT_NAMES or not math.isfinite(speed):
+                raise ControlFault("Invalid commissioning jog request.")
+            lower = max(
+                self._config.limit_for(joint).minimum,
+                origin[joint] - excursion_deg,
             )
-        )
+            upper = min(
+                self._config.limit_for(joint).maximum,
+                origin[joint] + excursion_deg,
+            )
+            at_limit = actual[joint] >= upper if speed > 0 else actual[joint] <= lower
+            if speed and not at_limit:
+                allowed[joint] = speed
+        if not allowed:
+            self.pause()
+            return
+        self._setpoints.joints.update(actual)
+        self._setpoints.targets.update(actual)
+        self._send(encode_speedj_vector(allowed, watchdog_s))
 
     def pause(self) -> None:
         self._send(encode_stopj())
+        self._tracking_velocities = {name: 0.0 for name in JOINT_NAMES}
         actual = self.feedback_joints
         if actual is not None:
             self._setpoints.joints.update(actual)
@@ -190,12 +249,15 @@ class URArm:
             return None
         return {name: math.degrees(actual[index]) for index, name in enumerate(JOINT_NAMES)}
 
-    def update(self, targets: ArmTargets, elapsed_s: float) -> None:
+    def update(self, targets: ArmTargets, elapsed_s: float, *, speed_limits=None) -> None:
         """Move the setpoint toward the mapped pose, then command that setpoint."""
         if not self._armed:
             return
         self._setpoints.set_targets(targets.joints, targets.gripper)
-        self._setpoints.step(self._config.max_speed_deg_s * max(elapsed_s, 0.0))
+        if speed_limits is not None or self._config.operation in (OPERATION_TRACKING, OPERATION_KEYFRAME):
+            self._step_tracking_setpoints(max(elapsed_s, 0.0), speed_limits)
+        else:
+            self._setpoints.step(self._config.max_speed_deg_s * max(elapsed_s, 0.0))
         self._send(
             encode_servoj(
                 self._setpoints.joints,
@@ -205,12 +267,47 @@ class URArm:
             )
         )
         if targets.gripper is not None and targets.gripper != self._gripper:
-            self._send(encode_gripper(targets.gripper == GRIPPER_CLOSE, self._config.tool_output))
+            closed = targets.gripper == GRIPPER_CLOSE
+            command = (
+                encode_robotiq_gripper(
+                    closed,
+                    self._config.gripper_speed_percent,
+                    self._config.gripper_force_percent,
+                )
+                if self._config.gripper_driver == GRIPPER_ROBOTIQ
+                else encode_gripper(closed, self._config.tool_output)
+            )
+            self._send(command)
             self._gripper = targets.gripper
 
-    def poll_feedback(self) -> None:
-        if self._rtde is None:
+    def _step_tracking_setpoints(self, elapsed_s: float, speed_limits=None) -> None:
+        """Ramp velocity linearly and brake smoothly before each target."""
+        if elapsed_s <= 0:
             return
+        acceleration = self._config.tracking_acceleration_deg_s2
+        for joint, target in self._setpoints.targets.items():
+            max_speed = speed_limits.get(joint, 0.0) if speed_limits is not None else self._config.max_speed_deg_s
+            current = self._setpoints.joints[joint]
+            error = target - current
+            if abs(error) < 1e-9:
+                self._tracking_velocities[joint] = 0.0
+                continue
+            braking_speed = math.sqrt(2.0 * acceleration * abs(error))
+            desired = math.copysign(min(max_speed, braking_speed), error)
+            velocity = self._tracking_velocities[joint]
+            max_change = acceleration * elapsed_s
+            velocity += max(-max_change, min(max_change, desired - velocity))
+            step = velocity * elapsed_s
+            if step * error > 0 and abs(step) >= abs(error):
+                self._setpoints.joints[joint] = target
+                self._tracking_velocities[joint] = 0.0
+            else:
+                self._setpoints.joints[joint] = self._config.limit_for(joint).clamp(current + step)
+                self._tracking_velocities[joint] = velocity
+
+    def poll_feedback(self) -> dict[str, Any] | None:
+        if self._rtde is None:
+            return None
         sample = self._rtde.read()
         if sample:
             self._feedback = sample
@@ -219,6 +316,7 @@ class URArm:
             # Never present a stale pose as the live one.
             self._feedback = {}
             self._feedback_at = None
+        return sample
 
     def check_control_health(self) -> None:
         if self._rtde is None:
@@ -327,10 +425,20 @@ class URBackend:
         self._require_feedback = require_feedback
         self._status_query = status_query
         self._commissioning = config.operation == OPERATION_COMMISSIONING
+        self._telemetry = None
+        self._feedback_log = None
+        self._next_telemetry_at = 0.0
+        self._next_tracking_event_at = 0.0
         if require_feedback and not config.feedback:
             raise ControlFault("Hardware control requires RTDE feedback.")
         if config.preflight:
-            _preflight(config, status_query, require_reduced=self._commissioning)
+            _preflight(
+                config,
+                status_query,
+                require_reduced=(
+                    self._commissioning and config.commissioning_require_reduced
+                ),
+            )
         factory = rtde_factory if config.feedback else None
         self._arms: dict[str, URArm] = {}
         try:
@@ -345,16 +453,37 @@ class URBackend:
         self._next_send_at = 0.0
         self._last_send_at: float | None = None
         self._commissioning_origins: dict[str, dict[str, float]] = {}
+        self._tracking_origins: dict[str, dict[str, float]] = {}
         self._jog_direction = 0
+        self._jog_speeds: dict[str, float] = {}
+        self._position_targets: dict[str, float] = {}
+        self._position_speeds: dict[str, float] = {}
+        self._position_status = "idle"
         self._jog_deadline = 0.0
         self._commissioning_last_step: float | None = None
+        self._commissioning_speed_deg_s = config.commissioning_speed_deg_s
+        if config.telemetry_log_path:
+            path = Path(config.telemetry_log_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._telemetry = path.open("a", encoding="utf-8", buffering=1)
+            self._write_telemetry("session_started")
+        if config.feedback_log_path:
+            path = Path(config.feedback_log_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._feedback_log = path.open("a", encoding="utf-8", buffering=1)
+            self._write_feedback("session_started")
+
     def arm_commissioning(self) -> None:
         if not self._commissioning:
             raise ControlFault("This backend is not in commissioning mode.")
         if self._fault is not None:
             raise ControlFault(self._fault)
         try:
-            _preflight(self._config, self._status_query, require_reduced=True)
+            _preflight(
+                self._config,
+                self._status_query,
+                require_reduced=self._config.commissioning_require_reduced,
+            )
             origins = {}
             for name, arm in self._arms.items():
                 arm.poll_feedback()
@@ -391,8 +520,9 @@ class URBackend:
                         f"{arm.name}: robot must be stationary before tracking is armed."
                     )
             # Validate every arm first, then atomically adopt both current poses.
-            for arm in arms:
-                arm.capture_current_as_setpoint()
+            self._tracking_origins = {
+                arm.name: arm.capture_current_as_setpoint() for arm in arms
+            }
         except BaseException as error:
             self._fault = str(error)
             self.close()
@@ -404,16 +534,149 @@ class URBackend:
         if direction not in (-1, 1):
             raise ControlFault("Jog direction must be -1 or +1.")
         self._jog_direction = direction
+        self._jog_speeds = {
+            self._config.commissioning_joint: (
+                direction * self._commissioning_speed_deg_s
+            )
+        }
         self._jog_deadline = self._clock() + self._config.commissioning_watchdog_s
+
+    def refresh_joint_jogs(self, speeds_deg_s: dict[str, float]) -> None:
+        if not self._commissioning_origins:
+            raise ControlFault("Capture the commissioning origin before jogging.")
+        cleaned = {
+            joint: float(speed)
+            for joint, speed in speeds_deg_s.items()
+            if joint in JOINT_NAMES and math.isfinite(speed) and speed != 0.0
+        }
+        if not cleaned or len(cleaned) != len(speeds_deg_s):
+            raise ControlFault("Select at least one valid joint velocity.")
+        if any(abs(speed) > COMMISSIONING_MAX_SPEED_DEG_S for speed in cleaned.values()):
+            raise ControlFault(
+                f"Joint speed must not exceed {COMMISSIONING_MAX_SPEED_DEG_S:g} deg/s."
+            )
+        self._jog_direction = 0
+        self._jog_speeds = cleaned
+        self._jog_deadline = self._clock() + self._config.commissioning_watchdog_s
+
+    def set_commissioning_speed(self, speed_deg_s: float) -> None:
+        if (
+            not math.isfinite(speed_deg_s)
+            or not 0 < speed_deg_s <= COMMISSIONING_MAX_SPEED_DEG_S
+        ):
+            raise ControlFault(
+                "Commissioning speed must be between 0 and "
+                f"{COMMISSIONING_MAX_SPEED_DEG_S:g} deg/s."
+            )
+        self._commissioning_speed_deg_s = speed_deg_s
+
+    def start_joint_positions(self, joints: dict[str, float], speeds: dict[str, float], *, relative=False) -> None:
+        """Validate the complete request before a held manual position move."""
+        if not self._commissioning or len(self._commissioning_origins) != 1:
+            raise ValueError("Capture the stationary robot pose before entering targets.")
+        if not joints or set(joints) != set(speeds) or not set(joints) <= set(JOINT_NAMES):
+            raise ValueError("Enter at least one joint target and its speed.")
+        if any(not math.isfinite(v) for v in joints.values()) or any(not math.isfinite(v) or not 0 < v <= COMMISSIONING_MAX_SPEED_DEG_S for v in speeds.values()):
+            raise ValueError("Targets must be finite; speeds must be between 0 and 30 deg/s.")
+        name, arm = next(iter(self._arms.items()))
+        arm.poll_feedback()
+        self._check_commissioning_health(arm, require_stationary=True)
+        actual = arm.feedback_joints
+        targets = {}
+        for joint, value in joints.items():
+            target = actual[joint] + value if relative else value
+            self._validate_position_target(name, joint, target)
+            targets[joint] = target
+        arm.capture_current_as_setpoint()
+        self._position_targets = targets
+        self._position_speeds = dict(speeds)
+        self._jog_direction = 0
+        self._jog_speeds = {}
+        self._commissioning_last_step = self._clock()
+        self._position_status = "running"
+        self._jog_deadline = self._clock() + self._config.commissioning_watchdog_s
+
+    def _validate_position_target(self, name: str, joint: str, target: float) -> None:
+        origin = self._commissioning_origins[name][joint]
+        limit = self._config.limit_for(joint)
+        low = max(limit.minimum, origin - self._config.commissioning_excursion_deg)
+        high = min(limit.maximum, origin + self._config.commissioning_excursion_deg)
+        if not math.isfinite(target) or not low <= target <= high:
+            raise ValueError(f"{joint}: target {target:.1f} is outside {low:.1f} .. {high:.1f} deg.")
+
+    def plan_joint_sequence(self, steps: tuple[tuple[str, float, float], ...]) -> tuple[dict[str, float], ...]:
+        """Resolve all relative steps from one fresh pose without sending motion."""
+        if not self._commissioning or len(self._commissioning_origins) != 1:
+            raise ValueError("Capture the stationary robot pose before starting a sequence.")
+        if not steps:
+            raise ValueError("Add at least one sequence step.")
+        name, arm = next(iter(self._arms.items()))
+        arm.poll_feedback()
+        self._check_commissioning_health(arm, require_stationary=True)
+        position = dict(arm.feedback_joints)
+        planned = []
+        for number, (joint, delta, speed) in enumerate(steps, 1):
+            if joint not in JOINT_NAMES or not math.isfinite(delta) or not math.isfinite(speed) or not 0 < speed <= COMMISSIONING_MAX_SPEED_DEG_S:
+                raise ValueError(f"Step {number}: invalid joint, angle or speed.")
+            position[joint] += delta
+            try:
+                self._validate_position_target(name, joint, position[joint])
+            except ValueError as error:
+                raise ValueError(f"Step {number}: {error}") from error
+            planned.append({joint: position[joint]})
+        return tuple(planned)
+
+    def refresh_position_move(self) -> None:
+        if self._position_targets:
+            now = self._clock()
+            if now > self._jog_deadline:
+                self.pause()
+                return
+            self._jog_deadline = now + self._config.commissioning_watchdog_s
+
+    @property
+    def position_move_active(self) -> bool:
+        return bool(self._position_targets)
+
+    @property
+    def position_move_status(self) -> str:
+        return self._position_status
 
     def _commissioning_tick(self) -> None:
         if not self._commissioning or not self._commissioning_origins:
             return
         now = self._clock()
+        if self._position_targets:
+            if now > self._jog_deadline:
+                self.pause()
+                return
+            elapsed = now - self._commissioning_last_step
+            if elapsed < self._config.send_interval:
+                return
+            try:
+                arm = next(iter(self._arms.values()))
+                arm.poll_feedback()
+                self._check_commissioning_health(arm)
+                actual = arm.feedback_joints
+                settled = all(abs(actual[j] - v) <= 0.3 for j, v in self._position_targets.items())
+                if settled and max(abs(v) for v in arm.feedback_speeds_deg_s.values()) < 0.5:
+                    self.pause()
+                    self._position_status = "completed"
+                    return
+                arm.update(ArmTargets(joints=self._position_targets), min(elapsed, self._config.send_interval * MAX_CATCHUP_INTERVALS), speed_limits=self._position_speeds)
+                self._commissioning_last_step = now
+            except BaseException as error:
+                self._fault = str(error)
+                self.close()
+                raise
+            return
         if self._jog_direction and now > self._jog_deadline:
             self.pause()
             return
-        if not self._jog_direction:
+        if self._jog_speeds and now > self._jog_deadline:
+            self.pause()
+            return
+        if not self._jog_speeds:
             return
         if (
             self._commissioning_last_step is not None
@@ -433,11 +696,11 @@ class URBackend:
                 arm.poll_feedback()
                 self._check_commissioning_health(arm)
             for name, arm in self._arms.items():
-                arm.commissioning_step(
-                    self._config.commissioning_joint,
-                    self._jog_direction,
+                arm.commissioning_step_multi(
+                    self._jog_speeds,
                     self._commissioning_origins[name],
-                    elapsed,
+                    self._config.commissioning_excursion_deg,
+                    self._config.commissioning_watchdog_s,
                 )
             self._commissioning_last_step = now
         except BaseException as error:
@@ -449,9 +712,12 @@ class URBackend:
         self, arm: URArm, require_stationary: bool = False
     ) -> None:
         arm.check_control_health()
-        if arm._feedback.get("safety_status") != 2:
+        allowed_safety_states = (
+            (2,) if self._config.commissioning_require_reduced else (1, 2)
+        )
+        if arm._feedback.get("safety_status") not in allowed_safety_states:
             raise ControlFault(
-                f"{arm.name}: commissioning requires controller safety status REDUCED."
+                f"{arm.name}: controller safety status blocks commissioning."
             )
         speeds = arm.feedback_speeds_deg_s
         if speeds is None:
@@ -475,6 +741,10 @@ class URBackend:
 
     def pause(self) -> None:
         self._jog_direction = 0
+        self._position_status = "stopped"
+        self._position_targets = {}
+        self._position_speeds = {}
+        self._jog_speeds = {}
         self._jog_deadline = 0.0
         self._tracker = TargetTracker()
         self._last_send_at = None
@@ -509,10 +779,15 @@ class URBackend:
         try:
             # Check every arm before allowing either one to stream a new command.
             for arm in self._arms.values():
-                arm.poll_feedback()
+                sample = arm.poll_feedback()
+                if sample:
+                    self._log_robot_feedback(arm, sample, now)
                 arm.check_control_health()
             for name, arm in self._arms.items():
-                arm.update(accumulated.arm(name), elapsed)
+                raw = accumulated.arm(name)
+                bounded = self._bounded_tracking_targets(name, raw)
+                arm.update(bounded, elapsed)
+                self._log_tracking_sample(name, raw, bounded, arm, now)
         except ControlFault as error:
             self._fault = str(error)
             self.close()
@@ -523,6 +798,110 @@ class URBackend:
         if self._last_send_at is None:
             return self._config.send_interval
         return min(now - self._last_send_at, self._config.send_interval * MAX_CATCHUP_INTERVALS)
+
+    def _bounded_tracking_targets(self, name: str, targets: ArmTargets) -> ArmTargets:
+        if self._config.operation not in (OPERATION_TRACKING, OPERATION_KEYFRAME):
+            return targets
+        origin = self._tracking_origins.get(name)
+        if origin is None:
+            raise ControlFault(f"{name}: capture the tracking origin before sending targets.")
+        excursion = self._config.tracking_excursion_deg
+        bounded = {
+            joint: max(origin[joint] - excursion, min(origin[joint] + excursion, value))
+            for joint, value in targets.joints.items()
+            if joint in origin
+        }
+        return ArmTargets(
+            joints=bounded,
+            gripper=targets.gripper,
+            tcp_target=targets.tcp_target,
+        )
+
+    def _log_tracking_sample(
+        self,
+        name: str,
+        raw: ArmTargets,
+        bounded: ArmTargets,
+        arm: URArm,
+        now: float,
+    ) -> None:
+        if self._telemetry is None or now < self._next_telemetry_at:
+            return
+        self._next_telemetry_at = now + 0.2
+        actual = arm.feedback_joints
+        speeds = arm.feedback_speeds_deg_s
+        self._write_telemetry(
+            "tracking_sample",
+            arm=name,
+            raw_target_deg=raw.joints,
+            bounded_target_deg=bounded.joints,
+            sent_setpoint_deg=dict(arm._setpoints.joints),
+            actual_joint_deg=actual,
+            actual_speed_deg_s=speeds,
+            robot_mode=ROBOT_MODES.get(arm._feedback.get("robot_mode"), "UNKNOWN"),
+            safety_status=SAFETY_STATUSES.get(
+                arm._feedback.get("safety_status"), "UNKNOWN"
+            ),
+            settings={
+                "max_speed_deg_s": self._config.max_speed_deg_s,
+                "acceleration_deg_s2": self._config.tracking_acceleration_deg_s2,
+                "excursion_deg": self._config.tracking_excursion_deg,
+                "deadband_deg": self._config.joint_deadband_deg,
+            },
+        )
+
+    def _write_telemetry(self, event: str, **fields: Any) -> None:
+        if self._telemetry is None:
+            return
+        record = {"time_unix_s": time.time(), "event": event, **fields}
+        self._telemetry.write(json.dumps(record, separators=(",", ":")) + "\n")
+
+    def _log_robot_feedback(
+        self, arm: URArm, sample: dict[str, Any], monotonic_s: float
+    ) -> None:
+        actual_q = sample.get("actual_q")
+        actual_qd = sample.get("actual_qd")
+        self._write_feedback(
+            "rtde_sample",
+            arm=arm.name,
+            host=arm.host,
+            monotonic_s=round(monotonic_s, 6),
+            actual_joint_rad=actual_q,
+            actual_joint_deg=(
+                {name: math.degrees(actual_q[index]) for index, name in enumerate(JOINT_NAMES)}
+                if actual_q and len(actual_q) == len(JOINT_NAMES)
+                else None
+            ),
+            actual_speed_rad_s=actual_qd,
+            actual_speed_deg_s=(
+                {name: math.degrees(actual_qd[index]) for index, name in enumerate(JOINT_NAMES)}
+                if actual_qd and len(actual_qd) == len(JOINT_NAMES)
+                else None
+            ),
+            actual_tcp_pose=sample.get("actual_TCP_pose"),
+            actual_tcp_speed=sample.get("actual_TCP_speed"),
+            robot_mode=sample.get("robot_mode"),
+            robot_mode_name=ROBOT_MODES.get(sample.get("robot_mode"), "UNKNOWN"),
+            safety_status=sample.get("safety_status"),
+            safety_status_name=SAFETY_STATUSES.get(sample.get("safety_status"), "UNKNOWN"),
+            speed_scaling=sample.get("speed_scaling"),
+            target_speed_fraction=sample.get("target_speed_fraction"),
+            runtime_state=sample.get("runtime_state"),
+        )
+
+    def _write_feedback(self, event: str, **fields: Any) -> None:
+        if self._feedback_log is None:
+            return
+        record = {"time_unix_s": time.time(), "event": event, **fields}
+        self._feedback_log.write(json.dumps(record, separators=(",", ":")) + "\n")
+
+    def note_tracking_event(self, event: str, elapsed_s: float) -> None:
+        """Record camera gaps without flooding the JSONL file every video frame."""
+        now = self._clock()
+        if event == "tracking_gap_held" and now < self._next_tracking_event_at:
+            return
+        self._next_tracking_event_at = now + 0.1
+        self._write_telemetry(event, gap_elapsed_s=round(elapsed_s, 4))
 
     def robot_state(self) -> RobotState | None:
         if not self._arms:
@@ -541,7 +920,7 @@ class URBackend:
             state = "armed" if self._commissioning_origins else "not armed"
             lines.append(
                 f"commissioning {state}: {self._config.commissioning_joint}, "
-                f"{self._config.commissioning_speed_deg_s:g} deg/s, "
+                f"{self._commissioning_speed_deg_s:g} deg/s, "
                 f"+/-{self._config.commissioning_excursion_deg:g} deg"
             )
         return lines
@@ -549,6 +928,14 @@ class URBackend:
     def close(self) -> None:
         for arm in self._arms.values():
             arm.close()
+        if self._telemetry is not None:
+            self._write_telemetry("session_closed")
+            self._telemetry.close()
+            self._telemetry = None
+        if self._feedback_log is not None:
+            self._write_feedback("session_closed")
+            self._feedback_log.close()
+            self._feedback_log = None
 
 
 def _preflight(

@@ -4,10 +4,12 @@ from unittest.mock import Mock
 from vision_robot_arm.core.pose_state import PoseState
 from vision_robot_arm.robot.config import (
     OPERATION_COMMISSIONING,
+    OPERATION_KEYFRAME,
     OPERATION_TRACKING,
     RobotConfig,
 )
 from vision_robot_arm.robot.session import HardwareSession
+from vision_robot_arm.robot.targets import ArmState, RobotState
 
 
 def pose(complete=True):
@@ -65,6 +67,45 @@ class HardwareSessionTests(unittest.TestCase):
         self.session.advance()
         self.session.update(pose())
         self.backend.send.assert_called_once()
+
+    def test_brief_tracking_loss_repeats_last_target_before_stopping(self):
+        now = [10.0]
+        backend = Mock()
+        backend.ready.return_value = True
+        session = HardwareSession(
+            RobotConfig(
+                backend="ur",
+                operation=OPERATION_TRACKING,
+                right_host="test",
+                tracking_loss_grace_s=0.4,
+            ),
+            Mock(return_value=backend),
+            clock=lambda: now[0],
+        )
+        session.advance()
+        session.advance()
+        session.update(pose())
+        session.advance()
+        session.update(pose())
+        valid_target = backend.send.call_args.args[0]
+
+        session.tracking_lost()
+        now[0] += 0.3
+        session.tracking_lost()
+
+        self.assertEqual(session.phase, "active")
+        self.assertEqual(backend.send.call_args.args[0], valid_target)
+        backend.pause.assert_not_called()
+        backend.note_tracking_event.assert_any_call("tracking_gap_held", 0.0)
+
+        now[0] += 0.11
+        session.tracking_lost()
+
+        self.assertEqual(session.phase, "paused")
+        backend.pause.assert_called_once()
+        event, elapsed = backend.note_tracking_event.call_args.args
+        self.assertEqual(event, "tracking_gap_stopped")
+        self.assertAlmostEqual(elapsed, 0.41)
 
     def test_fault_is_latched_and_closes_backend(self):
         self.prepare()
@@ -157,3 +198,77 @@ class HardwareSessionTests(unittest.TestCase):
 
         backend.pause.assert_called_once()
         self.assertEqual(session.phase, "connected")
+
+    def test_keyframe_mode_moves_by_the_captured_body_pose_delta(self):
+        backend = Mock()
+        backend.ready.return_value = True
+        backend.robot_state.return_value = RobotState(
+            arms={
+                "right": ArmState(
+                    joints={
+                        "base": 0.0,
+                        "shoulder": -40.0,
+                        "elbow": 20.0,
+                        "wrist_1": -30.0,
+                        "wrist_2": 0.0,
+                        "wrist_3": 0.0,
+                    },
+                    targets={},
+                    gripper="open",
+                )
+            },
+            lift_mode=False,
+        )
+        session = HardwareSession(
+            RobotConfig(
+                backend="ur",
+                operation=OPERATION_KEYFRAME,
+                right_host="test",
+            ),
+            Mock(return_value=backend),
+        )
+        start = PoseState(
+            1,
+            [],
+            None,
+            start_angles := {
+                "right_shoulder_elevation": 90.0,
+                "right_elbow": 120.0,
+                "right_wrist": 180.0,
+            },
+            start_angles,
+            {},
+            (),
+            False,
+        )
+        end = PoseState(
+            2,
+            [],
+            None,
+            end_angles := {
+                "right_shoulder_elevation": 100.0,
+                "right_elbow": 100.0,
+                "right_wrist": 170.0,
+            },
+            end_angles,
+            {},
+            (),
+            False,
+        )
+
+        session.advance()
+        session.advance()
+        self.assertEqual(session.phase, "keyframe_start")
+        session.update(start)
+        session.advance()
+        self.assertEqual(session.phase, "keyframe_end")
+        session.update(end)
+        session.advance()
+        self.assertEqual(session.phase, "active")
+        session.update(end)
+
+        target = backend.send.call_args.args[0].arm("right")
+        self.assertEqual(
+            target.joints,
+            {"shoulder": -50.0, "elbow": 40.0, "wrist_1": -20.0},
+        )

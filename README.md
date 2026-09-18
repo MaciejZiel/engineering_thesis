@@ -9,7 +9,7 @@ NVIDIA Jetson AGX Orin and an Orbbec Gemini 335Lg 3D camera).
 
 Current version:
 
-- presents the camera, system status, controls and dual-arm digital twin in one dashboard window
+- **Web interface**: presents the camera, system status, controls and dual-arm digital twin in a modern browser
 - opens a webcam with OpenCV
 - detects a single human pose with MediaPipe Pose Landmarker
 - draws a custom skeleton with a horizontal hip line
@@ -43,7 +43,21 @@ itself in editable mode without changing those versions:
 dependency maintenance, but both collaborators should use the lock file for
 normal development and demonstrations.
 
+### Web interface (optional)
+
+The web interface is a React/TypeScript application with a Three.js 3D workspace. Build it with Node.js:
+
+```powershell
+cd frontend
+npm install
+npm run build
+```
+
+The build output goes to `frontend/dist/` and is served automatically by the web launcher when present.
+
 ## Run
+
+### Desktop (OpenCV dashboard)
 
 ```powershell
 .venv\Scripts\python main.py
@@ -54,6 +68,25 @@ Or, with the virtual environment activated (`.venv\Scripts\Activate.ps1`):
 ```powershell
 python main.py
 ```
+
+If the default camera is not correct:
+
+### Web interface (React + Three.js)
+
+The web interface (`python -m vision_robot_arm.web`) presents the workspace, 3D digital twin and calibration tools in a browser.
+
+```powershell
+# Demo mode (illustrative, no camera or robot)
+.venv\Scripts\python -m vision_robot_arm.web --demo
+
+# Camera mode (tracking + simulation)
+.venv\Scripts\python -m vision_robot_arm.web --camera
+
+# Custom port
+.venv\Scripts\python -m vision_robot_arm.web --camera --port 8765
+```
+
+Open http://127.0.0.1:8765 in a browser. The web interface runs the simulation backend only; hardware operation remains available through `main.py`.
 
 If the default camera is not correct:
 
@@ -380,7 +413,9 @@ tests/
 
 Test files follow the `test_<area>_<topic>.py` convention so that each area
 owns its own tests. See `docs/ARCHITECTURE.md` for the data flow and import
-rules, and `docs/OWNERSHIP.md` for who owns which area and how we commit.
+rules, `docs/OWNERSHIP.md` for who owns which area and how we commit, and
+`docs/WEB_FRONTEND_MIGRATION_PLAN.md` for the staged migration from the OpenCV
+dashboard to a local React and Three.js operator interface.
 
 ## Test Mode
 
@@ -516,6 +551,46 @@ safety planes/joint limits and accessible teach-pendant emergency stop according
 to the laboratory procedure first. The checks below are application safeguards,
 not safety-rated robot functions.
 
+For camera-free joint tests, use the standalone multi-axis panel. It does not
+load MediaPipe, open a camera, or accept pose targets:
+
+```powershell
+.venv\Scripts\python scripts\ur_manual_test.py --host 10.20.3.20 --side right
+```
+
+The window deliberately tests one robot at a time. Set the maximum excursion
+before connecting. The controls then require three separate actions:
+
+1. **Connect read-only** opens Dashboard and RTDE monitoring without a motion
+   command.
+2. **Prepare manual control** verifies Remote Control and a motion-capable
+   **NORMAL** or **REDUCED** safety status, then opens the commissioning channel
+   without moving the arm. This NORMAL-mode exception exists only in this
+   low-speed standalone tester; regular commissioning still requires REDUCED.
+3. **Capture current pose & arm** requires fresh, stationary RTDE feedback and
+   adopts that position as the limited test origin without moving the arm.
+
+Each joint row has an independent direction selector, live angle and speed
+field. Configure any combination of the six axes, then hold **HOLD TO MOVE
+SELECTED JOINTS** or Space. All selected velocities are sent together in one
+`speedj` vector. Releasing the global dead-man sends `stopj` immediately; the
+150 ms watchdog remains active. The application accepts at most 30 deg/s per
+joint and +/-80 degrees from the captured origin. All six joint speeds default
+to 30 deg/s and the shared excursion defaults to +/-80 degrees.
+The complete configured range is available in both NORMAL and REDUCED. The UR
+controller's configured safety limits remain authoritative.
+The laboratory robot address `10.20.3.20` is prefilled but remains editable. Press
+**Escape** or **STOP AND DISCONNECT** to stop, disarm and close the connection.
+Change the IP, side or excursion only while disconnected.
+
+The six speed fields remain editable after manual control is prepared. Manual
+jogging uses a velocity command with gentle acceleration rather than a sequence
+of short position corrections; changes take effect when the next hold begins.
+
+Test the two arms in separate runs. If the displayed joint values, direction,
+stopping response or selected robot identity is wrong, disconnect and resolve
+that issue before testing another joint.
+
 Start with the read-only monitor. This opens dashboard and RTDE connections but
 cannot send `movej`, `servoj`, `stopj` or tool-output commands:
 
@@ -536,15 +611,15 @@ workspace, select a low pendant speed slider and run:
 python main.py --robot-backend ur --robot-operation commissioning `
   --robot-right-host 192.168.1.10 `
   --robot-commissioning-joint shoulder `
-  --robot-commissioning-speed 2 `
-  --robot-commissioning-excursion 2
+  --robot-commissioning-speed 30 `
+  --robot-commissioning-excursion 80
 ```
 
 Press **H** once to connect and a second time to capture the stationary current
 pose. Neither action commands motion. Then hold the on-screen `−`/`+` button or
 the **[**/**]** key to jog. Releasing it stops refresh; a 150 ms watchdog sends
-`stopj`. The default is limited to 2 deg/s and ±2 degrees from the captured
-origin. Hard validation prevents commissioning above 5 deg/s or ±5 degrees and
+`stopj`. The default is 30 deg/s and ±80 degrees from the captured origin.
+Hard validation prevents commissioning above 30 deg/s or ±80 degrees and
 prevents specifying two robot hosts. Press **P**, **H**, or **Stop motion** to
 disarm commissioning.
 
@@ -553,6 +628,50 @@ there and fix it before testing the next joint. Repeat with `base`, `elbow`,
 `wrist_1`, `wrist_2` and `wrist_3`, one at a time.
 
 ### Vision tracking over URScript
+
+For the first live, one-arm camera test used in the laboratory, run:
+
+```powershell
+python scripts/ur_camera_tracking_test.py
+```
+
+Use `--host` or `--camera` only when the laboratory address or camera changes.
+
+Stand fully in frame and keep only the right arm active for the first test.
+Press **H** once to connect, **H** again to capture the stationary robot pose,
+then **H** a third time after valid body targets appear to enable live control.
+The robot is limited to 20 deg/s and +/-40 degrees from the captured pose. Joint
+velocity ramps linearly at 7 deg/s^2 and brakes before reaching each target. A
+2-degree input deadzone suppresses small tracked-hand motion. Camera targets and
+commands are written to `logs/ur_tracking.jsonl`; feedback received from the
+robot is written separately to `logs/ur_robot_feedback.jsonl`.
+Press **P** to pause without closing the view. Press **Q** or the on-screen
+**STOP** button to send `stopj` and close the application.
+
+### Slow start/end keyframe test
+
+To capture a movement instead of continuously following the camera, run:
+
+```powershell
+python scripts/ur_keyframe_test.py
+```
+
+The control button (or **H**) advances one deliberate step at a time:
+
+1. connect to the robot;
+2. capture its stationary RTDE pose;
+3. capture the operator's start frame;
+4. move the operator's arm, then capture the end frame and begin motion.
+
+The robot applies the operator joint-angle difference to its measured starting
+pose. It does not jump to an absolute camera angle. The preset limits motion to
+20 deg/s, ramps at 7 deg/s^2 and clamps every joint to +/-80 degrees around the
+captured robot pose. Shoulder motion is reversed relative to the captured angle
+difference; elbow and wrist retain their directions. Once both frames are captured, a temporary camera dropout
+does not alter the recorded destination. **P**, **Q**, and the on-screen stop
+control still send `stopj`. This mode writes independent command and robot
+feedback logs to `logs/ur_keyframe_tracking.jsonl` and
+`logs/ur_keyframe_robot_feedback.jsonl`.
 
 Full tracking is selected explicitly:
 

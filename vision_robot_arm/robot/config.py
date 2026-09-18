@@ -20,18 +20,23 @@ BACKEND_CHOICES = (BACKEND_NONE, BACKEND_DEBUG, BACKEND_SIM, BACKEND_UR, BACKEND
 OPERATION_MONITOR = "monitor"
 OPERATION_COMMISSIONING = "commissioning"
 OPERATION_TRACKING = "tracking"
+OPERATION_KEYFRAME = "keyframe"
 OPERATION_CHOICES = (
     OPERATION_MONITOR,
     OPERATION_COMMISSIONING,
     OPERATION_TRACKING,
+    OPERATION_KEYFRAME,
 )
 
 UR_SECONDARY_PORT = 30002
 UR_RTDE_PORT = 30004
 UR_DASHBOARD_PORT = 29999
 UR7E_MAX_JOINT_SPEED_DEG_S = 180.0
-COMMISSIONING_MAX_SPEED_DEG_S = 5.0
-COMMISSIONING_MAX_EXCURSION_DEG = 5.0
+COMMISSIONING_MAX_SPEED_DEG_S = 30.0
+COMMISSIONING_MAX_EXCURSION_DEG = 80.0
+GRIPPER_DIGITAL = "digital"
+GRIPPER_ROBOTIQ = "robotiq"
+GRIPPER_DRIVER_CHOICES = (GRIPPER_DIGITAL, GRIPPER_ROBOTIQ)
 
 
 @dataclass(frozen=True)
@@ -79,6 +84,7 @@ DEFAULT_WRIST_MAPPING = JointMapping(
 class RobotConfig:
     backend: str = BACKEND_NONE
     operation: str = OPERATION_MONITOR
+    tracking_space: str = "3d"
     print_interval: float = 0.5
     right_host: str | None = None
     left_host: str | None = None
@@ -94,10 +100,20 @@ class RobotConfig:
     baud_rate: int = 115200
     send_interval: float = 0.05
     max_speed_deg_s: float = 60.0
+    tracking_excursion_deg: float = 40.0
+    tracking_acceleration_deg_s2: float = 7.0
+    tracking_loss_grace_s: float = 0.4
+    telemetry_log_path: str | None = None
+    feedback_log_path: str | None = None
+    gripper_gesture_frames: int = 3
+    gripper_driver: str = GRIPPER_DIGITAL
+    gripper_speed_percent: int = 80
+    gripper_force_percent: int = 50
     commissioning_joint: str = JOINT_SHOULDER
-    commissioning_speed_deg_s: float = 2.0
-    commissioning_excursion_deg: float = 2.0
+    commissioning_speed_deg_s: float = 30.0
+    commissioning_excursion_deg: float = 80.0
     commissioning_watchdog_s: float = 0.15
+    commissioning_require_reduced: bool = True
     joint_deadband_deg: float = 1.5
     shoulder: JointMapping = DEFAULT_SHOULDER_MAPPING
     elbow: JointMapping = DEFAULT_ELBOW_MAPPING
@@ -139,10 +155,15 @@ class RobotConfig:
         return self.limit_for(joint).clamp(UR_HOME_DEG.get(joint, 0.0))
 
     def validate(self) -> None:
+        if self.tracking_space not in ("2d", "3d"):
+            raise SystemExit("--tracking-space must be 2d or 3d")
         for flag, value in (
             ("--robot-print-interval", self.print_interval),
             ("--robot-send-interval", self.send_interval),
             ("--robot-max-speed", self.max_speed_deg_s),
+            ("--robot-tracking-excursion", self.tracking_excursion_deg),
+            ("--robot-tracking-acceleration", self.tracking_acceleration_deg_s2),
+            ("--robot-tracking-loss-grace", self.tracking_loss_grace_s),
             ("--robot-deadband", self.joint_deadband_deg),
             ("--robot-servo-lookahead", self.servo_lookahead_s),
             ("--robot-commissioning-speed", self.commissioning_speed_deg_s),
@@ -157,12 +178,18 @@ class RobotConfig:
             ("--robot-dashboard-port", self.dashboard_port),
             ("--robot-tool-output", self.tool_output),
             ("--robot-servo-gain", self.servo_gain),
+            ("--robot-gripper-gesture-frames", self.gripper_gesture_frames),
         ):
             if type(value) is not int:
                 raise SystemExit(f"{flag} must be an integer")
         if self.backend not in BACKEND_CHOICES:
             choices = ", ".join(BACKEND_CHOICES)
             raise SystemExit(f"--robot-backend must be one of: {choices}")
+        if self.gripper_driver not in GRIPPER_DRIVER_CHOICES:
+            raise SystemExit(
+                "--robot-gripper-driver must be one of: "
+                + ", ".join(GRIPPER_DRIVER_CHOICES)
+            )
         if self.operation not in OPERATION_CHOICES:
             choices = ", ".join(OPERATION_CHOICES)
             raise SystemExit(f"--robot-operation must be one of: {choices}")
@@ -191,6 +218,18 @@ class RobotConfig:
             raise SystemExit(
                 f"--robot-max-speed must be between 0 and {UR7E_MAX_JOINT_SPEED_DEG_S:.0f} deg/s (UR7e limit)"
             )
+        if not 0 < self.tracking_excursion_deg <= COMMISSIONING_MAX_EXCURSION_DEG:
+            raise SystemExit(
+                "--robot-tracking-excursion must be between 0 and "
+                f"{COMMISSIONING_MAX_EXCURSION_DEG:g} degrees"
+            )
+        if not 0 < self.tracking_acceleration_deg_s2 <= UR7E_MAX_JOINT_SPEED_DEG_S:
+            raise SystemExit(
+                "--robot-tracking-acceleration must be between 0 and "
+                f"{UR7E_MAX_JOINT_SPEED_DEG_S:g} deg/s^2"
+            )
+        if not 0 <= self.tracking_loss_grace_s <= 1.0:
+            raise SystemExit("--robot-tracking-loss-grace must be between 0 and 1 second")
         if self.baud_rate <= 0:
             raise SystemExit("--robot-baud must be greater than 0")
         if self.joint_deadband_deg < 0:
@@ -206,6 +245,14 @@ class RobotConfig:
             raise SystemExit("--robot-tool-output must be 0 or 1")
         if self.servo_gain < 100 or self.servo_gain > 2000:
             raise SystemExit("--robot-servo-gain must be between 100 and 2000")
+        if self.gripper_gesture_frames < 1:
+            raise SystemExit("--robot-gripper-gesture-frames must be at least 1")
+        for flag, value in (
+            ("--robot-gripper-speed", self.gripper_speed_percent),
+            ("--robot-gripper-force", self.gripper_force_percent),
+        ):
+            if type(value) is not int or not 0 <= value <= 100:
+                raise SystemExit(f"{flag} must be an integer between 0 and 100")
         if self.servo_lookahead_s < 0.03 or self.servo_lookahead_s > 0.2:
             raise SystemExit("--robot-servo-lookahead must be between 0.03 and 0.2 seconds")
         if self.backend == BACKEND_UR and not self.hosts:
@@ -219,10 +266,10 @@ class RobotConfig:
                 raise SystemExit(
                     "Commissioning requires RTDE feedback and dashboard preflight"
                 )
-        if self.backend == BACKEND_UR and self.operation == OPERATION_TRACKING:
+        if self.backend == BACKEND_UR and self.operation in (OPERATION_TRACKING, OPERATION_KEYFRAME):
             if not self.feedback or not self.preflight:
                 raise SystemExit(
-                    "Vision tracking requires RTDE feedback and dashboard preflight"
+                    "Vision control requires RTDE feedback and dashboard preflight"
                 )
         if self.backend == BACKEND_SERIAL and not self.port:
             raise SystemExit("--robot-port is required with --robot-backend serial")
