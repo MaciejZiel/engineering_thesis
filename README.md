@@ -627,10 +627,35 @@ Press **H** once to connect, **H** again to capture the stationary robot pose,
 then **H** a third time after valid body targets appear to enable live control.
 The robot is limited to 20 deg/s and +/-40 degrees from the captured pose. Joint
 velocity ramps linearly at 7 deg/s^2 and brakes before reaching each target. A
-6-degree input deadzone suppresses small tracked-hand motion. The JSONL log
-records camera targets, bounded targets, transmitted setpoints and RTDE state.
+2-degree input deadzone suppresses small tracked-hand motion. Camera targets and
+commands are written to `logs/ur_tracking.jsonl`; feedback received from the
+robot is written separately to `logs/ur_robot_feedback.jsonl`.
 Press **P** to pause without closing the view. Press **Q** or the on-screen
 **STOP** button to send `stopj` and close the application.
+
+### Slow start/end keyframe test
+
+To capture a movement instead of continuously following the camera, run:
+
+```powershell
+python scripts/ur_keyframe_test.py
+```
+
+The control button (or **H**) advances one deliberate step at a time:
+
+1. connect to the robot;
+2. capture its stationary RTDE pose;
+3. capture the operator's start frame;
+4. move the operator's arm, then capture the end frame and begin motion.
+
+The robot applies the operator joint-angle difference to its measured starting
+pose. It does not jump to an absolute camera angle. The preset limits motion to
+5 deg/s, ramps at 3 deg/s^2 and clamps every joint to +/-40 degrees around the
+captured robot pose. Once both frames are captured, a temporary camera dropout
+does not alter the recorded destination. **P**, **Q**, and the on-screen stop
+control still send `stopj`. This mode writes independent command and robot
+feedback logs to `logs/ur_keyframe_tracking.jsonl` and
+`logs/ur_keyframe_robot_feedback.jsonl`.
 
 Full tracking is selected explicitly:
 
