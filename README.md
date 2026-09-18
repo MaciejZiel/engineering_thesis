@@ -9,7 +9,7 @@ NVIDIA Jetson AGX Orin and an Orbbec Gemini 335Lg 3D camera).
 
 Current version:
 
-- presents the camera, system status, controls and dual-arm digital twin in one dashboard window
+- **Web interface**: presents the camera, system status, controls and dual-arm digital twin in a modern browser
 - opens a webcam with OpenCV
 - detects a single human pose with MediaPipe Pose Landmarker
 - draws a custom skeleton with a horizontal hip line
@@ -43,7 +43,21 @@ itself in editable mode without changing those versions:
 dependency maintenance, but both collaborators should use the lock file for
 normal development and demonstrations.
 
+### Web interface (optional)
+
+The web interface is a React/TypeScript application with a Three.js 3D workspace. Build it with Node.js:
+
+```powershell
+cd frontend
+npm install
+npm run build
+```
+
+The build output goes to `frontend/dist/` and is served automatically by the web launcher when present.
+
 ## Run
+
+### Desktop (OpenCV dashboard)
 
 ```powershell
 .venv\Scripts\python main.py
@@ -54,6 +68,25 @@ Or, with the virtual environment activated (`.venv\Scripts\Activate.ps1`):
 ```powershell
 python main.py
 ```
+
+If the default camera is not correct:
+
+### Web interface (React + Three.js)
+
+The web interface (`python -m vision_robot_arm.web`) presents the workspace, 3D digital twin and calibration tools in a browser.
+
+```powershell
+# Demo mode (illustrative, no camera or robot)
+.venv\Scripts\python -m vision_robot_arm.web --demo
+
+# Camera mode (tracking + simulation)
+.venv\Scripts\python -m vision_robot_arm.web --camera
+
+# Custom port
+.venv\Scripts\python -m vision_robot_arm.web --camera --port 8765
+```
+
+Open http://127.0.0.1:8765 in a browser. The web interface runs the simulation backend only; hardware operation remains available through `main.py`.
 
 If the default camera is not correct:
 
