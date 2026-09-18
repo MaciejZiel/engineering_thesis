@@ -614,6 +614,23 @@ there and fix it before testing the next joint. Repeat with `base`, `elbow`,
 
 ### Vision tracking over URScript
 
+For the first live, one-arm camera test used in the laboratory, run:
+
+```powershell
+python main.py --camera auto --width 1280 --height 720 --fps 30 `
+  --inference-width 640 --inference-height 360 --test-mode `
+  --robot-backend ur --robot-operation tracking `
+  --robot-right-host 10.20.3.20 --robot-max-speed 10 `
+  --robot-tracking-excursion 40
+```
+
+Stand fully in frame and keep only the right arm active for the first test.
+Press **H** once to connect, **H** again to capture the stationary robot pose,
+then **H** a third time after valid body targets appear to enable live control.
+The robot is limited to 10 deg/s and +/-40 degrees from the captured pose.
+Press **P** to pause without closing the view. Press **Q** or the on-screen
+**STOP** button to send `stopj` and close the application.
+
 Full tracking is selected explicitly:
 
 ```powershell
