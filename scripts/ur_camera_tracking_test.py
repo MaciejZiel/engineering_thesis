@@ -44,6 +44,7 @@ def run() -> int:
         "--robot-gripper-force", "50",
         "--robot-gripper-gesture-frames", "3",
         "--robot-telemetry-log", "logs/ur_tracking.jsonl",
+        "--robot-feedback-log", "logs/ur_robot_feedback.jsonl",
     ]
     return main()
 

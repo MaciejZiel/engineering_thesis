@@ -725,6 +725,25 @@ class TrackingArmingTests(unittest.TestCase):
         self.assertIn("shoulder", sample["sent_setpoint_deg"])
         self.assertEqual(sample["settings"]["excursion_deg"], 40.0)
 
+    def test_robot_feedback_is_written_to_a_separate_rtde_log(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "robot-feedback.jsonl"
+            backend, _ = self.make(feedback_log_path=str(path))
+            backend.arm_tracking()
+            backend.send(targets(right={"shoulder": 3.0}))
+            backend.close()
+
+            records = [json.loads(line) for line in path.read_text().splitlines()]
+
+        sample = next(record for record in records if record["event"] == "rtde_sample")
+        self.assertEqual(sample["arm"], "right")
+        self.assertEqual(sample["robot_mode_name"], "RUNNING")
+        self.assertEqual(sample["safety_status_name"], "NORMAL")
+        self.assertIn("shoulder", sample["actual_joint_deg"])
+        self.assertIn("actual_tcp_pose", sample)
+        self.assertEqual(records[0]["event"], "session_started")
+        self.assertEqual(records[-1]["event"], "session_closed")
+
 
 if __name__ == "__main__":
     unittest.main()

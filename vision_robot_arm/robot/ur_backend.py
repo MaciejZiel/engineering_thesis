@@ -303,9 +303,9 @@ class URArm:
             else:
                 self._setpoints.joints[joint] = current + step
 
-    def poll_feedback(self) -> None:
+    def poll_feedback(self) -> dict[str, Any] | None:
         if self._rtde is None:
-            return
+            return None
         sample = self._rtde.read()
         if sample:
             self._feedback = sample
@@ -314,6 +314,7 @@ class URArm:
             # Never present a stale pose as the live one.
             self._feedback = {}
             self._feedback_at = None
+        return sample
 
     def check_control_health(self) -> None:
         if self._rtde is None:
@@ -423,6 +424,7 @@ class URBackend:
         self._status_query = status_query
         self._commissioning = config.operation == OPERATION_COMMISSIONING
         self._telemetry = None
+        self._feedback_log = None
         self._next_telemetry_at = 0.0
         self._next_tracking_event_at = 0.0
         if require_feedback and not config.feedback:
@@ -460,6 +462,11 @@ class URBackend:
             path.parent.mkdir(parents=True, exist_ok=True)
             self._telemetry = path.open("a", encoding="utf-8", buffering=1)
             self._write_telemetry("session_started")
+        if config.feedback_log_path:
+            path = Path(config.feedback_log_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._feedback_log = path.open("a", encoding="utf-8", buffering=1)
+            self._write_feedback("session_started")
 
     def arm_commissioning(self) -> None:
         if not self._commissioning:
@@ -668,7 +675,9 @@ class URBackend:
         try:
             # Check every arm before allowing either one to stream a new command.
             for arm in self._arms.values():
-                arm.poll_feedback()
+                sample = arm.poll_feedback()
+                if sample:
+                    self._log_robot_feedback(arm, sample, now)
                 arm.check_control_health()
             for name, arm in self._arms.items():
                 raw = accumulated.arm(name)
@@ -743,6 +752,45 @@ class URBackend:
         record = {"time_unix_s": time.time(), "event": event, **fields}
         self._telemetry.write(json.dumps(record, separators=(",", ":")) + "\n")
 
+    def _log_robot_feedback(
+        self, arm: URArm, sample: dict[str, Any], monotonic_s: float
+    ) -> None:
+        actual_q = sample.get("actual_q")
+        actual_qd = sample.get("actual_qd")
+        self._write_feedback(
+            "rtde_sample",
+            arm=arm.name,
+            host=arm.host,
+            monotonic_s=round(monotonic_s, 6),
+            actual_joint_rad=actual_q,
+            actual_joint_deg=(
+                {name: math.degrees(actual_q[index]) for index, name in enumerate(JOINT_NAMES)}
+                if actual_q and len(actual_q) == len(JOINT_NAMES)
+                else None
+            ),
+            actual_speed_rad_s=actual_qd,
+            actual_speed_deg_s=(
+                {name: math.degrees(actual_qd[index]) for index, name in enumerate(JOINT_NAMES)}
+                if actual_qd and len(actual_qd) == len(JOINT_NAMES)
+                else None
+            ),
+            actual_tcp_pose=sample.get("actual_TCP_pose"),
+            actual_tcp_speed=sample.get("actual_TCP_speed"),
+            robot_mode=sample.get("robot_mode"),
+            robot_mode_name=ROBOT_MODES.get(sample.get("robot_mode"), "UNKNOWN"),
+            safety_status=sample.get("safety_status"),
+            safety_status_name=SAFETY_STATUSES.get(sample.get("safety_status"), "UNKNOWN"),
+            speed_scaling=sample.get("speed_scaling"),
+            target_speed_fraction=sample.get("target_speed_fraction"),
+            runtime_state=sample.get("runtime_state"),
+        )
+
+    def _write_feedback(self, event: str, **fields: Any) -> None:
+        if self._feedback_log is None:
+            return
+        record = {"time_unix_s": time.time(), "event": event, **fields}
+        self._feedback_log.write(json.dumps(record, separators=(",", ":")) + "\n")
+
     def note_tracking_event(self, event: str, elapsed_s: float) -> None:
         """Record camera gaps without flooding the JSONL file every video frame."""
         now = self._clock()
@@ -780,6 +828,10 @@ class URBackend:
             self._write_telemetry("session_closed")
             self._telemetry.close()
             self._telemetry = None
+        if self._feedback_log is not None:
+            self._write_feedback("session_closed")
+            self._feedback_log.close()
+            self._feedback_log = None
 
 
 def _preflight(

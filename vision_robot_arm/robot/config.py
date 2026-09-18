@@ -97,6 +97,7 @@ class RobotConfig:
     tracking_acceleration_deg_s2: float = 7.0
     tracking_loss_grace_s: float = 0.4
     telemetry_log_path: str | None = None
+    feedback_log_path: str | None = None
     gripper_gesture_frames: int = 3
     gripper_driver: str = GRIPPER_DIGITAL
     gripper_speed_percent: int = 80

@@ -301,6 +301,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional JSONL file for targets, setpoints and RTDE feedback.",
     )
     robot.add_argument(
+        "--robot-feedback-log",
+        default=None,
+        help="Optional separate JSONL file containing only values received from robot RTDE.",
+    )
+    robot.add_argument(
         "--robot-gripper-gesture-frames",
         type=int,
         default=3,
@@ -489,6 +494,7 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         tracking_acceleration_deg_s2=args.robot_tracking_acceleration,
         tracking_loss_grace_s=args.robot_tracking_loss_grace,
         telemetry_log_path=args.robot_telemetry_log,
+        feedback_log_path=args.robot_feedback_log,
         gripper_gesture_frames=args.robot_gripper_gesture_frames,
         gripper_driver=args.robot_gripper_driver,
         gripper_speed_percent=args.robot_gripper_speed,
