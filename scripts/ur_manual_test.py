@@ -9,7 +9,7 @@ from pathlib import Path
 from tkinter import ttk
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from vision_robot_arm.robot.manual_test import ManualArmTestSession, ManualTestSettings  # noqa: E402
+from vision_robot_arm.robot.manual_test import ManualArmTestSession, ManualTestSettings, SequenceStep  # noqa: E402
 from vision_robot_arm.robot.targets import JOINT_NAMES  # noqa: E402
 
 BG, PANEL, RAISED, BORDER = "#0d0f11", "#15181b", "#1c2024", "#2a2f34"
@@ -25,6 +25,7 @@ JOINT_LABELS = {
     "base": "Base", "shoulder": "Shoulder", "elbow": "Elbow",
     "wrist_1": "Wrist 1", "wrist_2": "Wrist 2", "wrist_3": "Wrist 3",
 }
+SEQUENCE_JOINT_LABELS = {name: f"J{i} · {JOINT_LABELS[name]}" for i, name in enumerate(JOINT_NAMES, 1)}
 
 
 class ManualTestWindow:
@@ -44,6 +45,13 @@ class ManualTestWindow:
         self.target_message = tk.StringVar(value="Blank targets keep their current position. Values are degrees.")
         self._last_arm = None
         self._position_mode = False
+        self.sequence_steps: list[SequenceStep] = []
+        self.sequence_joint = tk.StringVar(value=SEQUENCE_JOINT_LABELS["shoulder"])
+        self.sequence_delta = tk.StringVar(value="30")
+        self.sequence_speed = tk.StringVar(value="30")
+        self.sequence_status = tk.StringVar(value="Add relative moves below. Nothing moves until Start sequence.")
+        self.sequence_controls = []
+        self._sequence_view_state = None
         self.direction_buttons = {}
         self.speed_controls, self.locked_controls = [], []
         self._moving = self._closed = False
@@ -67,7 +75,18 @@ class ManualTestWindow:
         style.configure("Control.TSpinbox", fieldbackground=RAISED, background=RAISED,
                         foreground=TEXT, bordercolor=BORDER, arrowcolor=MUTED,
                         padding=7, font=(MONO, 10))
+        style.configure("Control.TNotebook", background=PANEL, borderwidth=0)
+        style.configure("Control.TNotebook.Tab", background=RAISED, foreground=MUTED,
+                        padding=(18, 12), font=(FONT, 10, "bold"))
+        style.map("Control.TNotebook.Tab", background=[("selected", PANEL)], foreground=[("selected", ACCENT)])
+        style.configure("Queue.Treeview", background=PANEL, fieldbackground=PANEL,
+                        foreground=TEXT, rowheight=38, font=(MONO, 10), borderwidth=0)
+        style.configure("Queue.Treeview.Heading", background=RAISED, foreground=MUTED,
+                        font=(FONT, 9, "bold"), padding=10, relief="flat")
+        style.map("Queue.Treeview", background=[("selected", "#33271e")], foreground=[("selected", TEXT)])
         self.root.bind("<Escape>", lambda _event: self._stop())
+        self.root.bind("<KeyPress-q>", lambda _event: self._stop())
+        self.root.bind("<KeyPress-Q>", lambda _event: self._stop())
         self.root.bind("<KeyPress-space>", self._space_down)
         self.root.bind("<KeyRelease-space>", lambda _event: self._end_jog())
 
@@ -88,13 +107,26 @@ class ManualTestWindow:
         self.status_dot.pack(side="left", padx=(0, 7))
         tk.Label(status, textvariable=self.phase, bg=RAISED, fg=TEXT,
                  font=(FONT, 9, "bold")).pack(side="left")
+        footer = tk.Frame(shell, bg=BG, pady=10)
+        footer.pack(side="bottom", fill="x")
+        tk.Label(footer, textvariable=self.hint, bg=BG, fg=MUTED, font=(FONT, 9)).pack(side="left")
+        self.stop_button = self._button(footer, "STOP & DISCONNECT   Q / ESC", self._stop,
+                                        bg="#352124", fg=DANGER, active="#48282c")
+        self.stop_button.pack(side="right")
         content = tk.Frame(shell, bg=BG)
         content.pack(fill="both", expand=True, pady=(20, 0))
         sidebar, workspace = self._panel(content, 300), self._panel(content)
         sidebar.pack(side="left", fill="y", padx=(0, 14))
         workspace.pack(side="left", fill="both", expand=True)
         self._build_connection(sidebar)
-        self._build_workspace(workspace)
+        self.tabs = ttk.Notebook(workspace, style="Control.TNotebook")
+        self.tabs.pack(fill="both", expand=True)
+        self.sequence_tab = tk.Frame(self.tabs, bg=PANEL)
+        self.manual_tab = tk.Frame(self.tabs, bg=PANEL)
+        self.tabs.add(self.sequence_tab, text="Sequence")
+        self.tabs.add(self.manual_tab, text="Manual control")
+        self._build_workspace(self.manual_tab)
+        self._build_sequence(self.sequence_tab)
 
     def _build_connection(self, parent: tk.Widget) -> None:
         self._section(parent, "Connection", "One controller at a time")
@@ -180,13 +212,138 @@ class ManualTestWindow:
         self.position_button.bind("<Leave>", lambda _event: self._end_jog())
         tk.Label(targets, textvariable=self.target_message, bg=PANEL, fg=MUTED, anchor="w",
                  wraplength=800, font=(FONT, 9)).pack(fill="x")
-        footer = tk.Frame(parent, bg=PANEL, padx=18, pady=10)
-        footer.pack(fill="x")
-        tk.Label(footer, textvariable=self.hint, bg=PANEL, fg=MUTED,
-                 font=(FONT, 9)).pack(side="left")
-        self.stop_button = self._button(footer, "STOP & DISCONNECT   ESC", self._stop,
-                                        bg="#352124", fg=DANGER, active="#48282c")
-        self.stop_button.pack(side="right")
+
+    def _build_sequence(self, parent):
+        self._section(parent, "Motion sequence", "Queue relative joint moves. Each step waits for the robot to reach its target.")
+        editor = tk.Frame(parent, bg=PANEL, padx=18)
+        editor.pack(fill="x")
+        for col, label in enumerate(("JOINT", "ANGLE CHANGE  °", "SPEED  °/s")):
+            tk.Label(editor, text=label, bg=PANEL, fg=MUTED, font=(FONT, 8, "bold")).grid(row=0, column=col, sticky="w", pady=(0, 6))
+        joint = ttk.Combobox(editor, textvariable=self.sequence_joint,
+                             values=tuple(SEQUENCE_JOINT_LABELS.values()), state="readonly",
+                             width=20, style="Control.TCombobox")
+        delta = ttk.Spinbox(editor, textvariable=self.sequence_delta, from_=-160, to=160,
+                            increment=1, width=12, style="Control.TSpinbox")
+        speed = ttk.Spinbox(editor, textvariable=self.sequence_speed, from_=0.1, to=30,
+                            increment=.5, width=12, style="Control.TSpinbox")
+        for col, widget in enumerate((joint, delta, speed)):
+            widget.grid(row=1, column=col, sticky="ew", padx=(0, 12))
+            self.sequence_controls.append(widget)
+            editor.columnconfigure(col, weight=1)
+        add = self._button(editor, "+ Add step", self._add_sequence_step, bg=ACCENT, fg="#241a13")
+        add.grid(row=1, column=3, sticky="ns")
+        self.sequence_controls.append(add)
+        delta.bind("<Return>", lambda _event: self._add_sequence_step())
+        speed.bind("<Return>", lambda _event: self._add_sequence_step())
+        tk.Label(parent, text="Example: Shoulder +30°, then Elbow −15°. Signs follow the robot's joint axes.",
+                 bg=PANEL, fg=MUTED, font=(FONT, 9), anchor="w").pack(fill="x", padx=18, pady=(10, 16))
+        toolbar = tk.Frame(parent, bg=PANEL, padx=18)
+        toolbar.pack(fill="x")
+        for label, action in (("Remove selected", self._remove_sequence_step),
+                              ("Move up", lambda: self._move_sequence_step(-1)),
+                              ("Move down", lambda: self._move_sequence_step(1)),
+                              ("Clear queue", self._clear_sequence)):
+            button = self._button(toolbar, label, action, pady=8)
+            button.pack(side="left", padx=(0, 8))
+            self.sequence_controls.append(button)
+        table = tk.Frame(parent, bg=PANEL, padx=18, pady=12)
+        table.pack(fill="both", expand=True)
+        columns = ("number", "joint", "delta", "speed", "state")
+        self.queue_table = ttk.Treeview(table, columns=columns, show="headings", selectmode="browse", style="Queue.Treeview", height=7)
+        for key, label, width in zip(columns, ("STEP", "JOINT", "CHANGE (°)", "SPEED (°/s)", "STATUS"), (65, 185, 115, 130, 145)):
+            self.queue_table.heading(key, text=label)
+            self.queue_table.column(key, width=width, minwidth=55, stretch=True, anchor="w")
+        scrollbar = ttk.Scrollbar(table, orient="vertical", command=self.queue_table.yview)
+        self.queue_table.configure(yscrollcommand=scrollbar.set)
+        self.queue_table.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        self.queue_table.tag_configure("active", background="#33271e", foreground=ACCENT)
+        self.queue_table.tag_configure("done", foreground=SUCCESS)
+        bottom = tk.Frame(parent, bg=PANEL, padx=18, pady=12)
+        bottom.pack(fill="x")
+        tk.Label(bottom, textvariable=self.sequence_status, bg=PANEL, fg=TEXT, anchor="w",
+                 wraplength=850, font=(FONT, 10)).pack(fill="x", pady=(0, 12))
+        self.sequence_start_button = self._button(bottom, "Start sequence", self._start_sequence, bg=ACCENT, fg="#241a13", pady=13)
+        self.sequence_start_button.pack(side="left", fill="x", expand=True)
+        self.sequence_stop_button = self._button(bottom, "Stop sequence", self._stop_sequence, bg="#352124", fg=DANGER, pady=13)
+        self.sequence_stop_button.pack(side="left", padx=(10, 0))
+        live = tk.Frame(parent, bg=RAISED, padx=18, pady=12)
+        live.pack(fill="x", padx=18, pady=(0, 18))
+        for i, name in enumerate(JOINT_NAMES):
+            cell = tk.Frame(live, bg=RAISED)
+            cell.pack(side="left", expand=True, fill="x")
+            tk.Label(cell, text=f"J{i+1} {JOINT_LABELS[name]}", bg=RAISED, fg=MUTED, font=(FONT, 8)).pack()
+            tk.Label(cell, textvariable=self.joint_values[name], bg=RAISED, fg=TEXT, font=(MONO, 10)).pack(pady=(5, 0))
+
+    def _queue_edited(self):
+        self.session.sequence_state = "idle"
+        self.session.sequence_index = 0
+        self._render_queue()
+        self.sequence_status.set(f"{len(self.sequence_steps)} steps queued. Changes are relative; Start runs the whole queue.")
+        self._refresh_ui()
+
+    def _add_sequence_step(self):
+        if self.session.sequence_running:
+            return
+        try:
+            joint = next(name for name, label in SEQUENCE_JOINT_LABELS.items() if label == self.sequence_joint.get())
+            self.sequence_steps.append(SequenceStep(joint, float(self.sequence_delta.get().replace(",", ".")), float(self.sequence_speed.get().replace(",", "."))))
+            self._queue_edited()
+        except (ValueError, StopIteration) as error:
+            self.sequence_status.set(str(error) or "Choose a joint and enter a valid angle and speed.")
+
+    def _remove_sequence_step(self):
+        selected = self.queue_table.selection()
+        if selected and not self.session.sequence_running:
+            del self.sequence_steps[int(selected[0])]
+            self._queue_edited()
+
+    def _move_sequence_step(self, offset):
+        selected = self.queue_table.selection()
+        if not selected or self.session.sequence_running:
+            return
+        index = int(selected[0])
+        destination = index + offset
+        if 0 <= destination < len(self.sequence_steps):
+            self.sequence_steps[index], self.sequence_steps[destination] = self.sequence_steps[destination], self.sequence_steps[index]
+            self._queue_edited()
+            self.queue_table.selection_set(str(destination))
+
+    def _clear_sequence(self):
+        if not self.session.sequence_running:
+            self.sequence_steps.clear()
+            self._queue_edited()
+
+    def _render_queue(self):
+        for item in self.queue_table.get_children():
+            self.queue_table.delete(item)
+        state, current = self.session.sequence_state, self.session.sequence_index
+        for i, step in enumerate(self.sequence_steps):
+            status, tag = "Queued", ""
+            if state != "idle" and i < current:
+                status, tag = "Done", "done"
+            elif state == "running" and i == current:
+                status, tag = "Moving", "active"
+            elif state in ("stopped", "fault") and i == current:
+                status = "Stopped"
+            self.queue_table.insert("", "end", iid=str(i), values=(i+1, SEQUENCE_JOINT_LABELS[step.joint], f"{step.delta_deg:+g}", f"{step.speed_deg_s:g}", status), tags=(tag,))
+        if state == "running":
+            self.queue_table.see(str(current))
+
+    def _start_sequence(self):
+        try:
+            self.session.start_sequence(self.sequence_steps)
+            self.sequence_status.set(self.session.sequence_message)
+        except (ValueError, RuntimeError) as error:
+            self.sequence_status.set(str(error))
+        self._render_queue()
+        self._refresh_ui()
+
+    def _stop_sequence(self):
+        self.session.stop_sequence()
+        self.sequence_status.set(self.session.sequence_message)
+        self._render_queue()
+        self._refresh_ui()
 
     def _joint_row(self, table: tk.Frame, row: int, name: str) -> None:
         bg = PANEL if row % 2 else "#181b1f"
@@ -335,7 +492,7 @@ class ManualTestWindow:
             self.target_message.set(str(error))
 
     def _space_down(self, event):
-        if not isinstance(event.widget, (tk.Entry, ttk.Spinbox, ttk.Combobox)):
+        if self.tabs.select() == str(self.manual_tab) and not isinstance(event.widget, (tk.Entry, ttk.Entry, ttk.Spinbox, ttk.Combobox)):
             self._begin_multi_jog()
 
     def _perform(self, action):
@@ -376,6 +533,8 @@ class ManualTestWindow:
             else:
                 control.configure(state="normal" if editable else "disabled")
         speed_state = "normal" if phase in ("disconnected", "prepared", "armed") else "disabled"
+        if self.session.sequence_running:
+            speed_state = "disabled"
         for control in self.speed_controls:
             control.configure(state=speed_state)
         self.connect_button.configure(state="normal" if phase == "disconnected" else "disabled")
@@ -388,6 +547,17 @@ class ManualTestWindow:
             for button in buttons:
                 button.configure(state=jog_state)
         self.stop_button.configure(state="normal" if phase != "disconnected" else "disabled")
+        running = self.session.sequence_running
+        for control in self.sequence_controls:
+            control.configure(state="disabled" if running else "readonly" if isinstance(control, ttk.Combobox) else "normal")
+        self.sequence_start_button.configure(state="normal" if self.session.can_jog and self.sequence_steps and not self._moving else "disabled")
+        self.sequence_stop_button.configure(state="normal" if running else "disabled")
+        view_state = (self.session.sequence_state, self.session.sequence_index, self.session.sequence_message)
+        if view_state != self._sequence_view_state:
+            self._sequence_view_state = view_state
+            if self.session.sequence_state != "idle":
+                self.sequence_status.set(self.session.sequence_message)
+            self._render_queue()
 
     def _stop(self):
         self._moving = False
