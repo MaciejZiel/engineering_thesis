@@ -365,7 +365,9 @@ tests/
 
 Test files follow the `test_<area>_<topic>.py` convention so that each area
 owns its own tests. See `docs/ARCHITECTURE.md` for the data flow and import
-rules, and `docs/OWNERSHIP.md` for who owns which area and how we commit.
+rules, `docs/OWNERSHIP.md` for who owns which area and how we commit, and
+`docs/WEB_FRONTEND_MIGRATION_PLAN.md` for the staged migration from the OpenCV
+dashboard to a local React and Three.js operator interface.
 
 ## Test Mode
 
