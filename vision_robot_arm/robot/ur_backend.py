@@ -17,6 +17,7 @@ from typing import Any, Callable
 from vision_robot_arm.robot.backend import Clock, TargetTracker
 from vision_robot_arm.robot.config import (
     COMMISSIONING_MAX_SPEED_DEG_S,
+    GRIPPER_ROBOTIQ,
     OPERATION_COMMISSIONING,
     OPERATION_TRACKING,
     RobotConfig,
@@ -90,6 +91,36 @@ def encode_speedj(joint: str, speed_deg_s: float, duration_s: float) -> bytes:
 def encode_gripper(closed: bool, tool_output: int = 0) -> bytes:
     value = "True" if closed else "False"
     return f"set_tool_digital_out({tool_output}, {value})\n".encode("ascii")
+
+
+def encode_robotiq_gripper(
+    closed: bool, speed_percent: int = 80, force_percent: int = 50
+) -> bytes:
+    """Build a non-blocking Robotiq URCap command for the controller's local daemon."""
+    position = 255 if closed else 0
+    speed = round(max(0, min(100, speed_percent)) * 2.55)
+    force = round(max(0, min(100, force_percent)) * 2.55)
+    commands = (("ACT", 1), ("SPE", speed), ("FOR", force), ("POS", position), ("GTO", 1))
+    lines = [
+        "def motion_twin_gripper():",
+        '  if (socket_open("127.0.0.1", 63352, "motion_twin_gripper")):',
+    ]
+    for variable, value in commands:
+        lines.extend(
+            (
+                f'    socket_set_var("{variable}", {value}, "motion_twin_gripper")',
+                '    socket_read_byte_list(3, "motion_twin_gripper", 0.2)',
+            )
+        )
+    lines.extend(
+        (
+            '    socket_close("motion_twin_gripper")',
+            "  end",
+            "end",
+            "",
+        )
+    )
+    return "\n".join(lines).encode("ascii")
 
 
 def default_connector(host: str, port: int) -> Any:
@@ -235,7 +266,17 @@ class URArm:
             )
         )
         if targets.gripper is not None and targets.gripper != self._gripper:
-            self._send(encode_gripper(targets.gripper == GRIPPER_CLOSE, self._config.tool_output))
+            closed = targets.gripper == GRIPPER_CLOSE
+            command = (
+                encode_robotiq_gripper(
+                    closed,
+                    self._config.gripper_speed_percent,
+                    self._config.gripper_force_percent,
+                )
+                if self._config.gripper_driver == GRIPPER_ROBOTIQ
+                else encode_gripper(closed, self._config.tool_output)
+            )
+            self._send(command)
             self._gripper = targets.gripper
 
     def _step_tracking_setpoints(self, elapsed_s: float) -> None:

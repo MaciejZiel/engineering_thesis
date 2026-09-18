@@ -14,6 +14,7 @@ from vision_robot_arm.robot.ur_backend import (
     URBackend,
     ControlFault,
     encode_gripper,
+    encode_robotiq_gripper,
     encode_servoj,
     encode_speedj,
     encode_speedj_vector,
@@ -151,6 +152,16 @@ class EncodeTests(unittest.TestCase):
     def test_gripper_uses_the_configured_tool_output(self) -> None:
         self.assertEqual(encode_gripper(True), b"set_tool_digital_out(0, True)\n")
         self.assertEqual(encode_gripper(False, tool_output=1), b"set_tool_digital_out(1, False)\n")
+
+    def test_robotiq_gripper_uses_urcap_socket_with_scaled_settings(self) -> None:
+        opened = encode_robotiq_gripper(False, speed_percent=80, force_percent=50)
+        closed = encode_robotiq_gripper(True, speed_percent=80, force_percent=50)
+
+        self.assertIn(b'socket_open("127.0.0.1", 63352', opened)
+        self.assertIn(b'socket_set_var("SPE", 204', opened)
+        self.assertIn(b'socket_set_var("FOR", 127', opened)
+        self.assertIn(b'socket_set_var("POS", 0', opened)
+        self.assertIn(b'socket_set_var("POS", 255', closed)
 
 
 class URBackendTests(unittest.TestCase):

@@ -31,6 +31,9 @@ UR_DASHBOARD_PORT = 29999
 UR7E_MAX_JOINT_SPEED_DEG_S = 180.0
 COMMISSIONING_MAX_SPEED_DEG_S = 30.0
 COMMISSIONING_MAX_EXCURSION_DEG = 80.0
+GRIPPER_DIGITAL = "digital"
+GRIPPER_ROBOTIQ = "robotiq"
+GRIPPER_DRIVER_CHOICES = (GRIPPER_DIGITAL, GRIPPER_ROBOTIQ)
 
 
 @dataclass(frozen=True)
@@ -94,6 +97,9 @@ class RobotConfig:
     tracking_acceleration_deg_s2: float = 7.0
     telemetry_log_path: str | None = None
     gripper_gesture_frames: int = 3
+    gripper_driver: str = GRIPPER_DIGITAL
+    gripper_speed_percent: int = 80
+    gripper_force_percent: int = 50
     commissioning_joint: str = JOINT_SHOULDER
     commissioning_speed_deg_s: float = 30.0
     commissioning_excursion_deg: float = 80.0
@@ -165,6 +171,11 @@ class RobotConfig:
         if self.backend not in BACKEND_CHOICES:
             choices = ", ".join(BACKEND_CHOICES)
             raise SystemExit(f"--robot-backend must be one of: {choices}")
+        if self.gripper_driver not in GRIPPER_DRIVER_CHOICES:
+            raise SystemExit(
+                "--robot-gripper-driver must be one of: "
+                + ", ".join(GRIPPER_DRIVER_CHOICES)
+            )
         if self.operation not in OPERATION_CHOICES:
             choices = ", ".join(OPERATION_CHOICES)
             raise SystemExit(f"--robot-operation must be one of: {choices}")
@@ -220,6 +231,12 @@ class RobotConfig:
             raise SystemExit("--robot-servo-gain must be between 100 and 2000")
         if self.gripper_gesture_frames < 1:
             raise SystemExit("--robot-gripper-gesture-frames must be at least 1")
+        for flag, value in (
+            ("--robot-gripper-speed", self.gripper_speed_percent),
+            ("--robot-gripper-force", self.gripper_force_percent),
+        ):
+            if type(value) is not int or not 0 <= value <= 100:
+                raise SystemExit(f"{flag} must be an integer between 0 and 100")
         if self.servo_lookahead_s < 0.03 or self.servo_lookahead_s > 0.2:
             raise SystemExit("--robot-servo-lookahead must be between 0.03 and 0.2 seconds")
         if self.backend == BACKEND_UR and not self.hosts:

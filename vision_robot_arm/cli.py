@@ -25,6 +25,7 @@ from vision_robot_arm.robot.config import (
     UR_DASHBOARD_PORT,
     UR_RTDE_PORT,
     UR_SECONDARY_PORT,
+    GRIPPER_DRIVER_CHOICES,
     JointLimit,
     JointMapping,
     RobotConfig,
@@ -300,6 +301,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Consecutive open/fist results required before a gripper command. Default: 3.",
     )
     robot.add_argument(
+        "--robot-gripper-driver",
+        choices=GRIPPER_DRIVER_CHOICES,
+        default="digital",
+        help="Gripper transport: tool digital output or Robotiq URCap socket.",
+    )
+    robot.add_argument("--robot-gripper-speed", type=int, default=80)
+    robot.add_argument("--robot-gripper-force", type=int, default=50)
+    robot.add_argument(
         "--robot-commissioning-speed",
         type=float,
         default=30.0,
@@ -474,6 +483,9 @@ def parse_args(argv: list[str] | None = None) -> AppConfig:
         tracking_acceleration_deg_s2=args.robot_tracking_acceleration,
         telemetry_log_path=args.robot_telemetry_log,
         gripper_gesture_frames=args.robot_gripper_gesture_frames,
+        gripper_driver=args.robot_gripper_driver,
+        gripper_speed_percent=args.robot_gripper_speed,
+        gripper_force_percent=args.robot_gripper_force,
         commissioning_joint=args.robot_commissioning_joint,
         commissioning_speed_deg_s=args.robot_commissioning_speed,
         commissioning_excursion_deg=args.robot_commissioning_excursion,
